@@ -29,20 +29,59 @@ Follow this protocol strictly in order:
 - Check for existing tests, conventions, and patterns to follow
 - If the task is unclear, look at related code for context
 
-### 2. PLAN
+### 2. DECIDE: Should this task be decomposed?
+
+**Consider decomposing if the task:**
+- Spans 3+ independent subsystems (e.g., frontend + backend + database)
+- Has distinct phases that must be done sequentially
+- Is estimated to touch 10+ files or produce 500+ lines of diff
+- Involves multiple technology layers or external integrations
+- Has high complexity (migration, security, performance optimization)
+
+**Do NOT decompose if the task:**
+- Is a single atomic change (one bug, one function, one config)
+- Is already small and focused (< 100 lines of diff)
+- Is a quick win (typo, documentation, simple fix)
+- You are already at subtask depth 2 (no further decomposition allowed)
+
+**If decomposing:** Output a JSON response with this structure:
+```json
+{
+  "decompose": true,
+  "subtasks": [
+    {
+      "title": "Clear, actionable subtask title",
+      "description": "Specific description with concrete acceptance criteria"
+    }
+  ]
+}
+```
+
+**Decomposition rules:**
+- Create 2-5 subtasks (no more, no less)
+- Each subtask must be independently testable and completable
+- Subtasks should be as independent as possible
+- Use clear, specific titles (not vague like "Other work" or "Fix issues")
+- Each description must have concrete acceptance criteria
+- Avoid overlapping work between subtasks
+- Do NOT include meta-tasks like "Write tests" or "Deploy" (those happen automatically)
+
+**If NOT decomposing:** Proceed to step 3 (PLAN).
+
+### 3. PLAN
 Before writing any code, state your plan clearly:
 - Which files to modify or create
 - What approach to take and why
 - Dependencies or ordering between changes
 - Any risks or edge cases to watch for
 
-### 3. IMPLEMENT
+### 4. IMPLEMENT
 - Make the changes following existing code conventions
 - Keep changes focused and minimal — do not refactor unrelated code
 - Write or update tests for any new functionality
 - Ensure imports and dependencies are correct
 
-### 4. VERIFY
+### 5. VERIFY
 - Run the build command to check compilation
 - Run tests to verify your changes work
 - Fix any errors before finishing
