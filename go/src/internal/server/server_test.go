@@ -1252,6 +1252,149 @@ func TestInternal_Triaged(t *testing.T) {
 	}
 }
 
+// TestTriageAnalysis_FullLifecycle tests that triage_analysis is correctly
+// persisted and preserved through the full task lifecycle:
+// PENDING -> triaged -> READY -> popped by executor -> RUNNING -> done -> COMPLETED
+func TestTriageAnalysis_FullLifecycle(t *testing.T) {
+	srv, database := setupTestServer(t)
+
+	// Wire up manager
+	cfg := &config.Config{}
+	m := manager.NewManager(database, cfg)
+	SetManager(m)
+	defer SetManager(nil)
+
+	// Step 1: Create a PENDING operator task directly in DB
+	_, err := database.Exec(
+		`INSERT INTO tasks (id, title, type, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"triage-lifecycle-001", "Full lifecycle test", "CODING", "PENDING", 50, "OPERATOR",
+	)
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	// Step 2: Triager reports triage completion with analysis
+	body, _ := json.Marshal(map[string]interface{}{
+		"analysis":    "This is a detailed triage analysis for the task.",
+		"description": "Rewritten description with clear requirements.",
+		"priority":    25,
+		"model":       "opus",
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks/triage-lifecycle-001/triaged", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("triaged: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify triage_analysis after triage
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/triage-lifecycle-001", nil)
+	var task map[string]interface{}
+	parseResponse(t, rr, &task)
+
+	if task["status"] != "READY" {
+		t.Errorf("after triage: expected READY, got %v", task["status"])
+	}
+	if task["triage_analysis"] != "This is a detailed triage analysis for the task." {
+		t.Errorf("after triage: expected triage analysis, got %v", task["triage_analysis"])
+	}
+
+	// Step 3: Executor pops the task via /internal/tasks/next
+	body, _ = json.Marshal(map[string]string{"pod_id": "executor-01", "pod_type": "EXECUTOR"})
+	req = httptest.NewRequest("POST", "/internal/tasks/next", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("next task: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var nextResp map[string]interface{}
+	parseResponse(t, rr, &nextResp)
+	poppedTask := nextResp["task"]
+	if poppedTask == nil {
+		t.Fatal("next task: expected a task, got nil")
+	}
+	poppedMap := poppedTask.(map[string]interface{})
+	if poppedMap["triage_analysis"] != "This is a detailed triage analysis for the task." {
+		t.Errorf("popped task: expected triage analysis, got %v", poppedMap["triage_analysis"])
+	}
+
+	// Step 4: Executor reports task started
+	body, _ = json.Marshal(map[string]interface{}{
+		"executor_id": "executor-01",
+		"model":       "opus",
+		"branch_name": "flux/task-triage-lifecycle-001",
+	})
+	req = httptest.NewRequest("POST", "/internal/tasks/triage-lifecycle-001/started", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("started: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify triage_analysis still present after started
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/triage-lifecycle-001", nil)
+	parseResponse(t, rr, &task)
+	if task["triage_analysis"] != "This is a detailed triage analysis for the task." {
+		t.Errorf("after started: expected triage analysis, got %v", task["triage_analysis"])
+	}
+
+	// Step 5: Executor reports task done
+	body, _ = json.Marshal(map[string]interface{}{
+		"status":       "COMPLETED",
+		"result":       "task completed successfully",
+		"tokens_used":  1000,
+		"cost_usd":     0.05,
+		"executor_id":  "executor-01",
+		"model":        "opus",
+		"branch_name":  "flux/task-triage-lifecycle-001",
+		"diff_lines":   50,
+		"files_changed": 3,
+		"pr_url":       "https://github.com/test/repo/pull/1",
+		"pr_status":    "OPEN",
+	})
+	req = httptest.NewRequest("POST", "/internal/tasks/triage-lifecycle-001/done", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("done: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Step 6: Verify triage_analysis is STILL present after task completion
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/triage-lifecycle-001", nil)
+	parseResponse(t, rr, &task)
+
+	if task["status"] != "COMPLETED" {
+		t.Errorf("after done: expected COMPLETED, got %v", task["status"])
+	}
+	if task["triage_analysis"] != "This is a detailed triage analysis for the task." {
+		t.Errorf("after done: triage_analysis lost! expected analysis text, got %v", task["triage_analysis"])
+	}
+
+	// Also verify via direct DB query
+	var dbAnalysis string
+	err = database.QueryRow("SELECT triage_analysis FROM tasks WHERE id = ?", "triage-lifecycle-001").Scan(&dbAnalysis)
+	if err != nil {
+		t.Fatalf("direct DB query: %v", err)
+	}
+	if dbAnalysis != "This is a detailed triage analysis for the task." {
+		t.Errorf("direct DB: triage_analysis lost! expected analysis text, got %q", dbAnalysis)
+	}
+}
+
 func TestTasks_CancelCascade(t *testing.T) {
 	srv, _ := setupTestServer(t)
 
