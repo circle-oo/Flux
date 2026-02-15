@@ -577,6 +577,71 @@ func TestTasks_Cancel(t *testing.T) {
 	}
 }
 
+func TestTasks_PriorityDefaults(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Test OPERATOR task gets priority 30
+	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title":  "Operator task",
+		"type":   "CODING",
+		"source": "OPERATOR",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var operatorTask map[string]interface{}
+	parseResponse(t, rr, &operatorTask)
+	if operatorTask["priority"].(float64) != 30 {
+		t.Errorf("expected priority 30 for OPERATOR task, got %v", operatorTask["priority"])
+	}
+
+	// Test SELF task gets priority 50
+	rr = doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title":  "Self task",
+		"type":   "CODING",
+		"source": "SELF",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var selfTask map[string]interface{}
+	parseResponse(t, rr, &selfTask)
+	if selfTask["priority"].(float64) != 50 {
+		t.Errorf("expected priority 50 for SELF task, got %v", selfTask["priority"])
+	}
+
+	// Test SYSTEM task gets priority 50
+	rr = doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title":  "System task",
+		"type":   "CODING",
+		"source": "SYSTEM",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var systemTask map[string]interface{}
+	parseResponse(t, rr, &systemTask)
+	if systemTask["priority"].(float64) != 50 {
+		t.Errorf("expected priority 50 for SYSTEM task, got %v", systemTask["priority"])
+	}
+
+	// Test explicit priority overrides default
+	rr = doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title":    "Custom priority",
+		"type":     "CODING",
+		"source":   "OPERATOR",
+		"priority": 100,
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var customTask map[string]interface{}
+	parseResponse(t, rr, &customTask)
+	if customTask["priority"].(float64) != 100 {
+		t.Errorf("expected priority 100 for custom priority, got %v", customTask["priority"])
+	}
+}
+
 // --- Projects API tests ---
 
 func TestProjects_Create(t *testing.T) {

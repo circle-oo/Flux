@@ -49,11 +49,16 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Tags:        req.Tags,
 		Prompt:      req.Prompt,
 	}
-	if task.Priority == 0 {
-		task.Priority = 50
-	}
 	if task.Source == "" {
 		task.Source = models.TaskSourceOperator
+	}
+	if task.Priority == 0 {
+		// Prioritize OPERATOR tasks over SELF tasks
+		if task.Source == models.TaskSourceOperator {
+			task.Priority = 30
+		} else {
+			task.Priority = 50
+		}
 	}
 
 	if err := s.tasks.Create(task); err != nil {
