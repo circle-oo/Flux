@@ -1,5 +1,6 @@
 .omc/
 .DS_Store
+config.yaml
 
 # Go
 go/bin/
