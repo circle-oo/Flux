@@ -46,7 +46,7 @@ func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord) *Exec
 		id:       id,
 		config:   cfg,
 		claude:   NewClaudeCodeRunner(&cfg.Executor),
-		worktree: NewWorktreeManager(cfg.Orchestrator.WorkspaceBase),
+		worktree: NewWorktreeManager(cfg.Orchestrator.WorkspaceBase, cfg.GitHub.Token, cfg.GitHub.Username),
 		manager:  NewManagerClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
 		github:   github.NewClient(cfg.GitHub.Token, cfg.GitHub.Username),
 		notifier: discord,
@@ -100,6 +100,9 @@ func (e *Executor) executeOnce(ctx context.Context) {
 
 	slog.Info("picked up task", "task_id", task.ID, "title", task.Title, "type", task.Type)
 
+	// Set executor ID on the task
+	task.ExecutorID = e.id
+
 	// 2. Get model assignment
 	model, err := e.manager.GetModel(task.ID)
 	if err != nil {
@@ -115,7 +118,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	project, err := e.manager.GetProject(task.ProjectID)
 	if err != nil {
 		slog.Error("failed to get project", "task_id", task.ID, "project_id", task.ProjectID, "error", err)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("failed to get project: %v", err), 0, 0)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("failed to get project: %v", err), 0, 0)
 		return
 	}
 
@@ -123,22 +126,35 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	var worktreePath string
 	if task.BranchName != "" {
 		// CHANGES_REQUESTED fix: reuse existing worktree
+		// Fetch latest refs first so we can reset to the newest branch commit
+		if err := e.worktree.EnsureBareRepo(project.RepoURL, project.Name); err != nil {
+			slog.Error("failed to ensure bare repo", "error", err)
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("bare repo failed: %v", err), 0, 0)
+			return
+		}
 		worktreePath, err = e.worktree.FindByBranch(project.Name, task.BranchName)
 		if err != nil {
 			slog.Error("failed to find worktree by branch", "branch", task.BranchName, "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("worktree not found: %v", err), 0, 0)
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("worktree not found: %v", err), 0, 0)
 			return
 		}
+		// Update worktree to latest branch commit
+		if err := e.worktree.UpdateWorktree(project.Name, worktreePath, task.BranchName); err != nil {
+			slog.Error("failed to update worktree", "branch", task.BranchName, "error", err)
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("worktree update failed: %v", err), 0, 0)
+			return
+		}
+		slog.Info("reusing existing worktree", "task_id", task.ID, "branch", task.BranchName, "path", worktreePath)
 	} else {
 		if err := e.worktree.EnsureBareRepo(project.RepoURL, project.Name); err != nil {
 			slog.Error("failed to ensure bare repo", "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("bare repo failed: %v", err), 0, 0)
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("bare repo failed: %v", err), 0, 0)
 			return
 		}
 		worktreePath, task.BranchName, err = e.worktree.CreateWorktree(project.Name, task.ID)
 		if err != nil {
 			slog.Error("failed to create worktree", "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("worktree create failed: %v", err), 0, 0)
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("worktree create failed: %v", err), 0, 0)
 			return
 		}
 	}
@@ -159,14 +175,14 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	})
 	if err != nil {
 		slog.Error("claude code execution failed", "task_id", task.ID, "error", err)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("execution error: %v", err), 0, 0)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("execution error: %v", err), 0, 0)
 		return
 	}
 
 	// 8. Check rate limit
 	if IsRateLimited(result.ExitCode, result.Stderr) {
 		slog.Warn("rate limited, retrying task", "task_id", task.ID)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskRetry, "", "rate limited", result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskRetry, "", "rate limited", result.TokensUsed, result.CostUSD)
 		return
 	}
 
@@ -175,12 +191,23 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		slog.Error("worktree integrity violation", "task_id", task.ID, "error", err)
 		_ = e.notifier.Send(notifier.LevelCritical,
 			fmt.Sprintf("INTEGRITY VIOLATION task %s: %v", task.ID, err))
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("integrity violation: %v", err), result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("integrity violation: %v", err), result.TokensUsed, result.CostUSD)
 		return
 	}
 
 	// 10. Check subtask decomposition (Phase 2A stub)
 	_ = e.parseDecomposition(result.Stdout)
+
+	// 10.5. Build verification: run build if applicable
+	if task.RequiresTest() {
+		buildOK, buildOutput := e.runBuild(worktreePath, task)
+		if !buildOK {
+			slog.Warn("build failed for task", "task_id", task.ID)
+			e.registerBuildFailureTask(task, buildOutput)
+			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, fmt.Sprintf("build failed: %s", buildOutput), result.TokensUsed, result.CostUSD)
+			return
+		}
+	}
 
 	// 11. QA: run tests if required
 	if task.RequiresTest() {
@@ -188,7 +215,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		task.TestPassed = &passed
 		if !passed {
 			slog.Warn("tests failed for task", "task_id", task.ID)
-			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, "tests failed", result.TokensUsed, result.CostUSD)
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, "tests failed", result.TokensUsed, result.CostUSD)
 			return
 		}
 	}
@@ -205,11 +232,27 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			fmt.Sprintf("Task %s diff exceeds guardrails: %d lines, %d files", task.ID, diffLines, filesChanged))
 	}
 
+	// 12.5. Rebase onto main to resolve conflicts before creating PR
+	if err := e.worktree.RebaseOnMain(worktreePath); err != nil {
+		slog.Error("failed to rebase on main", "task_id", task.ID, "error", err)
+		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, fmt.Sprintf("rebase conflict: %v", err), result.TokensUsed, result.CostUSD)
+		return
+	}
+
+	// Force push after rebase
+	forcePushCmd := exec.Command("git", "push", "-f", "origin", task.BranchName)
+	forcePushCmd.Dir = worktreePath
+	if output, err := forcePushCmd.CombinedOutput(); err != nil {
+		slog.Error("git force push failed after rebase", "output", string(output), "error", err)
+		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, "force push failed after rebase", result.TokensUsed, result.CostUSD)
+		return
+	}
+
 	// 13. Create PR with rich description
 	owner, repo := extractOwnerRepo(project.RepoURL)
 	if owner == "" || repo == "" {
 		slog.Error("failed to extract owner/repo from URL", "url", project.RepoURL)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, "invalid repo URL", result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, "invalid repo URL", result.TokensUsed, result.CostUSD)
 		return
 	}
 
@@ -220,14 +263,22 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	prURL, prNumber, prErr := e.github.CreatePR(owner, repo, task.BranchName, "main", prTitle, prBody)
 	if prErr != nil {
 		slog.Error("failed to create PR", "task_id", task.ID, "error", prErr)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, fmt.Sprintf("PR creation failed: %v", prErr), result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("PR creation failed: %v", prErr), result.TokensUsed, result.CostUSD)
 		return
 	}
 	task.PRUrl = prURL
 	task.PRStatus = "OPEN"
 
 	// 14. Auto-merge decision
-	if ShouldAutoMerge(task, diffLines, filesChanged) {
+	shouldMerge, reason := ShouldAutoMerge(task, diffLines, filesChanged)
+
+	// Post comment explaining the decision
+	if commentErr := e.github.CreateComment(owner, repo, prNumber, reason); commentErr != nil {
+		slog.Warn("failed to post auto-merge comment", "task_id", task.ID, "pr", prNumber, "error", commentErr)
+		// Don't fail the task if comment posting fails - it's not critical
+	}
+
+	if shouldMerge {
 		if mergeErr := e.github.MergePR(owner, repo, prNumber); mergeErr != nil {
 			slog.Error("auto-merge failed", "task_id", task.ID, "pr", prNumber, "error", mergeErr)
 			_ = e.notifier.Send(notifier.LevelWarning,
@@ -243,7 +294,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 
 	// 15. Report completion
-	_ = e.manager.ReportTaskDone(task.ID, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD)
+	_ = e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD)
 	slog.Info("task completed", "task_id", task.ID, "pr_url", prURL, "pr_status", task.PRStatus)
 }
 
@@ -376,6 +427,81 @@ func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
 	return true
 }
 
+// runBuild detects the build system and runs a build in the worktree.
+// Returns (passed, output) where output contains error details on failure.
+func (e *Executor) runBuild(worktreePath string, task *models.Task) (bool, string) {
+	type buildCmd struct {
+		detectFile string
+		command    string
+		args       []string
+	}
+
+	buildCmds := []buildCmd{
+		{"go.mod", "go", []string{"build", "./..."}},
+		{"package.json", "npm", []string{"run", "build", "--if-present"}},
+		{"Cargo.toml", "cargo", []string{"build"}},
+		{"Makefile", "make", []string{"build"}},
+	}
+
+	for _, bc := range buildCmds {
+		detectPath := filepath.Join(worktreePath, bc.detectFile)
+		if _, err := os.Stat(detectPath); err == nil {
+			slog.Info("running build", "command", bc.command, "worktree", worktreePath)
+			cmd := exec.Command(bc.command, bc.args...)
+			cmd.Dir = worktreePath
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				slog.Warn("build failed", "command", bc.command, "output", string(output), "error", err)
+				return false, string(output)
+			}
+			slog.Info("build passed", "command", bc.command)
+			return true, ""
+		}
+	}
+
+	// No build system detected, pass by default
+	slog.Info("no build system detected, skipping build", "worktree", worktreePath)
+	return true, ""
+}
+
+// buildFailureTask constructs a BUGFIX task for a build failure.
+func buildFailureTask(failedTask *models.Task, buildOutput string) *models.Task {
+	// Truncate build output to keep the description manageable
+	const maxOutputLen = 2000
+	truncatedOutput := buildOutput
+	if len(truncatedOutput) > maxOutputLen {
+		truncatedOutput = truncatedOutput[len(truncatedOutput)-maxOutputLen:]
+	}
+
+	return &models.Task{
+		Title:       fmt.Sprintf("Fix build failure from: %s", failedTask.Title),
+		Description: fmt.Sprintf("The task %q (ID: %s) produced code that fails to build.\n\nBuild output:\n```\n%s\n```\n\nPlease fix the build errors in branch `%s`.", failedTask.Title, failedTask.ID, truncatedOutput, failedTask.BranchName),
+		Type:        models.TaskTypeBugfix,
+		Priority:    min(failedTask.Priority, 10), // High priority — build is broken
+		Source:      models.TaskSourceSystem,
+		ProjectID:   failedTask.ProjectID,
+		GoalID:      failedTask.GoalID,
+		BranchName:  failedTask.BranchName, // Reuse the same branch
+		Tags:        []string{"build-failure", "auto-registered"},
+	}
+}
+
+// registerBuildFailureTask creates a follow-up BUGFIX task to fix the build failure.
+func (e *Executor) registerBuildFailureTask(failedTask *models.Task, buildOutput string) {
+	bugfixTask := buildFailureTask(failedTask, buildOutput)
+
+	if err := e.manager.CreateTask(bugfixTask); err != nil {
+		slog.Error("failed to register build failure task", "parent_task_id", failedTask.ID, "error", err)
+		_ = e.notifier.Send(notifier.LevelWarning,
+			fmt.Sprintf("Failed to auto-register build fix task for %s: %v", failedTask.ID, err))
+		return
+	}
+
+	slog.Info("registered build failure task", "parent_task_id", failedTask.ID, "bugfix_task_id", bugfixTask.ID)
+	_ = e.notifier.Send(notifier.LevelWarning,
+		fmt.Sprintf("Build failed for task %s — auto-registered bugfix task: %s", failedTask.ID, bugfixTask.Title))
+}
+
 // commitAndGetDiff stages, commits, pushes, and returns diff stats.
 func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (diffLines, filesChanged int) {
 	// git add -A
@@ -457,34 +583,35 @@ func parseDiffStat(output string) (diffLines, filesChanged int) {
 }
 
 // ShouldAutoMerge determines if a PR should be auto-merged based on task attributes and diff size.
-func ShouldAutoMerge(task *models.Task, diffLines, filesChanged int) bool {
+// Returns (shouldMerge bool, reason string).
+func ShouldAutoMerge(task *models.Task, diffLines, filesChanged int) (bool, string) {
 	// Large diffs always require operator review
 	if diffLines > 2000 || filesChanged > 20 {
-		return false
+		return false, fmt.Sprintf("⏸️ **Auto-merge skipped**: Large diff (%d lines, %d files) requires operator review", diffLines, filesChanged)
 	}
 
 	// System/self source: auto-merge
 	if task.Source == models.TaskSourceSystem || task.Source == models.TaskSourceSelf {
-		return true
+		return true, fmt.Sprintf("✅ **Auto-merged**: System/self-generated task (%d lines, %d files)", diffLines, filesChanged)
 	}
 
 	// Maintenance type: auto-merge
 	if task.Type == models.TaskTypeMaintenance {
-		return true
+		return true, fmt.Sprintf("✅ **Auto-merged**: Maintenance task (%d lines, %d files)", diffLines, filesChanged)
 	}
 
 	// Bugfix with high priority (low number): auto-merge
 	if task.Type == models.TaskTypeBugfix && task.Priority <= 10 {
-		return true
+		return true, fmt.Sprintf("✅ **Auto-merged**: High-priority bugfix (P:%d, %d lines, %d files)", task.Priority, diffLines, filesChanged)
 	}
 
 	// Small changes: auto-merge
 	if filesChanged <= 3 && diffLines < 100 {
-		return true
+		return true, fmt.Sprintf("✅ **Auto-merged**: Small change (%d lines, %d files)", diffLines, filesChanged)
 	}
 
 	// Otherwise: operator review
-	return false
+	return false, fmt.Sprintf("⏸️ **Auto-merge skipped**: Requires operator review (Type: %s, Priority: %d, %d lines, %d files)", task.Type, task.Priority, diffLines, filesChanged)
 }
 
 // extractOwnerRepo parses owner and repo from a GitHub URL.

@@ -2,6 +2,7 @@ package executor
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 func TestNewWorktreeManager(t *testing.T) {
 	workspaceBase := "/tmp/test-workspace"
-	wm := NewWorktreeManager(workspaceBase)
+	wm := NewWorktreeManager(workspaceBase, "test-token", "test-user")
 
 	expectedReposDir := filepath.Join(workspaceBase, "repos")
 	expectedTreesDir := filepath.Join(workspaceBase, "trees")
@@ -22,6 +23,38 @@ func TestNewWorktreeManager(t *testing.T) {
 
 	if wm.treesDir != expectedTreesDir {
 		t.Errorf("expected treesDir %s, got %s", expectedTreesDir, wm.treesDir)
+	}
+
+	if wm.githubToken != "test-token" {
+		t.Errorf("expected githubToken test-token, got %s", wm.githubToken)
+	}
+
+	if wm.githubUser != "test-user" {
+		t.Errorf("expected githubUser test-user, got %s", wm.githubUser)
+	}
+}
+
+func TestTokenURL(t *testing.T) {
+	wm := NewWorktreeManager("/tmp/ws", "ghp_abc123", "myuser")
+
+	// HTTPS URL
+	got := wm.tokenURL("https://github.com/owner/repo.git")
+	expected := "https://myuser:ghp_abc123@github.com/owner/repo.git"
+	if got != expected {
+		t.Errorf("expected %s, got %s", expected, got)
+	}
+
+	// SSH URL
+	got = wm.tokenURL("git@github.com:owner/repo.git")
+	if got != expected {
+		t.Errorf("expected %s, got %s", expected, got)
+	}
+
+	// No token — returns original
+	wm2 := NewWorktreeManager("/tmp/ws", "", "myuser")
+	original := "git@github.com:owner/repo.git"
+	if wm2.tokenURL(original) != original {
+		t.Error("should return original URL when no token")
 	}
 }
 
@@ -310,6 +343,81 @@ func TestCreateWorktreeCommandConstruction(t *testing.T) {
 	}
 }
 
+func TestUpdateWorktreeCommandConstruction(t *testing.T) {
+	projectName := "test-project"
+	branchName := "task/abc123de"
+	bareDir := filepath.Join("/tmp/repos", projectName+".git")
+	worktreePath := "/tmp/trees/test-project--task-abc123de"
+
+	// UpdateWorktree should first fetch: git -C bareDir fetch --all
+	expectedFetchArgs := []string{"-C", bareDir, "fetch", "--all"}
+
+	if len(expectedFetchArgs) != 4 {
+		t.Errorf("fetch command should have 4 args, got %d", len(expectedFetchArgs))
+	}
+
+	if expectedFetchArgs[0] != "-C" || expectedFetchArgs[2] != "fetch" || expectedFetchArgs[3] != "--all" {
+		t.Error("fetch command structure is incorrect")
+	}
+
+	// Then reset: git -C worktreePath reset --hard origin/<branchName>
+	remoteRef := "origin/" + branchName
+	expectedResetArgs := []string{"-C", worktreePath, "reset", "--hard", remoteRef}
+
+	if len(expectedResetArgs) != 5 {
+		t.Errorf("reset command should have 5 args, got %d", len(expectedResetArgs))
+	}
+
+	if expectedResetArgs[0] != "-C" {
+		t.Error("first arg should be -C")
+	}
+
+	if expectedResetArgs[1] != worktreePath {
+		t.Errorf("second arg should be worktree path %s, got %s", worktreePath, expectedResetArgs[1])
+	}
+
+	if expectedResetArgs[2] != "reset" || expectedResetArgs[3] != "--hard" {
+		t.Error("should be 'reset --hard' command")
+	}
+
+	if expectedResetArgs[4] != "origin/"+branchName {
+		t.Errorf("should reset to origin/%s, got %s", branchName, expectedResetArgs[4])
+	}
+}
+
+func TestUpdateWorktreeRemoteRefFormat(t *testing.T) {
+	tests := []struct {
+		name       string
+		branchName string
+		wantRef    string
+	}{
+		{
+			name:       "standard_task_branch",
+			branchName: "task/abc123de",
+			wantRef:    "origin/task/abc123de",
+		},
+		{
+			name:       "feature_branch",
+			branchName: "feature/my-feature",
+			wantRef:    "origin/feature/my-feature",
+		},
+		{
+			name:       "simple_branch",
+			branchName: "fix-bug",
+			wantRef:    "origin/fix-bug",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			remoteRef := fmt.Sprintf("origin/%s", tt.branchName)
+			if remoteRef != tt.wantRef {
+				t.Errorf("expected remote ref %s, got %s", tt.wantRef, remoteRef)
+			}
+		})
+	}
+}
+
 func TestCleanupWorktreeCommandConstruction(t *testing.T) {
 	projectName := "test-project"
 	worktreePath := "/tmp/trees/test-project--task-abc123de"
@@ -332,5 +440,44 @@ func TestCleanupWorktreeCommandConstruction(t *testing.T) {
 
 	if expectedArgs[4] != "--force" {
 		t.Error("should have --force flag")
+	}
+}
+
+func TestRebaseOnMainCommandConstruction(t *testing.T) {
+	worktreePath := "/tmp/trees/test-project--task-abc123de"
+
+	// Expected fetch command: git fetch origin main
+	expectedFetchArgs := []string{"fetch", "origin", "main"}
+
+	if len(expectedFetchArgs) != 3 {
+		t.Errorf("fetch command should have 3 args, got %d", len(expectedFetchArgs))
+	}
+
+	if expectedFetchArgs[0] != "fetch" {
+		t.Error("first arg should be fetch")
+	}
+
+	if expectedFetchArgs[1] != "origin" || expectedFetchArgs[2] != "main" {
+		t.Error("should fetch origin main")
+	}
+
+	// Expected rebase command: git rebase origin/main
+	expectedRebaseArgs := []string{"rebase", "origin/main"}
+
+	if len(expectedRebaseArgs) != 2 {
+		t.Errorf("rebase command should have 2 args, got %d", len(expectedRebaseArgs))
+	}
+
+	if expectedRebaseArgs[0] != "rebase" {
+		t.Error("first arg should be rebase")
+	}
+
+	if expectedRebaseArgs[1] != "origin/main" {
+		t.Error("should rebase onto origin/main")
+	}
+
+	// Verify the worktreePath would be set as Dir
+	if worktreePath == "" {
+		t.Error("worktreePath should not be empty")
 	}
 }

@@ -3,6 +3,7 @@ package manager
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 var validTransitions = map[string][]string{
 	models.TaskPending:   {models.TaskReady},
 	models.TaskReady:     {models.TaskRunning},
-	models.TaskRunning:   {models.TaskCompleted, models.TaskFailed},
+	models.TaskRunning:   {models.TaskCompleted, models.TaskFailed, models.TaskRetry},
 	models.TaskFailed:    {models.TaskRetry, models.TaskArchived},
 	models.TaskRetry:     {models.TaskRunning},
 	models.TaskCompleted: {models.TaskArchived},
@@ -31,6 +32,9 @@ type Manager struct {
 
 // NewManager creates a new Manager instance.
 func NewManager(db *sql.DB, cfg *config.Config) *Manager {
+	slog.Debug("creating new manager",
+		"database_path", cfg.Database.Path,
+		"max_total_pods", cfg.Orchestrator.MaxTotalPods)
 	return &Manager{
 		db:       db,
 		config:   cfg,
@@ -46,19 +50,37 @@ func NewManager(db *sql.DB, cfg *config.Config) *Manager {
 // Researcher pods: RESEARCH type only.
 // Retries up to 5 times on SQLITE_BUSY to handle concurrent access.
 func (m *Manager) PopNextTask(podType string) (*models.Task, error) {
+	slog.Debug("pop next task started", "pod_type", podType)
 	const maxRetries = 5
 	for attempt := 0; attempt < maxRetries; attempt++ {
+		slog.Debug("pop next task attempt", "attempt", attempt+1, "max_retries", maxRetries)
 		task, err := m.popNextTaskOnce(podType)
 		if err == nil {
+			if task != nil {
+				slog.Info("task successfully popped",
+					"task_id", task.ID,
+					"title", task.Title,
+					"type", task.Type,
+					"pod_type", podType)
+			} else {
+				slog.Debug("no task available", "pod_type", podType)
+			}
 			return task, nil
 		}
 		// Retry on SQLite busy errors
 		if isSQLiteBusy(err) {
+			slog.Warn("sqlite busy, retrying",
+				"attempt", attempt+1,
+				"max_retries", maxRetries,
+				"backoff_ms", 10*(attempt+1))
 			time.Sleep(time.Duration(10*(attempt+1)) * time.Millisecond)
 			continue
 		}
 		return nil, err
 	}
+	slog.Error("pop next task: max retries exceeded",
+		"pod_type", podType,
+		"max_retries", maxRetries)
 	return nil, fmt.Errorf("pop next task: max retries exceeded due to database contention")
 }
 
@@ -73,6 +95,7 @@ func isSQLiteBusy(err error) bool {
 func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 	// Get current goal ID for goal boost (tiebreaker) - BEFORE starting transaction
 	currentGoalID := GetCurrentGoalID(m.goals)
+	slog.Debug("pop next task once started", "current_goal_id", currentGoalID, "pod_type", podType)
 
 	tx, err := m.db.Begin()
 	if err != nil {
@@ -129,6 +152,11 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 			return nil, fmt.Errorf("scan task: %w", err)
 		}
 
+		slog.Debug("evaluating candidate task",
+			"task_id", candidate.ID,
+			"title", candidate.Title,
+			"priority", candidate.Priority)
+
 		// Check if dependencies are met
 		met, err := m.areDependenciesMet(tx, candidate)
 		if err != nil {
@@ -137,12 +165,16 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 		if met {
 			task = candidate
 			break
+		} else {
+			slog.Debug("dependency not met for candidate", "task_id", candidate.ID)
 		}
 	}
 
 	if task == nil {
 		return nil, nil // No task with met dependencies available
 	}
+
+	slog.Debug("claiming task", "task_id", task.ID, "title", task.Title)
 
 	// Transition to RUNNING and set started_at
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -175,11 +207,14 @@ func (m *Manager) areDependenciesMet(tx *sql.Tx, task *models.Task) (bool, error
 		var status string
 		err := tx.QueryRow(`SELECT status FROM tasks WHERE id = ?`, depID).Scan(&status)
 		if err == sql.ErrNoRows {
+			slog.Debug("dependency not found", "dep_id", depID, "task_id", task.ID)
 			return false, fmt.Errorf("dependency not found: %s", depID)
 		}
 		if err != nil {
 			return false, fmt.Errorf("query dependency %s: %w", depID, err)
 		}
+
+		slog.Debug("checking dependency", "dep_id", depID, "status", status, "task_id", task.ID)
 
 		if status != models.TaskCompleted && status != models.TaskArchived {
 			return false, nil
@@ -210,6 +245,10 @@ func (m *Manager) TransitionTask(taskID, newStatus string) error {
 		}
 	}
 	if !isValid {
+		slog.Warn("invalid transition attempt",
+			"task_id", taskID,
+			"from_status", task.Status,
+			"to_status", newStatus)
 		return fmt.Errorf("invalid transition from %s to %s", task.Status, newStatus)
 	}
 
@@ -232,9 +271,15 @@ func (m *Manager) TransitionTask(taskID, newStatus string) error {
 			// Reset crash recovery flag
 			task.CrashRecovery = false
 		}
+
+		slog.Info("task retry",
+			"task_id", taskID,
+			"retry_count", task.RetryCount,
+			"crash_recovery", task.CrashRecovery)
 	}
 
 	// Update status
+	oldStatus := task.Status
 	task.Status = newStatus
 
 	// Set timestamps
@@ -251,17 +296,39 @@ func (m *Manager) TransitionTask(taskID, newStatus string) error {
 		return fmt.Errorf("update task: %w", err)
 	}
 
+	slog.Info("task state transition",
+		"task_id", taskID,
+		"from_status", oldStatus,
+		"to_status", newStatus)
+
 	return nil
 }
 
 // CreateTask delegates to TaskStore.Create.
 func (m *Manager) CreateTask(task *models.Task) error {
-	return m.tasks.Create(task)
+	err := m.tasks.Create(task)
+	if err == nil {
+		slog.Info("task created",
+			"task_id", task.ID,
+			"title", task.Title,
+			"type", task.Type,
+			"priority", task.Priority,
+			"project_id", task.ProjectID)
+	}
+	return err
 }
 
 // GetCurrentGoal returns the single ACTIVE goal.
 func (m *Manager) GetCurrentGoal() (*models.Goal, error) {
-	return m.goals.GetCurrent()
+	goal, err := m.goals.GetCurrent()
+	if err == nil {
+		if goal != nil {
+			slog.Debug("current goal retrieved", "goal_id", goal.ID, "title", goal.Title)
+		} else {
+			slog.Debug("no current goal found")
+		}
+	}
+	return goal, err
 }
 
 // GetTask retrieves a task by ID.

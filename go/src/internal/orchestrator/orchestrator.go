@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/circle-oo/flux/internal/config"
@@ -17,10 +18,12 @@ type Orchestrator struct {
 
 // NewOrchestrator creates a new Orchestrator instance.
 func NewOrchestrator(cfg *config.Config, rlh *RateLimitHandler) *Orchestrator {
-	return &Orchestrator{
+	o := &Orchestrator{
 		config:           cfg,
 		rateLimitHandler: rlh,
 	}
+	slog.Debug("orchestrator created")
+	return o
 }
 
 // SelectModel determines which model to use for a given task.
@@ -29,18 +32,26 @@ func NewOrchestrator(cfg *config.Config, rlh *RateLimitHandler) *Orchestrator {
 // - If task.NeedsOpus() → return Opus
 // - Otherwise → return Sonnet
 func (o *Orchestrator) SelectModel(task *models.Task) string {
+	slog.Debug("selecting model for task", "task_id", task.ID, "task_type", task.Type, "task_priority", task.Priority)
+
 	// Priority 1: Rate limit protection - always use cheaper model
 	if o.rateLimitHandler.RecentlyLimited() {
-		return o.config.Orchestrator.Models.Sonnet
+		model := o.config.Orchestrator.Models.Sonnet
+		slog.Info("model selection: using sonnet due to recent rate limit", "task_id", task.ID)
+		return model
 	}
 
 	// Priority 2: Task complexity analysis
 	if task.NeedsOpus() {
-		return o.config.Orchestrator.Models.Opus
+		model := o.config.Orchestrator.Models.Opus
+		slog.Info("model selection: using opus for complex task", "task_id", task.ID)
+		return model
 	}
 
 	// Default: Sonnet for standard tasks
-	return o.config.Orchestrator.Models.Sonnet
+	model := o.config.Orchestrator.Models.Sonnet
+	slog.Info("model selection: using sonnet", "task_id", task.ID)
+	return model
 }
 
 // BuildGoalSystemPrompt constructs a system prompt section from a goal.
@@ -53,9 +64,13 @@ func (o *Orchestrator) SelectModel(task *models.Task) string {
 //
 //   All your work should align with this Goal.
 func (o *Orchestrator) BuildGoalSystemPrompt(goal *models.Goal) string {
+	slog.Debug("building goal system prompt", "has_goal", goal != nil)
+
 	if goal == nil {
 		return ""
 	}
+
+	slog.Debug("goal context injected", "goal_id", goal.ID, "goal_title", goal.Title, "priorities", len(goal.Priorities), "metrics", len(goal.Metrics))
 
 	var sb strings.Builder
 

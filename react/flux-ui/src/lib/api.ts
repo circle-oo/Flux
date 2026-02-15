@@ -25,10 +25,22 @@ export interface Task {
   pr_url?: string
   pr_status?: string
   error_log?: string
+  result?: string
+  prompt?: string
+  executor_id?: string
+  model?: string
+  branch_name?: string
+  test_passed?: boolean | null
+  retry_count?: number
+  crash_recovery?: boolean
+  tokens_used?: number
+  cost_usd?: number
   created_at: string
+  updated_at?: string
   started_at?: string
   completed_at?: string
   parent_id?: string
+  depth?: number
   depends_on: string[]
   tags: string[]
   requires_test: boolean
@@ -183,6 +195,10 @@ class APIClient {
     await this.fetch(`/api/tasks/${id}/cancel`, { method: 'POST' })
   }
 
+  async retryTask(id: string): Promise<Task> {
+    return this.fetch(`/api/tasks/${id}/retry`, { method: 'POST' })
+  }
+
   // Projects
   async listProjects(): Promise<Project[]> {
     const data = await this.fetch<{ projects: Project[] }>('/api/projects')
@@ -216,6 +232,23 @@ class APIClient {
     return this.fetch(`/api/projects/${id}/reject`, {
       method: 'POST',
     })
+  }
+
+  // System
+  async restart(): Promise<{ status: string; message: string }> {
+    return this.fetch('/api/system/restart', {
+      method: 'POST',
+    })
+  }
+
+  // Logs
+  async getRecentLogs(): Promise<
+    { time: string; level: string; msg: string; attrs: Record<string, unknown> }[]
+  > {
+    const data = await this.fetch<{
+      logs: { time: string; level: string; msg: string; attrs: Record<string, unknown> }[]
+    }>('/api/logs/recent')
+    return data.logs || []
   }
 }
 
