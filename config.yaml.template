@@ -19,7 +19,7 @@ vault:
   path: "~/ObsidianVault/Flux"
 
 github:
-  username: "circle-oo"
+  username: ""
   token_env: "GITHUB_TOKEN"
   auto_create_repo: true
   default_visibility: "public"
