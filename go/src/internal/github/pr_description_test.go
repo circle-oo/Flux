@@ -23,7 +23,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			FilesChanged: 3,
 		}
 
-		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-1")
+		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-1", "main")
 		title, body := builder.Build()
 
 		if title != "[flux] Add user authentication" {
@@ -34,6 +34,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 		requiredSections := []string{
 			"📋 Requirements / Problem / Issues",
 			"🔨 What Was Done in This PR",
+			"### Summary",
 			"👀 Review Points",
 			"**Task Type:** CODING",
 			"**Priority:** 5",
@@ -59,7 +60,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			TestPassed:  &testPassed,
 		}
 
-		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-2")
+		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-2", "main")
 		_, body := builder.Build()
 
 		if !strings.Contains(body, "✅ All tests passed") {
@@ -80,7 +81,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			Model:       "opus",
 		}
 
-		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-3")
+		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-3", "main")
 		_, body := builder.Build()
 
 		expectedContent := []string{
@@ -108,7 +109,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			FilesChanged: 25,
 		}
 
-		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-4")
+		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-4", "main")
 		_, body := builder.Build()
 
 		if !strings.Contains(body, "**Size:** Large") {
@@ -159,7 +160,7 @@ func TestPRDescriptionBuilder_GenerateReviewPoints(t *testing.T) {
 				Priority:    5,
 			}
 
-			builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test")
+			builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test", "main")
 			points := builder.generateReviewPoints()
 
 			found := false
@@ -262,7 +263,7 @@ func TestPRDescriptionBuilder_GetCommitSummary(t *testing.T) {
 			Priority:    5,
 		}
 
-		builder := NewPRDescriptionBuilder(task, tmpDir, "executor-test")
+		builder := NewPRDescriptionBuilder(task, tmpDir, "executor-test", "main")
 		commits := builder.getCommitSummary()
 
 		if len(commits) != 2 {
@@ -348,7 +349,7 @@ func TestPRDescriptionBuilder_GetFileChanges(t *testing.T) {
 			Priority:    5,
 		}
 
-		builder := NewPRDescriptionBuilder(task, tmpDir, "executor-test")
+		builder := NewPRDescriptionBuilder(task, tmpDir, "executor-test", "main")
 		changes := builder.getFileChanges()
 
 		if len(changes) < 2 {
@@ -366,6 +367,102 @@ func TestPRDescriptionBuilder_GetFileChanges(t *testing.T) {
 	})
 }
 
+func TestPRDescriptionBuilder_GenerateImplementationSummary(t *testing.T) {
+	t.Run("generates complete summary", func(t *testing.T) {
+		task := &models.Task{
+			ID:          "task-summary",
+			Title:       "Add user authentication",
+			Description: "Implement JWT-based authentication for the API to secure user access and protect sensitive endpoints",
+			Type:        models.TaskTypeCoding,
+			Priority:    5,
+		}
+
+		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test", "main")
+		summary := builder.generateImplementationSummary()
+
+		// Check that summary contains key elements (Key Changes is optional if no commits/files)
+		expectedElements := []string{
+			"Add user authentication",
+			"**Why:**",
+			"**Impact:**",
+		}
+
+		for _, element := range expectedElements {
+			if !strings.Contains(summary, element) {
+				t.Errorf("expected summary to contain '%s', but it's missing.\nFull summary:\n%s", element, summary)
+			}
+		}
+
+		// Impact should mention functionality
+		if !strings.Contains(summary, "functionality") {
+			t.Errorf("expected summary to mention functionality for CODING task")
+		}
+	})
+
+	t.Run("includes task-specific impact", func(t *testing.T) {
+		tests := []struct {
+			taskType      string
+			expectedImpact string
+		}{
+			{models.TaskTypeCoding, "Adds new functionality"},
+			{models.TaskTypeBugfix, "Fixes a bug"},
+			{models.TaskTypeDocument, "Improves documentation"},
+			{models.TaskTypeMaintenance, "Maintains code quality"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.taskType, func(t *testing.T) {
+				task := &models.Task{
+					ID:          "task-test",
+					Title:       "Test task",
+					Description: "Test description",
+					Type:        tt.taskType,
+					Priority:    5,
+				}
+
+				builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test", "main")
+				summary := builder.generateImplementationSummary()
+
+				if !strings.Contains(summary, tt.expectedImpact) {
+					t.Errorf("expected summary to contain impact '%s' for task type %s", tt.expectedImpact, tt.taskType)
+				}
+			})
+		}
+	})
+}
+
+func TestPRDescriptionBuilder_BaseBranch(t *testing.T) {
+	t.Run("uses provided base branch", func(t *testing.T) {
+		task := &models.Task{
+			ID:          "task-base",
+			Title:       "Test base branch",
+			Description: "Testing base branch parameter",
+			Type:        models.TaskTypeCoding,
+			Priority:    5,
+		}
+
+		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test", "develop")
+		if builder.baseBranch != "develop" {
+			t.Errorf("expected base branch to be 'develop', got '%s'", builder.baseBranch)
+		}
+	})
+
+	t.Run("defaults to main when empty", func(t *testing.T) {
+		task := &models.Task{
+			ID:          "task-default",
+			Title:       "Test default branch",
+			Description: "Testing default base branch",
+			Type:        models.TaskTypeCoding,
+			Priority:    5,
+		}
+
+		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test", "")
+		if builder.baseBranch != "main" {
+			t.Errorf("expected base branch to default to 'main', got '%s'", builder.baseBranch)
+		}
+	})
+}
+
 func TestPRDescriptionBuilder_BuildFooter(t *testing.T) {
 	task := &models.Task{
 		ID:          "task-footer",
@@ -376,7 +473,7 @@ func TestPRDescriptionBuilder_BuildFooter(t *testing.T) {
 		Model:       "sonnet",
 	}
 
-	builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-42")
+	builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-42", "main")
 	footer := builder.buildFooter()
 
 	if !strings.Contains(footer, "executor-42") {

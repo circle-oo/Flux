@@ -348,9 +348,9 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 		return fmt.Errorf("invalid repo URL: %s", project.RepoURL)
 	}
 
-	prBuilder := github.NewPRDescriptionBuilder(task, worktreePath, e.id)
-	prTitle, prBody := prBuilder.Build()
 	defaultBranch := e.worktree.detectDefaultBranchFromWorktree(worktreePath)
+	prBuilder := github.NewPRDescriptionBuilder(task, worktreePath, e.id, defaultBranch)
+	prTitle, prBody := prBuilder.Build()
 	prURL, prNumber, prErr := e.github.CreatePR(owner, repo, task.BranchName, defaultBranch, prTitle, prBody)
 	if prErr != nil {
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("PR creation failed: %v", prErr), result.TokensUsed, result.CostUSD)
