@@ -1011,6 +1011,111 @@ func TestInternal_CreateSubtasks_CountExceeded(t *testing.T) {
 	}
 }
 
+func TestInternal_CreateTask(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"title":       "Fix build failure from: Original Task",
+		"description": "Build output:\n```\nmain.go:5:2: undefined: foo\n```",
+		"type":        "BUGFIX",
+		"priority":    10,
+		"source":      "SYSTEM",
+		"project_id":  "proj-123",
+		"branch_name": "task/abc12345",
+		"tags":        []string{"build-failure", "auto-registered"},
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+	if resp["id"] == nil || resp["id"] == "" {
+		t.Error("expected id to be set")
+	}
+	if resp["title"] != "Fix build failure from: Original Task" {
+		t.Errorf("expected title, got %v", resp["title"])
+	}
+	if resp["type"] != "BUGFIX" {
+		t.Errorf("expected BUGFIX, got %v", resp["type"])
+	}
+	if resp["source"] != "SYSTEM" {
+		t.Errorf("expected SYSTEM, got %v", resp["source"])
+	}
+	if resp["branch_name"] != "task/abc12345" {
+		t.Errorf("expected branch_name task/abc12345, got %v", resp["branch_name"])
+	}
+}
+
+func TestInternal_CreateTask_MissingTitle(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"type": "BUGFIX",
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestInternal_CreateTask_MissingType(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"title": "No type",
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestInternal_CreateTask_DefaultValues(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"title": "Minimal task",
+		"type":  "BUGFIX",
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+	// Priority defaults to 50
+	if int(resp["priority"].(float64)) != 50 {
+		t.Errorf("expected default priority 50, got %v", resp["priority"])
+	}
+	// Source defaults to SYSTEM
+	if resp["source"] != "SYSTEM" {
+		t.Errorf("expected default source SYSTEM, got %v", resp["source"])
+	}
+}
+
 func TestInternal_GetModel(t *testing.T) {
 	srv, _ := setupTestServer(t)
 

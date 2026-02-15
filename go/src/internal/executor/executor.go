@@ -195,6 +195,17 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	// 10. Check subtask decomposition (Phase 2A stub)
 	_ = e.parseDecomposition(result.Stdout)
 
+	// 10.5. Build verification: run build if applicable
+	if task.RequiresTest() {
+		buildOK, buildOutput := e.runBuild(worktreePath, task)
+		if !buildOK {
+			slog.Warn("build failed for task", "task_id", task.ID)
+			e.registerBuildFailureTask(task, buildOutput)
+			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, fmt.Sprintf("build failed: %s", buildOutput), result.TokensUsed, result.CostUSD)
+			return
+		}
+	}
+
 	// 11. QA: run tests if required
 	if task.RequiresTest() {
 		passed := e.runTests(worktreePath, task)
@@ -411,6 +422,81 @@ func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
 	// No test framework detected, pass by default
 	slog.Info("no test framework detected, skipping tests", "worktree", worktreePath)
 	return true
+}
+
+// runBuild detects the build system and runs a build in the worktree.
+// Returns (passed, output) where output contains error details on failure.
+func (e *Executor) runBuild(worktreePath string, task *models.Task) (bool, string) {
+	type buildCmd struct {
+		detectFile string
+		command    string
+		args       []string
+	}
+
+	buildCmds := []buildCmd{
+		{"go.mod", "go", []string{"build", "./..."}},
+		{"package.json", "npm", []string{"run", "build", "--if-present"}},
+		{"Cargo.toml", "cargo", []string{"build"}},
+		{"Makefile", "make", []string{"build"}},
+	}
+
+	for _, bc := range buildCmds {
+		detectPath := filepath.Join(worktreePath, bc.detectFile)
+		if _, err := os.Stat(detectPath); err == nil {
+			slog.Info("running build", "command", bc.command, "worktree", worktreePath)
+			cmd := exec.Command(bc.command, bc.args...)
+			cmd.Dir = worktreePath
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				slog.Warn("build failed", "command", bc.command, "output", string(output), "error", err)
+				return false, string(output)
+			}
+			slog.Info("build passed", "command", bc.command)
+			return true, ""
+		}
+	}
+
+	// No build system detected, pass by default
+	slog.Info("no build system detected, skipping build", "worktree", worktreePath)
+	return true, ""
+}
+
+// buildFailureTask constructs a BUGFIX task for a build failure.
+func buildFailureTask(failedTask *models.Task, buildOutput string) *models.Task {
+	// Truncate build output to keep the description manageable
+	const maxOutputLen = 2000
+	truncatedOutput := buildOutput
+	if len(truncatedOutput) > maxOutputLen {
+		truncatedOutput = truncatedOutput[len(truncatedOutput)-maxOutputLen:]
+	}
+
+	return &models.Task{
+		Title:       fmt.Sprintf("Fix build failure from: %s", failedTask.Title),
+		Description: fmt.Sprintf("The task %q (ID: %s) produced code that fails to build.\n\nBuild output:\n```\n%s\n```\n\nPlease fix the build errors in branch `%s`.", failedTask.Title, failedTask.ID, truncatedOutput, failedTask.BranchName),
+		Type:        models.TaskTypeBugfix,
+		Priority:    min(failedTask.Priority, 10), // High priority — build is broken
+		Source:      models.TaskSourceSystem,
+		ProjectID:   failedTask.ProjectID,
+		GoalID:      failedTask.GoalID,
+		BranchName:  failedTask.BranchName, // Reuse the same branch
+		Tags:        []string{"build-failure", "auto-registered"},
+	}
+}
+
+// registerBuildFailureTask creates a follow-up BUGFIX task to fix the build failure.
+func (e *Executor) registerBuildFailureTask(failedTask *models.Task, buildOutput string) {
+	bugfixTask := buildFailureTask(failedTask, buildOutput)
+
+	if err := e.manager.CreateTask(bugfixTask); err != nil {
+		slog.Error("failed to register build failure task", "parent_task_id", failedTask.ID, "error", err)
+		_ = e.notifier.Send(notifier.LevelWarning,
+			fmt.Sprintf("Failed to auto-register build fix task for %s: %v", failedTask.ID, err))
+		return
+	}
+
+	slog.Info("registered build failure task", "parent_task_id", failedTask.ID, "bugfix_task_id", bugfixTask.ID)
+	_ = e.notifier.Send(notifier.LevelWarning,
+		fmt.Sprintf("Build failed for task %s — auto-registered bugfix task: %s", failedTask.ID, bugfixTask.Title))
 }
 
 // commitAndGetDiff stages, commits, pushes, and returns diff stats.

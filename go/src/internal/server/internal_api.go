@@ -232,6 +232,63 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"tasks": created})
 }
 
+// handleInternalCreateTask handles POST /internal/tasks
+// Executor creates a follow-up task (e.g., build failure bugfix) via Manager.
+func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Type        string   `json:"type"`
+		Priority    int      `json:"priority"`
+		Source      string   `json:"source"`
+		ProjectID   string   `json:"project_id"`
+		GoalID      string   `json:"goal_id"`
+		BranchName  string   `json:"branch_name"`
+		Tags        []string `json:"tags"`
+	}
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	if req.Type == "" {
+		writeError(w, http.StatusBadRequest, "type is required")
+		return
+	}
+
+	task := &models.Task{
+		Title:       req.Title,
+		Description: req.Description,
+		Type:        req.Type,
+		Priority:    req.Priority,
+		Source:      req.Source,
+		ProjectID:   req.ProjectID,
+		GoalID:      req.GoalID,
+		BranchName:  req.BranchName,
+		Tags:        req.Tags,
+	}
+	if task.Priority == 0 {
+		task.Priority = 50
+	}
+	if task.Source == "" {
+		task.Source = models.TaskSourceSystem
+	}
+
+	if err := s.tasks.Create(task); err != nil {
+		slog.Error("failed to create internal task", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
+
+	writeJSON(w, http.StatusCreated, task)
+}
+
 // handleInternalGetModel handles GET /internal/model/{task_id}
 // Pod queries which model to use for a task.
 func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) {
