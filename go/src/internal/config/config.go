@@ -29,6 +29,7 @@ type Config struct {
 }
 
 type ServerConfig struct {
+	Host string     `yaml:"host"` // bind address: "0.0.0.0" (all interfaces), "127.0.0.1" (localhost only), or Tailscale IP
 	Port int        `yaml:"port"`
 	Auth AuthConfig `yaml:"auth"`
 }

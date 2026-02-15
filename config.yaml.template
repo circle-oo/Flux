@@ -1,9 +1,13 @@
 server:
+  # host: ""          # all interfaces (default) — accessible from LAN/Tailscale
+  # host: "127.0.0.1" # localhost only — local access only
+  # host: "100.x.y.z" # Tailscale IP — accessible only via Tailscale
+  host: ""
   port: 8080
   auth:
     enabled: true
     password_env: "FLUX_UI_PASSWORD"
-    session_expiry: "none"
+    session_expiry: "none"  # Tailscale handles network auth; explicit logout only
 
 database:
   path: "./data/flux.db"

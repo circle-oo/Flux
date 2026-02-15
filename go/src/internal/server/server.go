@@ -54,7 +54,7 @@ func NewServer(cfg *config.Config, db *sql.DB, discord *notifier.Discord, webFS 
 	s.setupRoutes()
 
 	s.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 		Handler: s.mux,
 	}
 
