@@ -1,9 +1,9 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useGoalStore } from '../stores/goalStore'
-import { Task } from '../lib/api'
+import { Task, api } from '../lib/api'
 
 function timeAgo(iso: string): string {
   const now = Date.now()
@@ -115,11 +115,30 @@ export default function Tasks() {
   })
   const [showAdvanced, setShowAdvanced] = useState(false)
 
+  const [subtaskCounts, setSubtaskCounts] = useState<Record<string, number>>({})
+
   useEffect(() => {
     fetchTasks()
     fetchProjects()
     fetchCurrentGoal()
   }, [fetchTasks, fetchProjects, fetchCurrentGoal])
+
+  // Fetch subtask counts for DECOMPOSED parent tasks
+  const fetchSubtaskCounts = useCallback(async () => {
+    const parents = tasks.filter((t) => t.status === 'DECOMPOSED' || t.tags?.includes('build-failure'))
+    const counts: Record<string, number> = {}
+    for (const parent of parents) {
+      try {
+        const subs = await api.listSubtasks(parent.id)
+        if (subs.length > 0) counts[parent.id] = subs.length
+      } catch { /* ignore */ }
+    }
+    setSubtaskCounts(counts)
+  }, [tasks])
+
+  useEffect(() => {
+    if (tasks.length > 0) fetchSubtaskCounts()
+  }, [tasks, fetchSubtaskCounts])
 
   // Filter out archived tasks and subtasks by default (unless explicitly filtering)
   const visibleTasks = useMemo(() => {
@@ -591,6 +610,11 @@ export default function Tasks() {
                           {task.status}
                         </span>
                         <span className="badge-secondary shrink-0">{task.type}</span>
+                        {subtaskCounts[task.id] && (
+                          <span className="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded shrink-0">
+                            {subtaskCounts[task.id]} subtask{subtaskCounts[task.id] !== 1 ? 's' : ''}
+                          </span>
+                        )}
                       </div>
 
                       {/* Description (clamped) */}
@@ -607,6 +631,9 @@ export default function Tasks() {
                         )}
                         <span>P{task.priority}</span>
                         <span>{task.source}</span>
+                        {task.executor_id && task.status === 'RUNNING' && (
+                          <span className="text-amber-500">{task.executor_id}</span>
+                        )}
                         {task.model && (
                           <span className="text-slate-600">{task.model}</span>
                         )}

@@ -10,6 +10,7 @@ const levelColors: Record<string, string> = {
 
 const componentColors: Record<string, string> = {
   executor: 'text-purple-400',
+  triager: 'text-teal-400',
   manager: 'text-green-400',
   orchestrator: 'text-cyan-400',
   server: 'text-yellow-400',

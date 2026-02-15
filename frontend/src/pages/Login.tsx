@@ -58,7 +58,7 @@ export default function Login() {
         </div>
 
         <div className="mt-8 text-center text-sm text-slate-500">
-          <p>Phase 1: Foundation</p>
+          <p>Autonomous Engineering System</p>
         </div>
       </div>
     </div>

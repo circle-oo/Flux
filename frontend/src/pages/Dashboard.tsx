@@ -45,6 +45,7 @@ export default function Dashboard() {
     PENDING: tasks.filter((t) => t.status === 'PENDING').length,
     READY: tasks.filter((t) => t.status === 'READY').length,
     RUNNING: tasks.filter((t) => t.status === 'RUNNING').length,
+    DECOMPOSED: tasks.filter((t) => t.status === 'DECOMPOSED').length,
     COMPLETED: tasks.filter((t) => t.status === 'COMPLETED').length,
     FAILED: tasks.filter((t) => t.status === 'FAILED').length,
   }
@@ -142,6 +143,14 @@ export default function Dashboard() {
           color="text-red-400"
           onClick={() => navigate('/tasks')}
         />
+        {tasksByStatus.DECOMPOSED > 0 && (
+          <StatCard
+            label="Decomposed"
+            value={tasksByStatus.DECOMPOSED}
+            color="text-purple-400"
+            onClick={() => navigate('/tasks')}
+          />
+        )}
         <StatCard
           label="PRs Open"
           value={pendingPRs}
@@ -188,6 +197,10 @@ export default function Dashboard() {
                             ? 'badge-warning'
                             : task.status === 'READY'
                             ? 'badge-info'
+                            : task.status === 'DECOMPOSED'
+                            ? 'bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold'
+                            : task.status === 'CANCELLED'
+                            ? 'bg-slate-500 text-white px-2 py-1 rounded text-xs font-semibold'
                             : 'badge-secondary'
                         }`}
                       >
@@ -196,6 +209,12 @@ export default function Dashboard() {
                     </div>
                     <p className="text-xs text-slate-500">
                       {task.type} · P{task.priority}
+                      {task.status === 'RUNNING' && task.executor_id && (
+                        <> · {task.executor_id}</>
+                      )}
+                      {task.status === 'RUNNING' && task.model && (
+                        <> · {task.model}</>
+                      )}
                       {task.pr_url && ' · PR'}
                     </p>
                   </div>

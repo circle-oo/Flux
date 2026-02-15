@@ -96,12 +96,27 @@ export default function TaskDetail() {
     getTask(id)
       .then((t) => {
         setTask(t)
-        // Fetch subtasks if task has any potential children
         fetchSubtasks(t.id).then(setSubtasks)
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [id, getTask, fetchSubtasks])
+
+  // Auto-refresh running/pending/decomposed tasks every 5s
+  useEffect(() => {
+    if (!task || !id) return
+    const activeStatuses = ['RUNNING', 'PENDING', 'READY', 'DECOMPOSED']
+    if (!activeStatuses.includes(task.status)) return
+
+    const interval = setInterval(() => {
+      getTask(id).then((t) => {
+        setTask(t)
+        fetchSubtasks(t.id).then(setSubtasks)
+      }).catch(() => {})
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [task?.status, id, getTask, fetchSubtasks])
 
   const handleRetry = async () => {
     if (!task || !confirm(`Retry task: ${task.title}?`)) return
