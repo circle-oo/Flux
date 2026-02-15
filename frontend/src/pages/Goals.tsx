@@ -53,16 +53,16 @@ export default function Goals() {
   }
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100 mb-2">Goals</h1>
-          <p className="text-slate-400">Manage system goals and objectives</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 mb-2">Goals</h1>
+          <p className="text-sm sm:text-base text-slate-400">Manage system goals and objectives</p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="btn-primary"
+          className="btn-primary whitespace-nowrap"
         >
           {showForm ? 'Cancel' : '+ New Goal'}
         </button>
@@ -70,7 +70,7 @@ export default function Goals() {
 
       {/* Create Form */}
       {showForm && (
-        <div className="card p-6">
+        <div className="card p-4 sm:p-6">
           <h2 className="text-xl font-semibold text-slate-100 mb-4">
             Create New Goal
           </h2>

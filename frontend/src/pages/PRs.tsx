@@ -96,19 +96,19 @@ export default function PRs() {
   }
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3 mb-2">
-            <h1 className="text-3xl font-bold text-slate-100">Pull Requests</h1>
+          <div className="flex items-center gap-2 sm:gap-3 mb-2">
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-100">Pull Requests</h1>
             {pendingPRs.length > 0 && (
-              <span className="badge badge-info text-lg px-3 py-1">
+              <span className="badge badge-info text-sm sm:text-lg px-2 sm:px-3 py-0.5 sm:py-1">
                 {pendingPRs.length}
               </span>
             )}
           </div>
-          <p className="text-slate-400">Review and manage pull requests</p>
+          <p className="text-sm sm:text-base text-slate-400">Review and manage pull requests</p>
         </div>
         <button
           onClick={() => fetchPendingPRs()}

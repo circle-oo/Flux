@@ -248,33 +248,33 @@ export default function Tasks() {
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]))
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3 mb-2">
-            <h1 className="text-3xl font-bold text-slate-100">Tasks</h1>
+          <div className="flex items-center gap-2 sm:gap-3 mb-2">
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-100">Tasks</h1>
             {tasks.length > 0 && (
-              <span className="badge badge-info text-lg px-3 py-1">
+              <span className="badge badge-info text-sm sm:text-lg px-2 sm:px-3 py-0.5 sm:py-1">
                 {tasks.length}
               </span>
             )}
           </div>
-          <p className="text-slate-400">Manage and track system tasks</p>
+          <p className="text-sm sm:text-base text-slate-400">Manage and track system tasks</p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="btn-primary"
+          className="btn-primary whitespace-nowrap"
         >
           {showForm ? 'Cancel' : '+ New Task'}
         </button>
       </div>
 
       {/* Filters */}
-      <div className="card p-4 space-y-3">
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="card p-3 sm:p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-3">
           {/* Status filter buttons */}
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap overflow-x-auto scrollbar-hide">
             {mainStatusFilters.map((sf) => (
               <button
                 key={sf.value}
@@ -311,7 +311,7 @@ export default function Tasks() {
               ))}
           </div>
 
-          <div className="w-px h-6 bg-slate-700" />
+          <div className="hidden sm:block w-px h-6 bg-slate-700" />
 
           {/* Project dropdown (kept as-is since there can be many) */}
           <select
@@ -322,7 +322,7 @@ export default function Tasks() {
                 project_id: e.target.value || undefined,
               })
             }
-            className="input w-auto text-xs py-1.5"
+            className="input w-full sm:w-auto text-sm py-2"
           >
             <option value="">All Projects</option>
             {activeProjects.map((p) => (
@@ -332,11 +332,11 @@ export default function Tasks() {
             ))}
           </select>
 
-          <div className="w-px h-6 bg-slate-700" />
+          <div className="hidden sm:block w-px h-6 bg-slate-700" />
 
           {/* Sort */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-slate-500">Sort:</span>
+          <div className="flex items-center gap-1.5 w-full sm:w-auto">
+            <span className="text-xs text-slate-500 whitespace-nowrap">Sort:</span>
             {sortOptions.map((opt) => (
               <button
                 key={opt.value}
@@ -363,11 +363,11 @@ export default function Tasks() {
 
       {/* Create Form */}
       {showForm && (
-        <div className="card p-6">
-          <h2 className="text-xl font-semibold text-slate-100 mb-4">
+        <div className="card p-4 sm:p-6">
+          <h2 className="text-lg sm:text-xl font-semibold text-slate-100 mb-4">
             Create New Task
           </h2>
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
             {/* Title */}
             <div>
               <label className="label">Title</label>
@@ -402,7 +402,7 @@ export default function Tasks() {
             </div>
 
             {/* Type + Priority row */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Type */}
               <div>
                 <label className="label">Type</label>
@@ -432,7 +432,7 @@ export default function Tasks() {
                     ({formData.priority})
                   </span>
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap sm:flex-nowrap gap-2">
                   {priorityPresets.map((preset) => (
                     <button
                       key={preset.value}
@@ -440,7 +440,7 @@ export default function Tasks() {
                       onClick={() =>
                         setFormData({ ...formData, priority: preset.value })
                       }
-                      className={`flex-1 px-2 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                      className={`flex-1 px-2 py-2.5 rounded-lg text-xs sm:text-sm font-medium border transition-colors touch-manipulation min-w-[80px] ${
                         formData.priority === preset.value
                           ? 'bg-slate-600 border-blue-500 text-white'
                           : 'bg-slate-700 border-slate-600 text-slate-400 hover:border-slate-500'
@@ -454,7 +454,7 @@ export default function Tasks() {
             </div>
 
             {/* Project + Goal row */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">Project</label>
                 <select
@@ -564,11 +564,11 @@ export default function Tasks() {
       )}
 
       {/* Tasks List */}
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4">
         {isLoading ? (
           <div className="text-slate-400">Loading...</div>
         ) : tasks.length === 0 ? (
-          <div className="card p-6 text-center text-slate-400">
+          <div className="card p-4 sm:p-6 text-center text-slate-400">
             No tasks found. Create one or adjust filters.
           </div>
         ) : (
@@ -578,7 +578,7 @@ export default function Tasks() {
               return (
                 <div
                   key={task.id}
-                  className="card p-5 hover:border-slate-600 transition-colors cursor-pointer"
+                  className="card p-4 sm:p-5 hover:border-slate-600 transition-colors cursor-pointer touch-manipulation"
                   onClick={() => navigate(`/tasks/${task.id}`)}
                 >
                   <div className="flex items-start justify-between">
@@ -699,7 +699,7 @@ export default function Tasks() {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex gap-2 ml-4 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex flex-col sm:flex-row gap-2 ml-0 sm:ml-4 mt-3 sm:mt-0 shrink-0" onClick={(e) => e.stopPropagation()}>
                       {(task.status === 'FAILED' || task.status === 'RETRY') && (
                         <button
                           onClick={() => handleRetry(task.id, task.title)}

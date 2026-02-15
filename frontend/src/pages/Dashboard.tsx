@@ -19,11 +19,11 @@ function StatCard({
 }) {
   return (
     <div
-      className={`card p-5 ${onClick ? 'cursor-pointer hover:bg-slate-700/50 transition-colors' : ''}`}
+      className={`card p-4 sm:p-5 ${onClick ? 'cursor-pointer hover:bg-slate-700/50 transition-colors touch-manipulation' : ''}`}
       onClick={onClick}
     >
-      <div className="text-sm font-medium text-slate-400 mb-1">{label}</div>
-      <div className={`text-3xl font-bold ${color}`}>{value}</div>
+      <div className="text-xs sm:text-sm font-medium text-slate-400 mb-1">{label}</div>
+      <div className={`text-2xl sm:text-3xl font-bold ${color}`}>{value}</div>
     </div>
   )
 }
@@ -73,15 +73,15 @@ export default function Dashboard() {
   const recentTasks = tasks.slice(0, 10)
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Header with system status */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100 mb-2">Dashboard</h1>
-          <p className="text-slate-400">System overview and status</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 mb-1 sm:mb-2">Dashboard</h1>
+          <p className="text-sm sm:text-base text-slate-400">System overview and status</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">
             <div
               className={`w-2.5 h-2.5 rounded-full ${
                 wsConnected
@@ -128,7 +128,7 @@ export default function Dashboard() {
       </section>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <StatCard
           label="Pending"
           value={tasksByStatus.PENDING}
@@ -176,12 +176,12 @@ export default function Dashboard() {
       </div>
 
       {/* Pods Section */}
-      <section className="card p-6">
-        <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">
+      <section className="card p-4 sm:p-6">
+        <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">
           Executor Pods
         </h2>
         {pods.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {pods.map((pod) => (
               <div
                 key={pod.id}
@@ -236,16 +236,16 @@ export default function Dashboard() {
       </section>
 
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Recent Tasks */}
-        <section className="card p-6 lg:col-span-2">
+        <section className="card p-4 sm:p-6 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+            <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider">
               Recent Tasks
             </h2>
             <button
               onClick={() => navigate('/tasks')}
-              className="text-xs text-blue-400 hover:text-blue-300"
+              className="text-xs text-blue-400 hover:text-blue-300 touch-manipulation"
             >
               View all
             </button>
@@ -308,21 +308,21 @@ export default function Dashboard() {
         <section className="space-y-4">
           {/* Active Projects */}
           <div
-            className="card p-5 cursor-pointer hover:border-slate-600 transition-colors"
+            className="card p-4 sm:p-5 cursor-pointer hover:border-slate-600 transition-colors touch-manipulation"
             onClick={() => navigate('/projects')}
           >
-            <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">
+            <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">
               Projects
             </h2>
-            <div className="text-2xl font-bold text-slate-100 mb-1">
+            <div className="text-xl sm:text-2xl font-bold text-slate-100 mb-1">
               {activeProjects}
             </div>
             <p className="text-xs text-slate-500">active projects</p>
           </div>
 
           {/* System Status */}
-          <div className="card p-5">
-            <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">
+          <div className="card p-4 sm:p-5">
+            <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">
               System
             </h2>
             <div className="space-y-2">

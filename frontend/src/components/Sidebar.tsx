@@ -1,14 +1,30 @@
 import { NavLink } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useWSStore } from '../stores/wsStore'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 
-export default function Sidebar() {
+interface SidebarProps {
+  mobileMenuOpen: boolean
+  setMobileMenuOpen: (open: boolean) => void
+}
+
+export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarProps) {
   const { logout } = useAuthStore()
   const wsConnected = useWSStore((s) => s.connected)
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
+
+  // Close mobile menu on desktop resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setMobileMenuOpen(false)
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [setMobileMenuOpen])
 
   const handleRestart = async () => {
     if (!confirm('Are you sure you want to restart Flux? This will update and restart the service.')) {
@@ -40,12 +56,28 @@ export default function Sidebar() {
     { path: '/settings', label: 'Settings', icon: '⚙️' },
   ]
 
+  const closeMobileMenu = () => setMobileMenuOpen(false)
+
   return (
-    <aside
-      className={`bg-slate-800 border-r border-slate-700 flex flex-col transition-all duration-300 ${
-        isCollapsed ? 'w-16' : 'w-64'
-      }`}
-    >
+    <>
+      {/* Mobile overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={closeMobileMenu}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={`
+          bg-slate-800 border-r border-slate-700 flex flex-col transition-all duration-300
+          ${isCollapsed ? 'w-16' : 'w-64'}
+          lg:relative lg:translate-x-0
+          fixed inset-y-0 left-0 z-50
+          ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        `}
+      >
       {/* Header */}
       <div className="p-4 border-b border-slate-700 flex items-center justify-between">
         {!isCollapsed && (
@@ -57,13 +89,26 @@ export default function Sidebar() {
             />
           </div>
         )}
-        <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          className="text-slate-400 hover:text-slate-200 transition-colors"
-          title={isCollapsed ? 'Expand' : 'Collapse'}
-        >
-          {isCollapsed ? '→' : '←'}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Close button for mobile */}
+          <button
+            onClick={closeMobileMenu}
+            className="lg:hidden p-2 -mr-2 text-slate-400 hover:text-slate-200 transition-colors touch-manipulation"
+            aria-label="Close menu"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          {/* Collapse button for desktop */}
+          <button
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="hidden lg:block text-slate-400 hover:text-slate-200 transition-colors touch-manipulation"
+            title={isCollapsed ? 'Expand' : 'Collapse'}
+          >
+            {isCollapsed ? '→' : '←'}
+          </button>
+        </div>
       </div>
 
       {/* Navigation */}
@@ -72,8 +117,9 @@ export default function Sidebar() {
           <NavLink
             key={item.path}
             to={item.path}
+            onClick={closeMobileMenu}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+              `flex items-center gap-3 px-3 py-3 rounded-lg transition-colors touch-manipulation min-h-[44px] ${
                 isActive
                   ? 'bg-blue-600 text-white'
                   : 'text-slate-300 hover:bg-slate-700 hover:text-white'
@@ -92,7 +138,7 @@ export default function Sidebar() {
         <button
           onClick={handleRestart}
           disabled={isRestarting}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-slate-300 hover:bg-slate-700 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[44px]"
           title={isCollapsed ? 'Restart' : undefined}
         >
           <span className="text-xl">{isRestarting ? '⏳' : '🔄'}</span>
@@ -100,7 +146,7 @@ export default function Sidebar() {
         </button>
         <button
           onClick={logout}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+          className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-slate-300 hover:bg-slate-700 hover:text-white transition-colors touch-manipulation min-h-[44px]"
           title={isCollapsed ? 'Logout' : undefined}
         >
           <span className="text-xl">🚪</span>
@@ -108,5 +154,6 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+    </>
   )
 }
