@@ -275,14 +275,9 @@ export default function Tasks() {
     const group = statusFilterGroups.find((g) => g.id === groupId)
     if (!group) return
 
-    if (group.statuses.length === 0) {
-      // 'All' group - clear status filter
-      setFilters({ ...filters, status: undefined })
-    } else {
-      // Set status filter to the first status in the group
-      // The filtering logic will handle showing all tasks matching any status in the group
-      setFilters({ ...filters, status: group.statuses[0] })
-    }
+    // Clear the backend status filter to fetch all tasks
+    // The client-side filtering logic will handle showing only the tasks matching the group
+    setFilters({ ...filters, status: undefined })
   }
 
   const handleDetailedStatusFilter = (value: string) => {
