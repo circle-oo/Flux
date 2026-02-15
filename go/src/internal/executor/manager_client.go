@@ -92,6 +92,37 @@ func (c *ManagerClient) ReportTaskDone(taskID, status, result, errorLog string, 
 	return nil
 }
 
+// CreateTask registers a new task via the Manager internal API.
+// POST /internal/tasks
+func (c *ManagerClient) CreateTask(task *models.Task) error {
+	body, err := json.Marshal(task)
+	if err != nil {
+		return fmt.Errorf("marshal task: %w", err)
+	}
+
+	resp, err := c.http.Post(
+		c.baseURL+"/internal/tasks",
+		"application/json",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return fmt.Errorf("post request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// Decode response to populate task ID
+	if err := json.NewDecoder(resp.Body).Decode(task); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+
+	return nil
+}
+
 // SubtaskRequest represents a subtask creation request.
 type SubtaskRequest struct {
 	Title       string `json:"title"`
