@@ -117,12 +117,12 @@ export default function Logs() {
   const levels = ['', 'DEBUG', 'INFO', 'WARN', 'ERROR']
 
   return (
-    <div className="p-8 flex flex-col h-full">
+    <div className="p-4 sm:p-6 lg:p-8 flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100 mb-2">Logs</h1>
-          <p className="text-slate-400">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 mb-2">Logs</h1>
+          <p className="text-sm sm:text-base text-slate-400">
             Real-time system logs ({filteredLogs.length} entries)
           </p>
         </div>
