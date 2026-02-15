@@ -87,12 +87,19 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 
 	// Clean up stale worktree directory if it exists from a previous attempt
 	if _, statErr := os.Stat(worktreePath); statErr == nil {
-		slog.Info("removing stale worktree directory from previous attempt", "path", worktreePath)
-		pruneCmd := exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", worktreePath)
-		_ = pruneCmd.Run() // best-effort
-		// Also prune any dangling worktree references
-		pruneCmd2 := exec.Command("git", "-C", bareDir, "worktree", "prune")
-		_ = pruneCmd2.Run()
+		slog.Info("removing stale worktree from previous attempt", "path", worktreePath)
+		// Try git worktree remove first
+		rmCmd := exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", worktreePath)
+		if rmOut, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
+			slog.Warn("git worktree remove failed, falling back to manual cleanup", "error", rmErr, "output", string(rmOut))
+			// Manual fallback: remove directory and prune
+			if err := os.RemoveAll(worktreePath); err != nil {
+				return "", "", fmt.Errorf("failed to remove stale worktree directory: %w", err)
+			}
+		}
+		// Always prune dangling worktree references
+		pruneCmd := exec.Command("git", "-C", bareDir, "worktree", "prune")
+		_ = pruneCmd.Run()
 	}
 
 	// Check if branch already exists (from a previous failed attempt / retry)
