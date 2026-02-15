@@ -2,6 +2,7 @@ package executor
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 )
 
@@ -28,8 +29,10 @@ type DecomposedTask struct {
 // ParseDecomposition attempts to extract a decomposition plan from Claude's response.
 // Returns nil if no valid decomposition is found (indicating normal code output).
 func ParseDecomposition(resultText string) *Decomposition {
+	slog.Debug("parsing decomposition from result", "result_length", len(resultText))
 	// Look for the decompose JSON pattern
 	if !strings.Contains(resultText, `"decompose"`) {
+		slog.Debug("no decomposition found in result")
 		return nil
 	}
 
@@ -114,6 +117,7 @@ func ParseDecomposition(resultText string) *Decomposition {
 		decomp.Subtasks[i].Description = strings.TrimSpace(decomp.Subtasks[i].Description)
 	}
 
+	slog.Info("decomposition detected", "subtask_count", len(decomp.Subtasks))
 	return &decomp
 }
 

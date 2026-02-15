@@ -11,7 +11,7 @@ import (
 
 func TestNewWorktreeManager(t *testing.T) {
 	workspaceBase := "/tmp/test-workspace"
-	wm := NewWorktreeManager(workspaceBase)
+	wm := NewWorktreeManager(workspaceBase, "test-token", "test-user")
 
 	expectedReposDir := filepath.Join(workspaceBase, "repos")
 	expectedTreesDir := filepath.Join(workspaceBase, "trees")
@@ -22,6 +22,38 @@ func TestNewWorktreeManager(t *testing.T) {
 
 	if wm.treesDir != expectedTreesDir {
 		t.Errorf("expected treesDir %s, got %s", expectedTreesDir, wm.treesDir)
+	}
+
+	if wm.githubToken != "test-token" {
+		t.Errorf("expected githubToken test-token, got %s", wm.githubToken)
+	}
+
+	if wm.githubUser != "test-user" {
+		t.Errorf("expected githubUser test-user, got %s", wm.githubUser)
+	}
+}
+
+func TestTokenURL(t *testing.T) {
+	wm := NewWorktreeManager("/tmp/ws", "ghp_abc123", "myuser")
+
+	// HTTPS URL
+	got := wm.tokenURL("https://github.com/owner/repo.git")
+	expected := "https://myuser:ghp_abc123@github.com/owner/repo.git"
+	if got != expected {
+		t.Errorf("expected %s, got %s", expected, got)
+	}
+
+	// SSH URL
+	got = wm.tokenURL("git@github.com:owner/repo.git")
+	if got != expected {
+		t.Errorf("expected %s, got %s", expected, got)
+	}
+
+	// No token — returns original
+	wm2 := NewWorktreeManager("/tmp/ws", "", "myuser")
+	original := "git@github.com:owner/repo.git"
+	if wm2.tokenURL(original) != original {
+		t.Error("should return original URL when no token")
 	}
 }
 

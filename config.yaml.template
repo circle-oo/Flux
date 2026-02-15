@@ -70,6 +70,11 @@ cleanup:
   usage_snapshots_days: 90
   failed_worktree_hours: 24
 
+auto_update:
+  enabled: true
+  check_interval: 5m
+  branch: "main"
+
 projects:
   - name: "flux"
     type: "REPO"

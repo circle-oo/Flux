@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { useGoalStore } from './goalStore'
 import { useTaskStore } from './taskStore'
+import { useLogStore } from './logStore'
 import type {} from './projectStore' // available for future PR_STATUS handling
 
-type EventType = 'TASK_UPDATED' | 'GOAL_CHANGED' | 'PR_STATUS' | 'POD_STATUS'
+type EventType = 'TASK_UPDATED' | 'GOAL_CHANGED' | 'PR_STATUS' | 'POD_STATUS' | 'LOG_ENTRY'
 
 interface TaskUpdatedData { task_id: string; status: string }
 interface GoalChangedData { goal_id: string; status: string }
@@ -163,6 +164,10 @@ function handleEvent(event: WSEvent) {
       if (import.meta.env.DEV) {
         console.log('Pod status update:', event.data)
       }
+      break
+
+    case 'LOG_ENTRY':
+      useLogStore.getState().addLog(event.data as any)
       break
 
     default:
