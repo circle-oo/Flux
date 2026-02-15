@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { Task } from '../lib/api'
+import ContentViewer from '../components/ContentViewer'
 
 const statusColor: Record<string, string> = {
   PENDING: 'badge-secondary',
@@ -287,20 +288,14 @@ export default function TaskDetail() {
       {/* Triage Analysis */}
       {task.triage_analysis && (
         <div className="card p-6">
-          <h2 className="text-lg font-semibold text-slate-200 mb-3">Triage Analysis</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.triage_analysis}
-          </pre>
+          <ContentViewer content={task.triage_analysis} title="Triage Analysis" />
         </div>
       )}
 
       {/* Plan */}
       {task.plan && (
         <div className="card p-6">
-          <h2 className="text-lg font-semibold text-slate-200 mb-3">Plan</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.plan}
-          </pre>
+          <ContentViewer content={task.plan} title="Plan" />
         </div>
       )}
 
@@ -308,7 +303,7 @@ export default function TaskDetail() {
       {task.error_log && (
         <div className="card p-6 border border-red-600/50">
           <h2 className="text-lg font-semibold text-red-400 mb-3">Error</h2>
-          <pre className="text-sm text-red-200 bg-red-900/20 rounded p-4 overflow-auto whitespace-pre-wrap">
+          <pre className="text-sm text-red-200 bg-red-900/20 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
             {task.error_log}
           </pre>
         </div>
@@ -317,20 +312,14 @@ export default function TaskDetail() {
       {/* Result */}
       {task.result && (
         <div className="card p-6">
-          <h2 className="text-lg font-semibold text-slate-200 mb-3">Result</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.result}
-          </pre>
+          <ContentViewer content={task.result} title="Result" />
         </div>
       )}
 
       {/* Prompt */}
       {task.prompt && (
         <div className="card p-6">
-          <h2 className="text-lg font-semibold text-slate-200 mb-3">Prompt</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.prompt}
-          </pre>
+          <ContentViewer content={task.prompt} title="Prompt" />
         </div>
       )}
     </div>
