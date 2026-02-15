@@ -35,7 +35,7 @@ function StateIndicator({ state }: { state: string }) {
 }
 
 export default function Settings() {
-  const { status, isLoading, isDeploying, error, fetchStatus, triggerDeploy } = useDeployStore()
+  const { status, isLoading, isDeploying, isChecking, error, fetchStatus, triggerDeploy, checkRemote } = useDeployStore()
   const wsConnected = useWSStore((s) => s.connected)
 
   useEffect(() => {
@@ -50,6 +50,10 @@ export default function Settings() {
       return
     }
     await triggerDeploy()
+  }
+
+  const handleCheckRemote = async () => {
+    await checkRemote()
   }
 
   const updater = status?.updater
@@ -71,13 +75,22 @@ export default function Settings() {
               Manage auto-deployment and trigger manual deploys
             </p>
           </div>
-          <button
-            onClick={handleDeploy}
-            disabled={isDeploying || isLoading}
-            className="btn-primary"
-          >
-            {isDeploying ? 'Deploying...' : 'Deploy Now'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleCheckRemote}
+              disabled={isChecking || isDeploying || isLoading}
+              className="btn-secondary"
+            >
+              {isChecking ? 'Checking...' : 'Check Remote'}
+            </button>
+            <button
+              onClick={handleDeploy}
+              disabled={isDeploying || isLoading}
+              className="btn-primary"
+            >
+              {isDeploying ? 'Deploying...' : 'Deploy Now'}
+            </button>
+          </div>
         </div>
 
         {error && (

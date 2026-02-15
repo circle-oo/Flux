@@ -202,6 +202,70 @@ func (u *Updater) TriggerUpdate(ctx context.Context) error {
 	return u.doUpdate(ctx, branch, true)
 }
 
+// CheckRemote fetches the remote and updates the local/remote commit info
+// without triggering a deploy. Returns nil on success.
+func (u *Updater) CheckRemote(ctx context.Context) error {
+	branch := u.cfg.Branch
+	if branch == "" {
+		branch = "main"
+	}
+
+	u.setState("checking")
+
+	now := time.Now()
+	u.mu.Lock()
+	u.lastCheckAt = &now
+	u.lastError = ""
+	u.mu.Unlock()
+	u.notifyChange()
+
+	// Fetch latest from remote
+	if err := u.gitCommand(ctx, "fetch", "origin", branch); err != nil {
+		u.mu.Lock()
+		u.lastError = err.Error()
+		u.state = "error"
+		u.mu.Unlock()
+		u.notifyChange()
+		return fmt.Errorf("git fetch: %w", err)
+	}
+
+	// Get local and remote HEADs
+	localHead, err := u.gitOutput(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		u.mu.Lock()
+		u.lastError = err.Error()
+		u.state = "error"
+		u.mu.Unlock()
+		u.notifyChange()
+		return fmt.Errorf("get local HEAD: %w", err)
+	}
+
+	remoteRef := "origin/" + branch
+	remoteHead, err := u.gitOutput(ctx, "rev-parse", remoteRef)
+	if err != nil {
+		u.mu.Lock()
+		u.lastError = err.Error()
+		u.state = "error"
+		u.mu.Unlock()
+		u.notifyChange()
+		return fmt.Errorf("get remote HEAD: %w", err)
+	}
+
+	u.mu.Lock()
+	u.localCommit = localHead
+	u.remoteCommit = remoteHead
+	u.mu.Unlock()
+
+	slog.Info("remote check complete",
+		"local", localHead[:8],
+		"remote", remoteHead[:8],
+		"upToDate", localHead == remoteHead,
+	)
+
+	u.setState("idle")
+	return nil
+}
+
 // checkAndUpdate fetches the remote, compares HEAD with remote branch,
 // and if there are new commits: pulls, rebuilds, and signals the process to restart.
 func (u *Updater) checkAndUpdate(ctx context.Context, branch string) error {

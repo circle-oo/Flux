@@ -68,6 +68,35 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// handleCheckRemote checks for updates without deploying.
+func (s *Server) handleCheckRemote(w http.ResponseWriter, r *http.Request) {
+	slog.Info("remote check requested via API")
+
+	if s.updater == nil {
+		writeError(w, http.StatusServiceUnavailable, "No auto-updater configured")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := s.updater.CheckRemote(ctx); err != nil {
+		slog.Error("remote check failed", "error", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Return the updated status
+	status := s.updater.Status()
+	resp := map[string]any{
+		"status":  "checked",
+		"message": "Remote check complete",
+		"updater": status,
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // SetUpdater sets the auto-updater reference so deploy endpoints can use it.
 func (s *Server) SetUpdater(u *updater.Updater) {
 	s.updater = u

@@ -122,6 +122,7 @@ func (s *Server) setupRoutes() {
 	// Deploy endpoints (requires auth)
 	s.mux.Handle("GET /api/system/deploy/status", s.authMiddleware(http.HandlerFunc(s.handleDeployStatus)))
 	s.mux.Handle("POST /api/system/deploy", s.authMiddleware(http.HandlerFunc(s.handleDeploy)))
+	s.mux.Handle("POST /api/system/deploy/check", s.authMiddleware(http.HandlerFunc(s.handleCheckRemote)))
 
 	// Archive endpoint (requires auth)
 	s.mux.Handle("POST /api/tasks/{id}/archive", s.authMiddleware(http.HandlerFunc(s.handleArchiveTask)))
