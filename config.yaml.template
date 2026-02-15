@@ -1,0 +1,80 @@
+server:
+  # host: ""          # all interfaces (default) — accessible from LAN/Tailscale
+  # host: "127.0.0.1" # localhost only — local access only
+  # host: "100.x.y.z" # Tailscale IP — accessible only via Tailscale
+  host: ""
+  port: 8080
+  auth:
+    enabled: true
+    password_env: "FLUX_UI_PASSWORD"
+    session_expiry: "none"  # Tailscale handles network auth; explicit logout only
+
+database:
+  path: "./data/flux.db"
+  backup_dir: "./data/backups"
+  backup_cron: "0 4 * * *"
+  backup_retention_days: 7
+
+vault:
+  path: "~/ObsidianVault/Flux"
+
+github:
+  username: ""
+  token_env: "GITHUB_TOKEN"
+  auto_create_repo: true
+  default_visibility: "public"
+
+claude_code:
+  plan: "max_5x"
+
+ccusage:
+  command: "npx ccusage@latest"
+  collection_interval: 1h
+
+orchestrator:
+  check_interval: 5m
+  scale_cooldown: 15m
+  max_total_pods: 5
+  min_research_ratio: 0.2
+  workspace_base: "./workspaces"
+  daily_summary_hour: 0
+
+  models:
+    opus: "opus"
+    sonnet: "sonnet"
+
+executor:
+  max_execution_time: 30m
+  max_output_size: 10485760
+  max_turns: 30
+  max_diff_lines: 2000
+  max_files_changed: 20
+
+subtask:
+  max_depth: 1
+  max_per_task: 5
+
+shutdown:
+  pod_grace_period: 10m
+  force_kill_after: 12m
+
+notifications:
+  discord:
+    webhook_url_env: "DISCORD_WEBHOOK_URL"
+
+services: []
+
+cleanup:
+  service_metrics_raw_days: 7
+  jsonl_retention_days: 30
+  usage_snapshots_days: 90
+  failed_worktree_hours: 24
+
+projects:
+  - name: "flux"
+    type: "REPO"
+    repo_url: "https://github.com/circle-oo/flux"
+
+logging:
+  level: "info"
+  file: "./logs/flux.log"

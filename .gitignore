@@ -1,1 +1,24 @@
 .omc/
+.DS_Store
+config.yaml
+
+# Go
+go/bin/
+go/src/flux
+go/src/web/dist/
+!go/src/web/dist/.gitkeep
+
+# React
+react/flux-ui/node_modules/
+react/flux-ui/dist/
+
+# Runtime data
+data/
+workspaces/
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
