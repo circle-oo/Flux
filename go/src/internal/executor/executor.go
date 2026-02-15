@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/circle-oo/flux/internal/apiclient"
+	"github.com/circle-oo/flux/internal/claudecli"
 	"github.com/circle-oo/flux/internal/config"
 	"github.com/circle-oo/flux/internal/executor/prompts"
 	"github.com/circle-oo/flux/internal/github"
@@ -36,9 +38,9 @@ var (
 type Executor struct {
 	id                 string
 	config             *config.Config
-	claude             *ClaudeCodeRunner
+	claude             *claudecli.Runner
 	worktree           *WorktreeManager
-	manager            *ManagerClient
+	manager            *apiclient.Client
 	github             *github.Client
 	notifier           *notifier.Discord
 	vaultWriter        *vault.Writer
@@ -58,9 +60,9 @@ func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord, vw *v
 	return &Executor{
 		id:          id,
 		config:      cfg,
-		claude:      NewClaudeCodeRunner(&cfg.Executor),
+		claude:      claudecli.NewRunner(&cfg.Executor),
 		worktree:    NewWorktreeManager(cfg.Orchestrator.WorkspaceBase, cfg.GitHub.Token, cfg.GitHub.Username),
-		manager:     NewManagerClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
+		manager:     apiclient.NewClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
 		github:      github.NewClient(cfg.GitHub.Token, cfg.GitHub.Username),
 		notifier:    discord,
 		vaultWriter: vw,
@@ -209,7 +211,7 @@ func (e *Executor) setupWorktree(task *models.Task, project *models.Project) (st
 
 // runExecution executes Claude Code and handles early exits (rate limit, decomposition).
 // Returns nil result if execution completed with early exit (caller should return).
-func (e *Executor) runExecution(ctx context.Context, task *models.Task, project *models.Project, worktreePath, model, systemPrompt string) (*ClaudeCodeResult, error) {
+func (e *Executor) runExecution(ctx context.Context, task *models.Task, project *models.Project, worktreePath, model, systemPrompt string) (*claudecli.Result, error) {
 	techStack := strings.Join(project.TechStack, ", ")
 	prompt := BuildAutopilotPrompt(task, project.Name, project.Description, techStack)
 
@@ -218,7 +220,7 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 
 	// Execute Claude Code
 	e.executionStartTime = time.Now()
-	result, err := e.claude.Run(ctx, ClaudeCodeOpts{
+	result, err := e.claude.Run(ctx, claudecli.Opts{
 		Prompt:       prompt,
 		WorkDir:      worktreePath,
 		Model:        model,
@@ -229,7 +231,7 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 	}
 
 	// Check rate limit
-	if IsRateLimited(result.ExitCode, result.Stderr) {
+	if claudecli.IsRateLimited(result.ExitCode, result.Stderr) {
 		slog.Warn("rate limited, retrying task", "task_id", task.ID)
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskRetry, "", "rate limited", result.TokensUsed, result.CostUSD)
 		return nil, nil
@@ -244,7 +246,7 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 	}
 
 	// Check subtask decomposition
-	parsed, parseErr := ParseResponse(result.Stdout)
+	parsed, parseErr := claudecli.ParseResponse(result.Stdout)
 	if parseErr == nil {
 		if decomp := ParseDecomposition(parsed.ResultText); decomp != nil {
 			subtasks := ToSubtaskRequests(decomp)
@@ -263,7 +265,7 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 }
 
 // processResults handles build, test, commit, PR creation, and usage collection.
-func (e *Executor) processResults(task *models.Task, result *ClaudeCodeResult, worktreePath string, project *models.Project) error {
+func (e *Executor) processResults(task *models.Task, result *claudecli.Result, worktreePath string, project *models.Project) error {
 	// Build verification
 	if task.RequiresTest() {
 		buildOK, buildOutput := e.runBuild(worktreePath, task)
@@ -673,7 +675,7 @@ func (e *Executor) claudeCodeSmokeTest() error {
 
 // SmokeTest verifies the Claude CLI is available and responsive.
 // This is exported so it can be reused by other components (e.g., triager).
-func SmokeTest(runner *ClaudeCodeRunner, model string) error {
+func SmokeTest(runner *claudecli.Runner, model string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -683,8 +685,8 @@ func SmokeTest(runner *ClaudeCodeRunner, model string) error {
 		"--output-format", "json",
 	)
 
-	stdout := &limitedBuffer{maxSize: 1 << 20}
-	stderr := &limitedBuffer{maxSize: 1 << 20}
+	stdout := &claudecli.LimitedBuffer{MaxSize: 1 << 20}
+	stderr := &claudecli.LimitedBuffer{MaxSize: 1 << 20}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
@@ -700,7 +702,7 @@ func SmokeTest(runner *ClaudeCodeRunner, model string) error {
 	}
 
 	// Try to parse JSON response
-	parsed, err := ParseResponse(output)
+	parsed, err := claudecli.ParseResponse(output)
 	if err == nil && strings.Contains(parsed.ResultText, "SMOKE_TEST_OK") {
 		return nil
 	}

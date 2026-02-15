@@ -3,14 +3,16 @@ package triager
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 	"text/template"
 	"time"
 
+	"github.com/circle-oo/flux/internal/apiclient"
+	"github.com/circle-oo/flux/internal/claudecli"
 	"github.com/circle-oo/flux/internal/config"
-	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
 	"github.com/circle-oo/flux/internal/notifier"
 )
@@ -38,8 +40,8 @@ func init() {
 type Triager struct {
 	id       string
 	config   *config.Config
-	claude   *executor.ClaudeCodeRunner
-	client   *executor.ManagerClient
+	claude   *claudecli.Runner
+	client   *apiclient.Client
 	notifier *notifier.Discord
 	stopCh   chan struct{}
 }
@@ -49,8 +51,8 @@ func New(id string, cfg *config.Config, discord *notifier.Discord) *Triager {
 	return &Triager{
 		id:       id,
 		config:   cfg,
-		claude:   executor.NewClaudeCodeRunner(&cfg.Executor),
-		client:   executor.NewManagerClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
+		claude:   claudecli.NewRunner(&cfg.Executor),
+		client:   apiclient.NewClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
 		notifier: discord,
 		stopCh:   make(chan struct{}),
 	}
@@ -100,33 +102,42 @@ func (t *Triager) processNext(ctx context.Context) {
 		return
 	}
 
-	slog.Info("triaging task", "task_id", task.ID, "title", task.Title, "component", component)
+	model := t.config.Triager.Model
+	if model == "" {
+		model = "haiku"
+	}
 
-	result, err := TriageTask(ctx, t.claude, task)
+	slog.Info("triaging task", "task_id", task.ID, "title", task.Title, "model", model, "component", component)
+
+	start := time.Now()
+	result, err := TriageTask(ctx, t.claude, task, model)
 	if err != nil {
 		slog.Warn("triage failed, promoting with original description",
 			"task_id", task.ID, "title", task.Title, "error", err, "component", component)
 		// Even on failure, promote to READY so the task doesn't get stuck
-		if reportErr := t.client.ReportTriaged(task.ID, "", "", 0, ""); reportErr != nil {
+		if reportErr := t.client.ReportTriaged(task.ID, "", "", 0); reportErr != nil {
 			slog.Error("failed to promote task after triage failure",
 				"task_id", task.ID, "error", reportErr, "component", component)
 		}
 		return
 	}
 
+	slog.Info("triage completed",
+		"task_id", task.ID, "duration", time.Since(start), "component", component)
+
 	slog.Info("reporting triage results",
 		"task_id", task.ID, "has_analysis", result.Analysis != "",
-		"analysis_len", len(result.Analysis), "priority", result.Priority, "model", result.Model,
+		"analysis_len", len(result.Analysis), "priority", result.Priority,
 		"component", component)
 
-	if reportErr := t.client.ReportTriaged(task.ID, result.Analysis, result.Description, result.Priority, result.Model); reportErr != nil {
+	if reportErr := t.client.ReportTriaged(task.ID, result.Analysis, result.Description, result.Priority); reportErr != nil {
 		slog.Error("failed to report triage results",
 			"task_id", task.ID, "error", reportErr, "component", component)
 		return
 	}
 
 	slog.Info("task triaged and promoted to READY",
-		"task_id", task.ID, "priority", result.Priority, "model", result.Model, "component", component)
+		"task_id", task.ID, "priority", result.Priority, "component", component)
 }
 
 // smokeTest verifies the Claude CLI is available.
@@ -140,11 +151,10 @@ func (t *Triager) smokeTest() error {
 		model = "haiku"
 	}
 
-	result, err := t.claude.Run(ctx, executor.ClaudeCodeOpts{
-		Prompt:   "respond with exactly: SMOKE_TEST_OK",
-		Model:    model,
-		MaxTurns: 1,
-		WorkDir:  "/tmp",
+	result, err := t.claude.Run(ctx, claudecli.Opts{
+		Prompt:  "respond with exactly: SMOKE_TEST_OK",
+		Model:   model,
+		WorkDir: "/tmp",
 	})
 	if err != nil {
 		return fmt.Errorf("smoke test failed: %w", err)
@@ -174,22 +184,27 @@ type TriageResult struct {
 	Analysis    string // Structured analysis of the task
 	Priority    int    // Suggested priority (1-100)
 	Description string // Rewritten description with clear requirements
-	Model       string // Recommended model for execution (opus or sonnet)
+}
+
+// triageJSON is the expected JSON output from the triage prompt.
+type triageJSON struct {
+	Analysis    string `json:"analysis"`
+	Priority    int    `json:"priority"`
+	Description string `json:"description"`
 }
 
 // TriageTask uses Claude to analyze a task, rewrite its description with clear
 // requirements, suggest a priority level, and recommend an execution model.
-func TriageTask(ctx context.Context, runner *executor.ClaudeCodeRunner, task *models.Task) (*TriageResult, error) {
+func TriageTask(ctx context.Context, runner *claudecli.Runner, task *models.Task, model string) (*TriageResult, error) {
 	prompt := buildTriagePrompt(task)
 
-	triageCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	triageCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	result, err := runner.Run(triageCtx, executor.ClaudeCodeOpts{
-		Prompt:   prompt,
-		Model:    "haiku",
-		MaxTurns: 1,
-		WorkDir:  "/tmp",
+	result, err := runner.Run(triageCtx, claudecli.Opts{
+		Prompt:  prompt,
+		Model:   model,
+		WorkDir: "/tmp",
 	})
 	if err != nil {
 		stderr, stdoutLen := "", 0
@@ -212,7 +227,7 @@ func TriageTask(ctx context.Context, runner *executor.ClaudeCodeRunner, task *mo
 	}
 
 	// Parse the response
-	parsed, err := executor.ParseResponse(result.Stdout)
+	parsed, err := claudecli.ParseResponse(result.Stdout)
 	if err != nil {
 		slog.Error("triage response parse failed",
 			"task_id", task.ID, "error", err,
@@ -223,15 +238,10 @@ func TriageTask(ctx context.Context, runner *executor.ClaudeCodeRunner, task *mo
 	slog.Info("triage raw response",
 		"task_id", task.ID,
 		"result_text_len", len(parsed.ResultText),
-		"result_text_prefix", truncate(parsed.ResultText, 300))
+		"result_text_prefix", truncate(parsed.ResultText, 300),
+		"raw_stdout_prefix", truncate(result.Stdout, 500))
 
 	triage := parseTriageResponse(parsed.ResultText, task)
-	slog.Info("triage complete",
-		"task_id", task.ID,
-		"suggested_priority", triage.Priority,
-		"suggested_model", triage.Model,
-		"has_analysis", triage.Analysis != "",
-		"analysis_len", len(triage.Analysis))
 
 	return triage, nil
 }
@@ -249,6 +259,7 @@ func buildTriagePrompt(task *models.Task) string {
 		Priority:    task.Priority,
 		Description: task.Description,
 		Tags:        tags,
+		ProjectName: task.ProjectID,
 	})
 	if err != nil {
 		slog.Warn("failed to render triage prompt template, using fallback", "error", err)
@@ -259,6 +270,7 @@ func buildTriagePrompt(task *models.Task) string {
 
 // parseSections extracts named sections from markdown-style response text.
 // Sections are delimited by ### or ## headings.
+// Kept as fallback for non-JSON triage responses.
 func parseSections(text string) map[string]string {
 	sections := map[string]string{}
 	currentSection := ""
@@ -270,7 +282,7 @@ func parseSections(text string) map[string]string {
 
 		// Check for known section headers
 		sectionName := ""
-		for _, name := range []string{"ANALYSIS", "PRIORITY", "DESCRIPTION", "MODEL"} {
+		for _, name := range []string{"ANALYSIS", "PRIORITY", "DESCRIPTION"} {
 			if strings.Contains(upper, "### "+name) || strings.Contains(upper, "## "+name) {
 				sectionName = strings.ToLower(name)
 				break
@@ -297,39 +309,92 @@ func parseSections(text string) map[string]string {
 	return sections
 }
 
+// extractJSON attempts to extract a JSON object from text that may contain
+// markdown code fences or narrative wrapping around the JSON.
+func extractJSON(text string) string {
+	text = strings.TrimSpace(text)
+
+	// Strip markdown code fences
+	if strings.HasPrefix(text, "```") {
+		lines := strings.SplitN(text, "\n", 2)
+		if len(lines) > 1 {
+			text = lines[1]
+		}
+		if idx := strings.LastIndex(text, "```"); idx >= 0 {
+			text = text[:idx]
+		}
+		text = strings.TrimSpace(text)
+	}
+
+	// Find JSON object boundaries in narrative text
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start >= 0 && end > start {
+		text = text[start : end+1]
+	}
+
+	return strings.TrimSpace(text)
+}
+
 func parseTriageResponse(text string, task *models.Task) *TriageResult {
 	result := &TriageResult{
 		Priority:    task.Priority, // default to existing
 		Description: task.Description,
-		Model:       "sonnet", // default model
 	}
 
-	sections := parseSections(text)
+	text = strings.TrimSpace(text)
 
-	// Extract analysis
-	if analysis, ok := sections["analysis"]; ok && analysis != "" {
-		result.Analysis = analysis
+	// Handle empty result text explicitly
+	if text == "" {
+		slog.Warn("triage response text is empty, returning defaults", "task_id", task.ID)
+		return result
 	}
 
-	// Extract priority
-	if priorityText, ok := sections["priority"]; ok && priorityText != "" {
-		var p int
-		if _, err := fmt.Sscanf(strings.TrimSpace(priorityText), "%d", &p); err == nil && p >= 1 && p <= 100 {
-			result.Priority = p
+	// Try JSON first, extracting from narrative/code-fenced wrapping
+	extracted := extractJSON(text)
+	var tj triageJSON
+	if err := json.Unmarshal([]byte(extracted), &tj); err == nil {
+		if tj.Analysis != "" {
+			result.Analysis = tj.Analysis
+		}
+		if tj.Priority >= 1 && tj.Priority <= 100 {
+			result.Priority = tj.Priority
+		}
+		if tj.Description != "" {
+			result.Description = tj.Description
+		}
+	} else {
+		// Fallback to markdown section parsing
+		sections := parseSections(text)
+
+		if analysis, ok := sections["analysis"]; ok && analysis != "" {
+			result.Analysis = analysis
+		}
+		if priorityText, ok := sections["priority"]; ok && priorityText != "" {
+			var p int
+			if _, err := fmt.Sscanf(strings.TrimSpace(priorityText), "%d", &p); err == nil && p >= 1 && p <= 100 {
+				result.Priority = p
+			}
+		}
+		if desc, ok := sections["description"]; ok && desc != "" {
+			result.Description = desc
+		}
+
+		if result.Analysis == "" {
+			slog.Warn("triage parsing produced no analysis from JSON or markdown",
+				"task_id", task.ID,
+				"text_len", len(text),
+				"text_prefix", truncate(text, 100),
+			)
 		}
 	}
 
-	// Extract rewritten description
-	if desc, ok := sections["description"]; ok && desc != "" {
-		result.Description = desc
-	}
-
-	// Extract model recommendation
-	if modelText, ok := sections["model"]; ok && modelText != "" {
-		m := strings.ToLower(strings.TrimSpace(modelText))
-		if m == "opus" || m == "sonnet" {
-			result.Model = m
-		}
+	// Sanity guard: if the task input is very short and priority is suspiciously high,
+	// override to default. This catches garbage/test inputs that the model may
+	// incorrectly triage as critical.
+	inputLen := len(strings.TrimSpace(task.Title)) + len(strings.TrimSpace(task.Description))
+	if inputLen < 10 && result.Priority < 10 {
+		result.Priority = 50
 	}
 
 	return result

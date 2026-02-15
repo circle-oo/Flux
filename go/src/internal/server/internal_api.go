@@ -261,14 +261,13 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 		Analysis    string `json:"analysis"`
 		Description string `json:"description"`
 		Priority    int    `json:"priority"`
-		Model       string `json:"model"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	slog.Info("internal API: triage result reported", "task_id", id, "model", req.Model)
+	slog.Info("internal API: triage result reported", "task_id", id)
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
@@ -286,9 +285,6 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 	if req.Priority > 0 && req.Priority != task.Priority {
 		slog.Info("triage adjusted priority", "task_id", id, "old", task.Priority, "new", req.Priority)
 		task.Priority = req.Priority
-	}
-	if req.Model != "" {
-		task.Model = req.Model
 	}
 
 	// Promote to READY
@@ -474,25 +470,7 @@ func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		// If triager already set a model, use it
-		if task.Model != "" && task.Model != "sonnet" {
-			slog.Info("internal API: model assigned (triager)", "task_id", taskID, "model", task.Model)
-			writeJSON(w, http.StatusOK, map[string]string{"model": task.Model})
-			return
-		}
-
-		// If task was triaged (has analysis), trust the triager's default sonnet
-		if task.TriageAnalysis != "" {
-			model := task.Model
-			if model == "" {
-				model = "sonnet"
-			}
-			slog.Info("internal API: model assigned (triaged)", "task_id", taskID, "model", model)
-			writeJSON(w, http.StatusOK, map[string]string{"model": model})
-			return
-		}
-
-		// Fallback heuristic for non-triaged tasks
+		// Use NeedsOpus heuristic for model selection
 		model := "sonnet"
 		if task.NeedsOpus() {
 			model = "opus"

@@ -1,4 +1,4 @@
-package executor
+package claudecli
 
 import (
 	"context"
@@ -9,18 +9,18 @@ import (
 	"github.com/circle-oo/flux/internal/config"
 )
 
-func TestNewClaudeCodeRunner(t *testing.T) {
+func TestNewRunner(t *testing.T) {
 	cfg := &config.ExecutorConfig{
 		MaxExecutionTime: 5 * time.Minute,
 		MaxOutputSize:    1024 * 1024,
 		MaxTurns:         30,
 	}
 
-	runner := NewClaudeCodeRunner(cfg)
+	runner := NewRunner(cfg)
 	if runner == nil {
 		t.Fatal("expected non-nil runner")
 	}
-	if runner.cfg != cfg {
+	if runner.Cfg != cfg {
 		t.Error("runner config not set correctly")
 	}
 }
@@ -215,75 +215,64 @@ func TestLimitedBuffer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			buf := &limitedBuffer{maxSize: tt.maxSize}
+			buf := &LimitedBuffer{MaxSize: tt.maxSize}
 			for _, w := range tt.writes {
 				buf.Write([]byte(w))
 			}
-			if buf.size != tt.wantSize {
-				t.Errorf("size = %d, want %d", buf.size, tt.wantSize)
+			if buf.Size != tt.wantSize {
+				t.Errorf("size = %d, want %d", buf.Size, tt.wantSize)
 			}
 			if buf.String() != tt.wantText {
 				t.Errorf("text = %q, want %q", buf.String(), tt.wantText)
 			}
-			if buf.truncated != tt.wantTrunc {
-				t.Errorf("truncated = %v, want %v", buf.truncated, tt.wantTrunc)
+			if buf.Truncated != tt.wantTrunc {
+				t.Errorf("truncated = %v, want %v", buf.Truncated, tt.wantTrunc)
 			}
 		})
 	}
 }
 
 func TestRun_TimeoutContextPattern(t *testing.T) {
-	// This test verifies the timeout context is created BEFORE CommandContext
-	// We can't easily test the actual execution without mocking, but we can
-	// verify the pattern compiles and the structure is correct.
-
 	cfg := &config.ExecutorConfig{
 		MaxExecutionTime: 100 * time.Millisecond,
 		MaxOutputSize:    1024,
 		MaxTurns:         1,
 	}
 
-	runner := NewClaudeCodeRunner(cfg)
+	runner := NewRunner(cfg)
 	ctx := context.Background()
 
-	// Use a non-existent binary so the command always fails
-	// We're testing the timeout pattern, not the command itself
-	opts := ClaudeCodeOpts{
+	opts := Opts{
 		Prompt:  "test",
 		WorkDir: "/tmp",
 		Model:   "sonnet",
 	}
 
-	// Override the claude binary to a non-existent one by using a very short timeout
-	// The command will fail either from not found or timeout
 	result, err := runner.Run(ctx, opts)
 
-	// We expect either an error or a non-zero exit code result
 	if result == nil && err == nil {
 		t.Error("expected either non-nil result or error")
 	}
 }
 
 func TestRun_OutputSizeLimit(t *testing.T) {
-	// Test that output size limit is enforced
 	cfg := &config.ExecutorConfig{
 		MaxExecutionTime: 5 * time.Second,
 		MaxOutputSize:    10, // Very small limit
 		MaxTurns:         1,
 	}
 
-	_ = NewClaudeCodeRunner(cfg) // verify runner creates successfully
+	_ = NewRunner(cfg)
 
-	// Create a limited buffer and test overflow
-	buf := &limitedBuffer{maxSize: cfg.MaxOutputSize}
+	buf := &LimitedBuffer{MaxSize: cfg.MaxOutputSize}
 	largeOutput := strings.Repeat("x", 100)
 	buf.Write([]byte(largeOutput))
 
-	if !buf.truncated {
+	if !buf.Truncated {
 		t.Error("expected buffer to be truncated")
 	}
-	if buf.size != cfg.MaxOutputSize {
-		t.Errorf("buffer size = %d, want %d", buf.size, cfg.MaxOutputSize)
+	if buf.Size != cfg.MaxOutputSize {
+		t.Errorf("buffer size = %d, want %d", buf.Size, cfg.MaxOutputSize)
 	}
 	if int64(len(buf.String())) != cfg.MaxOutputSize {
 		t.Errorf("output length = %d, want %d", len(buf.String()), cfg.MaxOutputSize)

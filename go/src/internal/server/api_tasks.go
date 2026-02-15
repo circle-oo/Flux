@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -9,9 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
-	"github.com/circle-oo/flux/internal/triager"
 )
 
 // handleCreateTask handles POST /api/tasks
@@ -89,9 +86,6 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		if s.config.Triager.Enabled {
 			// Triager component will poll and pick up PENDING tasks
 			slog.Info("task created as PENDING, triager will process", "task_id", task.ID)
-		} else if s.config.Executor.MaxExecutionTime > 0 {
-			// Fallback: inline triage if triager is disabled but executor is configured
-			go s.inlineTriage(task.ID)
 		} else {
 			// No triage available — promote directly to READY
 			s.promoteToReady(task.ID)
@@ -286,64 +280,6 @@ func (s *Server) handleListSubtasks(w http.ResponseWriter, r *http.Request) {
 		subtasks = []*models.Task{}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": subtasks})
-}
-
-// inlineTriage runs triage on a task in a background goroutine.
-// Used as fallback when the standalone triager is disabled.
-// Takes taskID to avoid data races with the HTTP handler.
-func (s *Server) inlineTriage(taskID string) {
-	// Re-read task from DB to get a fresh, owned copy.
-	task, err := s.tasks.GetByID(taskID)
-	if err != nil {
-		slog.Error("inline triage: failed to read task", "task_id", taskID, "error", err)
-		return
-	}
-
-	slog.Info("starting inline triage", "task_id", task.ID, "title", task.Title)
-
-	runner := executor.NewClaudeCodeRunner(&s.config.Executor)
-	ctx := context.Background()
-
-	result, err := triager.TriageTask(ctx, runner, task)
-	if err != nil {
-		slog.Warn("inline triage failed, promoting with original description", "task_id", task.ID, "error", err)
-		s.promoteToReady(task.ID)
-		return
-	}
-
-	// Re-read task from DB before updating to avoid overwriting concurrent changes.
-	task, err = s.tasks.GetByID(taskID)
-	if err != nil {
-		slog.Error("inline triage: failed to re-read task", "task_id", taskID, "error", err)
-		return
-	}
-
-	// Update task with triage results
-	if result.Analysis != "" {
-		task.TriageAnalysis = result.Analysis
-	}
-	if result.Description != "" && result.Description != task.Description {
-		task.Description = result.Description
-	}
-	if result.Priority != task.Priority {
-		slog.Info("inline triage adjusted priority", "task_id", task.ID, "old", task.Priority, "new", result.Priority)
-		task.Priority = result.Priority
-	}
-	if result.Model != "" {
-		task.Model = result.Model
-	}
-
-	// Move to READY after triage
-	task.Status = models.TaskReady
-	task.ExecutorID = ""
-
-	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to update task after inline triage", "task_id", task.ID, "error", err)
-		return
-	}
-
-	slog.Info("inline triage complete, task promoted to READY", "task_id", task.ID)
-	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 }
 
 // promoteToReady moves a PENDING task to READY status.

@@ -2,6 +2,8 @@ package executor
 
 import (
 	"testing"
+
+	"github.com/circle-oo/flux/internal/apiclient"
 )
 
 func TestParseDecomposition(t *testing.T) {
@@ -176,7 +178,7 @@ func TestToSubtaskRequests(t *testing.T) {
 	tests := []struct {
 		name  string
 		input *Decomposition
-		want  []SubtaskRequest
+		want  []apiclient.SubtaskRequest
 	}{
 		{
 			name:  "nil decomposition",
@@ -192,7 +194,7 @@ func TestToSubtaskRequests(t *testing.T) {
 					{Title: "Task 2", Description: "Second task"},
 				},
 			},
-			want: []SubtaskRequest{
+			want: []apiclient.SubtaskRequest{
 				{Title: "Task 1", Description: "First task"},
 				{Title: "Task 2", Description: "Second task"},
 			},
@@ -203,7 +205,7 @@ func TestToSubtaskRequests(t *testing.T) {
 				Decompose: true,
 				Subtasks:  []DecomposedTask{},
 			},
-			want: []SubtaskRequest{},
+			want: []apiclient.SubtaskRequest{},
 		},
 		{
 			name: "single subtask",
@@ -213,7 +215,7 @@ func TestToSubtaskRequests(t *testing.T) {
 					{Title: "Only task", Description: "Single task description"},
 				},
 			},
-			want: []SubtaskRequest{
+			want: []apiclient.SubtaskRequest{
 				{Title: "Only task", Description: "Single task description"},
 			},
 		},

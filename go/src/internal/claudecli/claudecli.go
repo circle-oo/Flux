@@ -1,4 +1,4 @@
-package executor
+package claudecli
 
 import (
 	"context"
@@ -13,13 +13,13 @@ import (
 	"github.com/circle-oo/flux/internal/config"
 )
 
-// ClaudeCodeRunner executes Claude Code CLI commands.
-type ClaudeCodeRunner struct {
-	cfg *config.ExecutorConfig
+// Runner executes Claude Code CLI commands.
+type Runner struct {
+	Cfg *config.ExecutorConfig
 }
 
-// ClaudeCodeResult contains the result of a Claude Code CLI execution.
-type ClaudeCodeResult struct {
+// Result contains the result of a Claude Code CLI execution.
+type Result struct {
 	ExitCode   int
 	Stdout     string
 	Stderr     string
@@ -29,13 +29,13 @@ type ClaudeCodeResult struct {
 	SessionID  string
 }
 
-// ClaudeCodeOpts contains options for running Claude Code CLI.
-type ClaudeCodeOpts struct {
+// Opts contains options for running Claude Code CLI.
+type Opts struct {
 	Prompt       string
 	WorkDir      string
 	Model        string // "sonnet" or "opus"
 	SystemPrompt string // Goal + context injected here
-	MaxTurns     int    // 0 = unlimited (default), 1 = single response (used for triage)
+	MaxTurns     int    // 0 = unlimited (default), set only when needed
 }
 
 // ParsedResponse contains parsed fields from Claude Code JSON output.
@@ -46,22 +46,20 @@ type ParsedResponse struct {
 	CostUSD    float64
 }
 
-// NewClaudeCodeRunner creates a new Claude Code CLI runner.
-func NewClaudeCodeRunner(cfg *config.ExecutorConfig) *ClaudeCodeRunner {
-	return &ClaudeCodeRunner{cfg: cfg}
+// NewRunner creates a new Claude Code CLI runner.
+func NewRunner(cfg *config.ExecutorConfig) *Runner {
+	return &Runner{Cfg: cfg}
 }
 
 // Run executes the Claude Code CLI with the given options.
-func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*ClaudeCodeResult, error) {
+func (r *Runner) Run(ctx context.Context, opts Opts) (*Result, error) {
 	slog.Info("starting claude code CLI", "model", opts.Model, "workdir", opts.WorkDir, "has_system_prompt", opts.SystemPrompt != "")
 
 	// Create timeout context BEFORE exec.CommandContext (CRITICAL TIMEOUT BUG FIX)
-	timeoutCtx, cancel := context.WithTimeout(ctx, r.cfg.MaxExecutionTime)
+	timeoutCtx, cancel := context.WithTimeout(ctx, r.Cfg.MaxExecutionTime)
 	defer cancel()
 
 	// Build command arguments
-	// Note: --cwd and --max-turns don't exist in v2.1.42
-	// Use cmd.Dir for working directory instead
 	args := []string{
 		"-p", opts.Prompt,
 		"--model", opts.Model,
@@ -79,14 +77,14 @@ func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*Claud
 	}
 
 	cmd := exec.CommandContext(timeoutCtx, "claude", args...)
-	cmd.Dir = opts.WorkDir // Set working directory via cmd.Dir
+	cmd.Dir = opts.WorkDir
 
 	// Set process group to kill child processes on timeout
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	// Create limited buffers for stdout/stderr to prevent memory exhaustion
-	stdoutBuf := &limitedBuffer{maxSize: r.cfg.MaxOutputSize}
-	stderrBuf := &limitedBuffer{maxSize: r.cfg.MaxOutputSize}
+	stdoutBuf := &LimitedBuffer{MaxSize: r.Cfg.MaxOutputSize}
+	stderrBuf := &LimitedBuffer{MaxSize: r.Cfg.MaxOutputSize}
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
 
@@ -94,7 +92,7 @@ func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*Claud
 	err := cmd.Run()
 	duration := time.Since(start)
 
-	result := &ClaudeCodeResult{
+	result := &Result{
 		ExitCode: 0,
 		Stdout:   stdoutBuf.String(),
 		Stderr:   stderrBuf.String(),
@@ -113,9 +111,9 @@ func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*Claud
 	slog.Info("claude code CLI completed", "exit_code", result.ExitCode, "duration", duration, "stdout_size", len(result.Stdout), "stderr_size", len(result.Stderr))
 
 	// Check output size guardrail
-	if stdoutBuf.truncated {
-		slog.Warn("stdout exceeded max output size", "max_bytes", r.cfg.MaxOutputSize)
-		return result, fmt.Errorf("stdout exceeded max output size (%d bytes)", r.cfg.MaxOutputSize)
+	if stdoutBuf.Truncated {
+		slog.Warn("stdout exceeded max output size", "max_bytes", r.Cfg.MaxOutputSize)
+		return result, fmt.Errorf("stdout exceeded max output size (%d bytes)", r.Cfg.MaxOutputSize)
 	}
 
 	// Parse JSON response if available
@@ -129,7 +127,6 @@ func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*Claud
 		} else {
 			slog.Warn("failed to parse claude code response", "error", parseErr)
 		}
-		// Don't fail on parse errors - just log them (caller should handle)
 	}
 
 	return result, nil
@@ -212,33 +209,33 @@ func IsRateLimited(exitCode int, stderr string) bool {
 	return false
 }
 
-// limitedBuffer is a buffer that enforces a maximum size.
-type limitedBuffer struct {
+// LimitedBuffer is a buffer that enforces a maximum size.
+type LimitedBuffer struct {
 	buf       strings.Builder
-	maxSize   int64
-	size      int64
-	truncated bool
+	MaxSize   int64
+	Size      int64
+	Truncated bool
 }
 
-func (b *limitedBuffer) Write(p []byte) (n int, err error) {
-	if b.truncated {
+func (b *LimitedBuffer) Write(p []byte) (n int, err error) {
+	if b.Truncated {
 		return len(p), nil // Discard further writes
 	}
 
-	available := b.maxSize - b.size
+	available := b.MaxSize - b.Size
 	if int64(len(p)) > available {
 		// Write only what fits
 		b.buf.Write(p[:available])
-		b.size = b.maxSize
-		b.truncated = true
+		b.Size = b.MaxSize
+		b.Truncated = true
 		return len(p), nil // Report full write to avoid errors
 	}
 
 	n, err = b.buf.Write(p)
-	b.size += int64(n)
+	b.Size += int64(n)
 	return n, err
 }
 
-func (b *limitedBuffer) String() string {
+func (b *LimitedBuffer) String() string {
 	return b.buf.String()
 }

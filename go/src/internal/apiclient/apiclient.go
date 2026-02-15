@@ -1,4 +1,4 @@
-package executor
+package apiclient
 
 import (
 	"bytes"
@@ -11,15 +11,15 @@ import (
 	"github.com/circle-oo/flux/internal/models"
 )
 
-// ManagerClient provides an HTTP client for Executor pods to communicate with Manager.
-type ManagerClient struct {
+// Client provides an HTTP client for pods to communicate with Manager.
+type Client struct {
 	baseURL string
 	http    *http.Client
 }
 
-// NewManagerClient creates a new ManagerClient.
-func NewManagerClient(baseURL string) *ManagerClient {
-	return &ManagerClient{
+// NewClient creates a new Client.
+func NewClient(baseURL string) *Client {
+	return &Client{
 		baseURL: baseURL,
 		http:    &http.Client{},
 	}
@@ -27,7 +27,7 @@ func NewManagerClient(baseURL string) *ManagerClient {
 
 // NextTask requests the next task from the Manager.
 // POST /internal/tasks/next
-func (c *ManagerClient) NextTask(podID, podType string) (*models.Task, error) {
+func (c *Client) NextTask(podID, podType string) (*models.Task, error) {
 	slog.Debug("requesting next task from manager", "pod_id", podID, "pod_type", podType)
 	req := map[string]string{
 		"pod_id":   podID,
@@ -83,7 +83,7 @@ type TaskDoneRequest struct {
 
 // ReportTaskDone reports task completion to the Manager.
 // POST /internal/tasks/{id}/done
-func (c *ManagerClient) ReportTaskDone(taskID string, task *models.Task, status, result, errorLog string, tokensUsed int, costUSD float64) error {
+func (c *Client) ReportTaskDone(taskID string, task *models.Task, status, result, errorLog string, tokensUsed int, costUSD float64) error {
 	slog.Info("reporting task completion", "task_id", taskID, "status", status, "tokens", tokensUsed, "cost_usd", costUSD)
 	req := TaskDoneRequest{
 		Status:     status,
@@ -126,7 +126,7 @@ func (c *ManagerClient) ReportTaskDone(taskID string, task *models.Task, status,
 
 // CreateTask registers a new task via the Manager internal API.
 // POST /internal/tasks
-func (c *ManagerClient) CreateTask(task *models.Task) error {
+func (c *Client) CreateTask(task *models.Task) error {
 	body, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("marshal task: %w", err)
@@ -156,9 +156,8 @@ func (c *ManagerClient) CreateTask(task *models.Task) error {
 }
 
 // GetTaskStatus fetches the current status of a task.
-// Used by executor to check if a task was cancelled mid-execution.
-// GET /internal/tasks/{id} (reuses the existing route via /api path)
-func (c *ManagerClient) GetTaskStatus(taskID string) (string, error) {
+// GET /internal/tasks/{id}/status
+func (c *Client) GetTaskStatus(taskID string) (string, error) {
 	url := fmt.Sprintf("%s/internal/tasks/%s/status", c.baseURL, taskID)
 	resp, err := c.http.Get(url)
 	if err != nil {
@@ -187,7 +186,7 @@ type SubtaskRequest struct {
 
 // CreateSubtasks creates subtasks for a parent task.
 // POST /internal/subtasks
-func (c *ManagerClient) CreateSubtasks(parentID string, subtasks []SubtaskRequest) error {
+func (c *Client) CreateSubtasks(parentID string, subtasks []SubtaskRequest) error {
 	slog.Info("creating subtasks", "parent_id", parentID, "count", len(subtasks))
 	req := map[string]interface{}{
 		"parent_id": parentID,
@@ -220,7 +219,7 @@ func (c *ManagerClient) CreateSubtasks(parentID string, subtasks []SubtaskReques
 
 // ReportTaskStarted reports execution start details to the server immediately.
 // POST /internal/tasks/{id}/started
-func (c *ManagerClient) ReportTaskStarted(taskID, executorID, model, branchName string) error {
+func (c *Client) ReportTaskStarted(taskID, executorID, model, branchName string) error {
 	slog.Debug("reporting task execution start", "task_id", taskID, "executor_id", executorID, "model", model)
 	req := map[string]string{
 		"executor_id": executorID,
@@ -250,7 +249,7 @@ func (c *ManagerClient) ReportTaskStarted(taskID, executorID, model, branchName 
 
 // NextPending requests the next PENDING task for the triager.
 // POST /internal/tasks/next-pending
-func (c *ManagerClient) NextPending(triagerID string) (*models.Task, error) {
+func (c *Client) NextPending(triagerID string) (*models.Task, error) {
 	slog.Debug("requesting next pending task", "triager_id", triagerID)
 	req := map[string]string{
 		"triager_id": triagerID,
@@ -287,13 +286,12 @@ func (c *ManagerClient) NextPending(triagerID string) (*models.Task, error) {
 
 // ReportTriaged reports triage completion for a task, promoting it to READY.
 // POST /internal/tasks/{id}/triaged
-func (c *ManagerClient) ReportTriaged(taskID, analysis, description string, priority int, model string) error {
-	slog.Info("reporting triage completion", "task_id", taskID, "model", model)
+func (c *Client) ReportTriaged(taskID, analysis, description string, priority int) error {
+	slog.Info("reporting triage completion", "task_id", taskID)
 	req := map[string]interface{}{
 		"analysis":    analysis,
 		"description": description,
 		"priority":    priority,
-		"model":       model,
 	}
 
 	body, err := json.Marshal(req)
@@ -318,7 +316,7 @@ func (c *ManagerClient) ReportTriaged(taskID, analysis, description string, prio
 
 // GetModel queries which model to use for a task.
 // GET /internal/model/{task_id}
-func (c *ManagerClient) GetModel(taskID string) (string, error) {
+func (c *Client) GetModel(taskID string) (string, error) {
 	slog.Debug("requesting model assignment", "task_id", taskID)
 	url := fmt.Sprintf("%s/internal/model/%s", c.baseURL, taskID)
 	resp, err := c.http.Get(url)
@@ -344,7 +342,7 @@ func (c *ManagerClient) GetModel(taskID string) (string, error) {
 
 // GetProject retrieves project information via the internal API.
 // GET /internal/projects/{id}
-func (c *ManagerClient) GetProject(projectID string) (*models.Project, error) {
+func (c *Client) GetProject(projectID string) (*models.Project, error) {
 	slog.Debug("requesting project info", "project_id", projectID)
 	url := fmt.Sprintf("%s/internal/projects/%s", c.baseURL, projectID)
 	resp, err := c.http.Get(url)

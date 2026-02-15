@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/circle-oo/flux/internal/claudecli"
 	"github.com/circle-oo/flux/internal/models"
 )
 
@@ -24,7 +25,7 @@ func TestBuildTaskSummaryData(t *testing.T) {
 		Result:       "Feature implemented successfully",
 	}
 
-	result := &ClaudeCodeResult{
+	result := &claudecli.Result{
 		Duration: 30 * time.Minute,
 	}
 
@@ -84,7 +85,7 @@ func TestBuildTaskSummaryDataWithDefaults(t *testing.T) {
 		Model:    "opus",
 	}
 
-	result := &ClaudeCodeResult{}
+	result := &claudecli.Result{}
 
 	data := buildTaskSummaryData(task, result)
 
@@ -113,7 +114,7 @@ func TestBuildTaskSummaryDataUsesResultStdout(t *testing.T) {
 		Result:   "", // Empty Result field
 	}
 
-	result := &ClaudeCodeResult{
+	result := &claudecli.Result{
 		Stdout:   "Claude Code output here",
 		Duration: 10 * time.Minute,
 	}

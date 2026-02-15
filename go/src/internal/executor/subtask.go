@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+
+	"github.com/circle-oo/flux/internal/apiclient"
 )
 
 // Decomposition represents a task that should be broken into subtasks.
@@ -113,15 +115,15 @@ func ParseDecomposition(resultText string) *Decomposition {
 	return &decomp
 }
 
-// ToSubtaskRequests converts a Decomposition to a slice of SubtaskRequests.
-func ToSubtaskRequests(d *Decomposition) []SubtaskRequest {
+// ToSubtaskRequests converts a Decomposition to a slice of apiclient.SubtaskRequest.
+func ToSubtaskRequests(d *Decomposition) []apiclient.SubtaskRequest {
 	if d == nil {
 		return nil
 	}
 
-	requests := make([]SubtaskRequest, len(d.Subtasks))
+	requests := make([]apiclient.SubtaskRequest, len(d.Subtasks))
 	for i, task := range d.Subtasks {
-		requests[i] = SubtaskRequest{
+		requests[i] = apiclient.SubtaskRequest{
 			Title:       task.Title,
 			Description: task.Description,
 		}
