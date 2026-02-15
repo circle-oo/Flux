@@ -128,6 +128,7 @@ func (s *Server) setupRoutes() {
 
 	// System endpoints (requires auth)
 	s.mux.Handle("POST /api/system/restart", s.authMiddleware(http.HandlerFunc(s.handleRestart)))
+	s.mux.Handle("GET /api/insights", s.authMiddleware(http.HandlerFunc(s.handleInsights)))
 
 	// Deploy endpoints (requires auth)
 	s.mux.Handle("GET /api/system/deploy/status", s.authMiddleware(http.HandlerFunc(s.handleDeployStatus)))
