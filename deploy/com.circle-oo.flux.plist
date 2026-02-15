@@ -6,9 +6,8 @@
     <string>com.circle-oo.flux</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/won.park/workspace/flux/go/bin/flux</string>
-        <string>--config</string>
-        <string>/Users/won.park/workspace/flux/config.yaml</string>
+        <string>/bin/zsh</string>
+        <string>/Users/won.park/workspace/flux/deploy/run-flux.sh</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/won.park/workspace/flux</string>
