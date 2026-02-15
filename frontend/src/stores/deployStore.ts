@@ -5,15 +5,18 @@ interface DeployState {
   status: DeployStatusResponse | null
   isLoading: boolean
   isDeploying: boolean
+  isCheckingRemote: boolean
   error: string | null
   fetchStatus: () => Promise<void>
   triggerDeploy: () => Promise<void>
+  checkRemoteCommit: () => Promise<void>
 }
 
 export const useDeployStore = create<DeployState>((set) => ({
   status: null,
   isLoading: false,
   isDeploying: false,
+  isCheckingRemote: false,
   error: null,
 
   fetchStatus: async () => {
@@ -38,6 +41,21 @@ export const useDeployStore = create<DeployState>((set) => ({
       set({
         error: error instanceof Error ? error.message : 'Failed to trigger deploy',
         isDeploying: false,
+      })
+    }
+  },
+
+  checkRemoteCommit: async () => {
+    set({ isCheckingRemote: true, error: null })
+    try {
+      await api.checkRemoteCommit()
+      // Fetch the updated status to get the new remote commit
+      const status = await api.getDeployStatus()
+      set({ status, isCheckingRemote: false })
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Failed to check remote commit',
+        isCheckingRemote: false,
       })
     }
   },

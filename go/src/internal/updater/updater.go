@@ -202,6 +202,59 @@ func (u *Updater) TriggerUpdate(ctx context.Context) error {
 	return u.doUpdate(ctx, branch, true)
 }
 
+// FetchRemoteCommit fetches the latest remote commit without deploying.
+// This updates the RemoteCommit field in the status so the user can see
+// if an update is available before deciding to deploy.
+func (u *Updater) FetchRemoteCommit(ctx context.Context) error {
+	branch := u.cfg.Branch
+	if branch == "" {
+		branch = "main"
+	}
+
+	slog.Info("fetching remote commit", "branch", branch)
+	u.setState("checking")
+
+	// Fetch latest from remote
+	if err := u.gitCommand(ctx, "fetch", "origin", branch); err != nil {
+		u.setState("error")
+		return fmt.Errorf("git fetch: %w", err)
+	}
+
+	// Get local HEAD
+	localHead, err := u.gitOutput(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		u.setState("error")
+		return fmt.Errorf("get local HEAD: %w", err)
+	}
+
+	// Get remote HEAD
+	remoteRef := "origin/" + branch
+	remoteHead, err := u.gitOutput(ctx, "rev-parse", remoteRef)
+	if err != nil {
+		u.setState("error")
+		return fmt.Errorf("get remote HEAD: %w", err)
+	}
+
+	u.mu.Lock()
+	u.localCommit = localHead
+	u.remoteCommit = remoteHead
+	now := time.Now()
+	u.lastCheckAt = &now
+	u.lastError = ""
+	u.mu.Unlock()
+
+	u.setState("idle")
+	u.notifyChange()
+
+	slog.Info("remote commit fetched",
+		"local", localHead[:8],
+		"remote", remoteHead[:8],
+		"update_available", localHead != remoteHead,
+	)
+
+	return nil
+}
+
 // checkAndUpdate fetches the remote, compares HEAD with remote branch,
 // and if there are new commits: pulls, rebuilds, and signals the process to restart.
 func (u *Updater) checkAndUpdate(ctx context.Context, branch string) error {

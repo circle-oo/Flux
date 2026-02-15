@@ -68,6 +68,35 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// handleCheckRemote fetches the remote commit hash without deploying.
+func (s *Server) handleCheckRemote(w http.ResponseWriter, r *http.Request) {
+	slog.Info("remote commit check requested via API")
+
+	if s.updater == nil {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":  "disabled",
+			"message": "No auto-updater configured.",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	if err := s.updater.FetchRemoteCommit(ctx); err != nil {
+		slog.Error("remote commit check failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": "Remote commit fetched successfully.",
+	})
+}
+
 // SetUpdater sets the auto-updater reference so deploy endpoints can use it.
 func (s *Server) SetUpdater(u *updater.Updater) {
 	s.updater = u
