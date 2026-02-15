@@ -95,6 +95,18 @@ export interface DeployStatusResponse {
   updater: UpdaterStatus
 }
 
+export interface ProjectActivity {
+  project_id: string
+  project_name: string
+  task_count: number
+}
+
+export interface Insights {
+  total_tokens: number
+  total_cost: number
+  project_activities: ProjectActivity[]
+}
+
 class APIClient {
   private baseURL = ''
 
@@ -349,6 +361,11 @@ class APIClient {
   // Config
   async getHealth(): Promise<{ status: string; version: string; auth_enabled: boolean }> {
     return this.fetch('/health')
+  }
+
+  // Insights
+  async getInsights(): Promise<Insights> {
+    return this.fetch('/api/insights')
   }
 }
 

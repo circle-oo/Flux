@@ -4,7 +4,7 @@ import { useGoalStore } from '../stores/goalStore'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useWSStore } from '../stores/wsStore'
-import { api, Pod } from '../lib/api'
+import { api, Pod, Insights } from '../lib/api'
 
 function formatUptime(ms: number): string {
   const totalMinutes = Math.floor(ms / 1000 / 60)
@@ -47,6 +47,7 @@ export default function Dashboard() {
   const wsConnected = useWSStore((s) => s.connected)
   const wsReconnecting = useWSStore((s) => s.reconnecting)
   const [pods, setPods] = useState<Pod[]>([])
+  const [insights, setInsights] = useState<Insights | null>(null)
 
   useEffect(() => {
     // Reset filters to ensure dashboard shows all tasks
@@ -55,6 +56,7 @@ export default function Dashboard() {
     fetchTasks()
     fetchProjects()
     fetchPods()
+    fetchInsights()
 
     // Poll pod status every 10 seconds
     const interval = setInterval(fetchPods, 10000)
@@ -67,6 +69,15 @@ export default function Dashboard() {
       setPods(data)
     } catch (error) {
       console.error('Failed to fetch pods:', error)
+    }
+  }
+
+  async function fetchInsights() {
+    try {
+      const data = await api.getInsights()
+      setInsights(data)
+    } catch (error) {
+      console.error('Failed to fetch insights:', error)
     }
   }
 
@@ -83,7 +94,6 @@ export default function Dashboard() {
     (t) => t.pr_url && t.pr_status === 'OPEN'
   ).length
   const activeProjects = projects.filter((p) => p.status === 'ACTIVE').length
-  const recentTasks = tasks.slice(0, 10)
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
@@ -256,69 +266,63 @@ export default function Dashboard() {
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        {/* Recent Tasks */}
+        {/* Insights */}
         <section className="card p-4 sm:p-6 lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider">
-              Recent Tasks
-            </h2>
-            <button
-              onClick={() => navigate('/tasks')}
-              className="text-xs text-blue-400 hover:text-blue-300 touch-manipulation"
-            >
-              View all
-            </button>
-          </div>
-          {recentTasks.length > 0 ? (
-            <div className="space-y-2">
-              {recentTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-slate-700/30 hover:bg-slate-700/60 cursor-pointer transition-colors"
-                  onClick={() => navigate(`/tasks/${task.id}`)}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <h3 className="text-slate-100 font-medium truncate text-sm">
-                        {task.title}
-                      </h3>
-                      <span
-                        className={`badge text-[10px] ${
-                          task.status === 'COMPLETED'
-                            ? 'badge-success'
-                            : task.status === 'FAILED'
-                            ? 'badge-danger'
-                            : task.status === 'RUNNING'
-                            ? 'badge-warning'
-                            : task.status === 'READY'
-                            ? 'badge-info'
-                            : task.status === 'DECOMPOSED'
-                            ? 'bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold'
-                            : task.status === 'CANCELLED'
-                            ? 'bg-slate-500 text-white px-2 py-1 rounded text-xs font-semibold'
-                            : 'badge-secondary'
-                        }`}
-                      >
-                        {task.status}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      {task.type} · P{task.priority}
-                      {task.status === 'RUNNING' && task.executor_id && (
-                        <> · {task.executor_id}</>
-                      )}
-                      {task.status === 'RUNNING' && task.model && (
-                        <> · {task.model}</>
-                      )}
-                      {task.pr_url && ' · PR'}
-                    </p>
+          <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">
+            Insights
+          </h2>
+          {insights ? (
+            <div className="space-y-6">
+              {/* Token Usage & Cost */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-4 rounded-lg bg-slate-700/30">
+                  <div className="text-xs text-slate-400 mb-1">Total Token Usage</div>
+                  <div className="text-2xl font-bold text-blue-400">
+                    {insights.total_tokens.toLocaleString()}
                   </div>
                 </div>
-              ))}
+                <div className="p-4 rounded-lg bg-slate-700/30">
+                  <div className="text-xs text-slate-400 mb-1">Total Cost</div>
+                  <div className="text-2xl font-bold text-green-400">
+                    ${insights.total_cost.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Activities per Project */}
+              <div>
+                <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">
+                  Activities per Project
+                </h3>
+                {insights.project_activities.length > 0 ? (
+                  <div className="space-y-2">
+                    {insights.project_activities.map((activity) => (
+                      <div
+                        key={activity.project_id}
+                        className="flex items-center justify-between p-3 rounded-lg bg-slate-700/30 hover:bg-slate-700/60 cursor-pointer transition-colors"
+                        onClick={() => navigate(`/projects/${activity.project_id}`)}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-slate-100 font-medium truncate text-sm">
+                            {activity.project_name}
+                          </h4>
+                        </div>
+                        <div className="text-sm font-semibold text-slate-300">
+                          {activity.task_count} {activity.task_count === 1 ? 'task' : 'tasks'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 italic text-sm py-4 text-center">
+                    No project activities yet
+                  </p>
+                )}
+              </div>
             </div>
           ) : (
             <p className="text-slate-500 italic text-sm py-4 text-center">
-              No tasks yet
+              Loading insights...
             </p>
           )}
         </section>

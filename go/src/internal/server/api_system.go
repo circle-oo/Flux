@@ -99,3 +99,69 @@ func (s *Server) legacyRestart() {
 		slog.Error("failed to send SIGTERM", "error", err)
 	}
 }
+
+// handleInsights handles GET /api/insights
+// Returns aggregated metrics: token usage, cost, and activities per project.
+func (s *Server) handleInsights(w http.ResponseWriter, r *http.Request) {
+	// Aggregate token usage and cost
+	var totalTokens int
+	var totalCost float64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(tokens_used), 0), COALESCE(SUM(cost_usd), 0)
+		FROM tasks
+	`).Scan(&totalTokens, &totalCost)
+	if err != nil {
+		serverError(w, "failed to aggregate usage metrics", "error", err)
+		return
+	}
+
+	// Get activities per project
+	type ProjectActivity struct {
+		ProjectID   string `json:"project_id"`
+		ProjectName string `json:"project_name"`
+		TaskCount   int    `json:"task_count"`
+	}
+	rows, err := s.db.Query(`
+		SELECT
+			t.project_id,
+			COALESCE(p.name, 'Unknown') as project_name,
+			COUNT(*) as task_count
+		FROM tasks t
+		LEFT JOIN projects p ON t.project_id = p.id
+		WHERE t.project_id != ''
+		GROUP BY t.project_id
+		ORDER BY task_count DESC
+	`)
+	if err != nil {
+		serverError(w, "failed to query project activities", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	var activities []ProjectActivity
+	for rows.Next() {
+		var pa ProjectActivity
+		if err := rows.Scan(&pa.ProjectID, &pa.ProjectName, &pa.TaskCount); err != nil {
+			serverError(w, "failed to scan project activity", "error", err)
+			return
+		}
+		activities = append(activities, pa)
+	}
+	if err := rows.Err(); err != nil {
+		serverError(w, "failed to iterate project activities", "error", err)
+		return
+	}
+
+	// If no activities found, return empty array instead of null
+	if activities == nil {
+		activities = []ProjectActivity{}
+	}
+
+	response := map[string]interface{}{
+		"total_tokens":       totalTokens,
+		"total_cost":         totalCost,
+		"project_activities": activities,
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
