@@ -319,7 +319,9 @@ func (s *Server) triageTask(taskID string) {
 	}
 
 	// Update task with triage results
-	task.TriageAnalysis = result.Analysis
+	if result.Analysis != "" {
+		task.TriageAnalysis = result.Analysis
+	}
 	if result.Description != "" && result.Description != task.Description {
 		task.Description = result.Description
 	}

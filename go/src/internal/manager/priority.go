@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -57,13 +56,7 @@ func (m *Manager) CountByPriority(minP, maxP int) (int, error) {
 
 // ListByPRStatus returns all tasks with the given PR status.
 func (m *Manager) ListByPRStatus(prStatus string) ([]*models.Task, error) {
-	query := `SELECT id, title, description, type, status, priority, source,
-		project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
-		result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-		diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
-		crash_recovery, tokens_used, cost_usd, created_at, updated_at, started_at,
-		completed_at
-		FROM tasks
+	query := models.TaskSelectSQL + `
 		WHERE pr_status = ?
 		ORDER BY priority ASC, created_at ASC`
 
@@ -75,7 +68,7 @@ func (m *Manager) ListByPRStatus(prStatus string) ([]*models.Task, error) {
 
 	var tasks []*models.Task
 	for rows.Next() {
-		t, err := scanTaskFromRows(rows)
+		t, err := models.ScanTask(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -85,39 +78,3 @@ func (m *Manager) ListByPRStatus(prStatus string) ([]*models.Task, error) {
 	return tasks, rows.Err()
 }
 
-// scanTaskFromRows is a helper to scan a task from sql.Rows.
-func scanTaskFromRows(rows interface{ Scan(...interface{}) error }) (*models.Task, error) {
-	var t models.Task
-	var dependsOnJSON, tagsJSON string
-	err := rows.Scan(
-		&t.ID, &t.Title, &t.Description, &t.Type, &t.Status, &t.Priority, &t.Source,
-		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
-		&dependsOnJSON, &tagsJSON, &t.Prompt,
-		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
-		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged,
-		&t.TriageAnalysis, &t.Plan, &t.TestPassed,
-		&t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
-		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse JSON fields
-	if err := parseJSONField(dependsOnJSON, &t.DependsOn); err != nil {
-		t.DependsOn = []string{}
-	}
-	if err := parseJSONField(tagsJSON, &t.Tags); err != nil {
-		t.Tags = []string{}
-	}
-
-	return &t, nil
-}
-
-// parseJSONField is a helper to parse JSON strings into Go types.
-func parseJSONField(jsonStr string, dest interface{}) error {
-	if jsonStr == "" || jsonStr == "null" {
-		return fmt.Errorf("empty or null JSON")
-	}
-	return json.Unmarshal([]byte(jsonStr), dest)
-}

@@ -193,8 +193,8 @@ func (s *TaskStore) Create(t *Task) error {
 
 // GetByID retrieves a task by its ID.
 func (s *TaskStore) GetByID(id string) (*Task, error) {
-	row := s.DB.QueryRow(taskSelectSQL+" WHERE id = ?", id)
-	return scanTask(row)
+	row := s.DB.QueryRow(TaskSelectSQL+" WHERE id = ?", id)
+	return ScanTask(row)
 }
 
 // ListFilter holds optional filter parameters for listing tasks.
@@ -208,7 +208,7 @@ type ListFilter struct {
 
 // List retrieves tasks matching the given filters.
 func (s *TaskStore) List(f ListFilter) ([]*Task, error) {
-	query := taskSelectSQL
+	query := TaskSelectSQL
 	var args []interface{}
 	var conditions []string
 
@@ -247,7 +247,7 @@ func (s *TaskStore) List(f ListFilter) ([]*Task, error) {
 
 	var tasks []*Task
 	for rows.Next() {
-		t, err := scanTaskRow(rows)
+		t, err := ScanTask(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -364,7 +364,7 @@ func (s *TaskStore) CountByParent(parentID string) (int, error) {
 
 // ListByParent retrieves all subtasks for a given parent task.
 func (s *TaskStore) ListByParent(parentID string) ([]*Task, error) {
-	query := taskSelectSQL + " WHERE parent_id = ? ORDER BY priority ASC, created_at ASC"
+	query := TaskSelectSQL + " WHERE parent_id = ? ORDER BY priority ASC, created_at ASC"
 	rows, err := s.DB.Query(query, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("query subtasks: %w", err)
@@ -373,7 +373,7 @@ func (s *TaskStore) ListByParent(parentID string) ([]*Task, error) {
 
 	var tasks []*Task
 	for rows.Next() {
-		t, err := scanTaskRow(rows)
+		t, err := ScanTask(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -384,7 +384,7 @@ func (s *TaskStore) ListByParent(parentID string) ([]*Task, error) {
 
 // ListPending retrieves tasks with PENDING status, ordered by priority.
 func (s *TaskStore) ListPending() ([]*Task, error) {
-	query := taskSelectSQL + " WHERE status = ? ORDER BY priority ASC, created_at ASC"
+	query := TaskSelectSQL + " WHERE status = ? ORDER BY priority ASC, created_at ASC"
 	rows, err := s.DB.Query(query, TaskPending)
 	if err != nil {
 		return nil, fmt.Errorf("query pending tasks: %w", err)
@@ -393,7 +393,7 @@ func (s *TaskStore) ListPending() ([]*Task, error) {
 
 	var tasks []*Task
 	for rows.Next() {
-		t, err := scanTaskRow(rows)
+		t, err := ScanTask(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -416,7 +416,11 @@ func (s *TaskStore) CancelChildren(parentID string) (int64, error) {
 	return result.RowsAffected()
 }
 
-const taskSelectSQL = `SELECT id, title, description, type, status, priority, source,
+// TaskSelectSQL is the canonical SELECT column list for tasks.
+// All queries that read full task rows should use this constant to avoid
+// column-list drift (the root cause of PR #23 where triage_analysis was
+// missing from manager queries).
+const TaskSelectSQL = `SELECT id, title, description, type, status, priority, source,
 	project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 	result, error_log, executor_id, model, branch_name, pr_url, pr_status,
 	diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
@@ -424,41 +428,13 @@ const taskSelectSQL = `SELECT id, title, description, type, status, priority, so
 	completed_at
 	FROM tasks`
 
-func scanTask(row *sql.Row) (*Task, error) {
+// ScanTask scans a task from any source that implements Scan (works with
+// both *sql.Row and *sql.Rows). This is the single source of truth for
+// the scan field order — it must match TaskSelectSQL.
+func ScanTask(scanner interface{ Scan(...interface{}) error }) (*Task, error) {
 	var t Task
 	var dependsOnJSON, tagsJSON string
-	err := row.Scan(
-		&t.ID, &t.Title, &t.Description, &t.Type, &t.Status, &t.Priority, &t.Source,
-		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
-		&dependsOnJSON, &tagsJSON, &t.Prompt,
-		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
-		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged,
-		&t.TriageAnalysis, &t.Plan, &t.TestPassed,
-		&t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
-		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal([]byte(dependsOnJSON), &t.DependsOn); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "depends_on", "error", err)
-	}
-	if err := json.Unmarshal([]byte(tagsJSON), &t.Tags); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "tags", "error", err)
-	}
-	if t.DependsOn == nil {
-		t.DependsOn = []string{}
-	}
-	if t.Tags == nil {
-		t.Tags = []string{}
-	}
-	return &t, nil
-}
-
-func scanTaskRow(rows *sql.Rows) (*Task, error) {
-	var t Task
-	var dependsOnJSON, tagsJSON string
-	err := rows.Scan(
+	err := scanner.Scan(
 		&t.ID, &t.Title, &t.Description, &t.Type, &t.Status, &t.Priority, &t.Source,
 		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
 		&dependsOnJSON, &tagsJSON, &t.Prompt,

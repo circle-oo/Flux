@@ -106,34 +106,16 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 	defer tx.Rollback()
 
 	// Build query based on pod type with goal boost and extended limit for dependency checking
+	orderAndLimit := `
+			ORDER BY priority ASC,
+				CASE WHEN goal_id = ? THEN 0 ELSE 1 END,
+				created_at ASC
+			LIMIT 10`
 	var query string
 	if podType == "RESEARCHER" {
-		query = `SELECT id, title, description, type, status, priority, source,
-			project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
-			result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-			diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
-			crash_recovery, tokens_used, cost_usd, created_at, updated_at, started_at,
-			completed_at
-			FROM tasks
-			WHERE status = ? AND type = ?
-			ORDER BY priority ASC,
-				CASE WHEN goal_id = ? THEN 0 ELSE 1 END,
-				created_at ASC
-			LIMIT 10`
+		query = models.TaskSelectSQL + " WHERE status = ? AND type = ?" + orderAndLimit
 	} else {
-		// Executor: any type except RESEARCH
-		query = `SELECT id, title, description, type, status, priority, source,
-			project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
-			result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-			diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
-			crash_recovery, tokens_used, cost_usd, created_at, updated_at, started_at,
-			completed_at
-			FROM tasks
-			WHERE status = ? AND type != ?
-			ORDER BY priority ASC,
-				CASE WHEN goal_id = ? THEN 0 ELSE 1 END,
-				created_at ASC
-			LIMIT 10`
+		query = models.TaskSelectSQL + " WHERE status = ? AND type != ?" + orderAndLimit
 	}
 
 	// Query multiple candidates for dependency checking
@@ -151,7 +133,7 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 	// Find first task with met dependencies
 	var task *models.Task
 	for rows.Next() {
-		candidate, err := scanTaskFromRows(rows)
+		candidate, err := models.ScanTask(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan task: %w", err)
 		}
@@ -370,18 +352,12 @@ func (m *Manager) popNextPendingOnce(triagerID string) (*models.Task, error) {
 	}
 	defer tx.Rollback()
 
-	query := `SELECT id, title, description, type, status, priority, source,
-		project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
-		result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-		diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
-		crash_recovery, tokens_used, cost_usd, created_at, updated_at, started_at,
-		completed_at
-		FROM tasks
+	query := models.TaskSelectSQL + `
 		WHERE status = ? AND (executor_id = '' OR executor_id IS NULL)
 		ORDER BY priority ASC, created_at ASC
 		LIMIT 1`
 
-	task, err := scanTaskFromRows(tx.QueryRow(query, models.TaskPending))
+	task, err := models.ScanTask(tx.QueryRow(query, models.TaskPending))
 	if err != nil {
 		return nil, nil // No pending task available
 	}
@@ -453,31 +429,3 @@ func (m *Manager) CheckParentCompletion(parentID string) error {
 	return m.TransitionTask(parentID, newStatus)
 }
 
-// scanTaskFromRow is a helper to scan a task from a sql.Row.
-func scanTaskFromRow(row *sql.Row) (*models.Task, error) {
-	var t models.Task
-	var dependsOnJSON, tagsJSON string
-	err := row.Scan(
-		&t.ID, &t.Title, &t.Description, &t.Type, &t.Status, &t.Priority, &t.Source,
-		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
-		&dependsOnJSON, &tagsJSON, &t.Prompt,
-		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
-		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged,
-		&t.TriageAnalysis, &t.Plan, &t.TestPassed,
-		&t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
-		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse JSON fields
-	if err := parseJSONField(dependsOnJSON, &t.DependsOn); err != nil {
-		t.DependsOn = []string{}
-	}
-	if err := parseJSONField(tagsJSON, &t.Tags); err != nil {
-		t.Tags = []string{}
-	}
-
-	return &t, nil
-}
