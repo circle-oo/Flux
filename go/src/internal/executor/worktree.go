@@ -3,6 +3,7 @@ package executor
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,23 +28,28 @@ type WorktreeTask struct {
 
 // NewWorktreeManager creates a new WorktreeManager
 func NewWorktreeManager(workspaceBase string) *WorktreeManager {
-	return &WorktreeManager{
+	wm := &WorktreeManager{
 		reposDir: filepath.Join(workspaceBase, "repos"),
 		treesDir: filepath.Join(workspaceBase, "trees"),
 	}
+	slog.Debug("worktree manager created", "repos_dir", wm.reposDir, "trees_dir", wm.treesDir)
+	return wm
 }
 
 // EnsureBareRepo ensures a bare repository exists and is up to date
 func (wm *WorktreeManager) EnsureBareRepo(repoURL, projectName string) error {
+	slog.Debug("ensuring bare repo", "repo_url", repoURL, "project", projectName)
 	bareDir := filepath.Join(wm.reposDir, projectName+".git")
 
 	// Check if bare repo exists
 	if _, err := os.Stat(bareDir); err == nil {
 		// Repository exists, fetch updates
+		slog.Debug("fetching updates for bare repo", "project", projectName)
 		cmd := exec.Command("git", "-C", bareDir, "fetch", "--all")
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to fetch repo: %w: %s", err, output)
 		}
+		slog.Info("bare repo ready", "project", projectName)
 		return nil
 	}
 
@@ -52,16 +58,19 @@ func (wm *WorktreeManager) EnsureBareRepo(repoURL, projectName string) error {
 		return fmt.Errorf("failed to create repos directory: %w", err)
 	}
 
+	slog.Info("cloning bare repo", "repo_url", repoURL, "project", projectName)
 	cmd := exec.Command("git", "clone", "--bare", repoURL, bareDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to clone bare repo: %w: %s", err, output)
 	}
 
+	slog.Info("bare repo ready", "project", projectName)
 	return nil
 }
 
 // CreateWorktree creates a new worktree for a task
 func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreePath string, branchName string, err error) {
+	slog.Info("creating worktree", "project", projectName, "task_id", taskID, "branch", fmt.Sprintf("task/%s", taskID[:8]))
 	bareDir := filepath.Join(wm.reposDir, projectName+".git")
 	branchName = fmt.Sprintf("task/%s", taskID[:8])
 	worktreePath = filepath.Join(wm.treesDir, fmt.Sprintf("%s--task-%s", projectName, taskID[:8]))
@@ -76,6 +85,7 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("failed to create worktree: %w: %s", err, output)
 	}
+	slog.Debug("worktree directory created", "path", worktreePath)
 
 	// Setup Claude configuration
 	if err := setupClaudeSettings(worktreePath); err != nil {
@@ -85,12 +95,15 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 	if err := setupClaudeMD(worktreePath, projectName); err != nil {
 		return "", "", fmt.Errorf("failed to setup CLAUDE.md: %w", err)
 	}
+	slog.Debug("claude settings configured", "path", worktreePath)
 
+	slog.Info("worktree ready", "project", projectName, "branch", branchName, "path", worktreePath)
 	return worktreePath, branchName, nil
 }
 
 // FindByBranch finds a worktree by its branch name
 func (wm *WorktreeManager) FindByBranch(projectName, branchName string) (string, error) {
+	slog.Debug("searching for worktree by branch", "project", projectName, "branch", branchName)
 	bareDir := filepath.Join(wm.reposDir, projectName+".git")
 
 	cmd := exec.Command("git", "-C", bareDir, "worktree", "list", "--porcelain")
@@ -121,6 +134,7 @@ func (wm *WorktreeManager) FindByBranch(projectName, branchName string) (string,
 		} else if strings.HasPrefix(line, "branch ") {
 			branch := strings.TrimPrefix(line, "branch refs/heads/")
 			if branch == branchName && currentWorktree != "" {
+				slog.Debug("worktree found", "branch", branchName, "path", currentWorktree)
 				return currentWorktree, nil
 			}
 		}
@@ -131,6 +145,7 @@ func (wm *WorktreeManager) FindByBranch(projectName, branchName string) (string,
 
 // CleanupWorktree removes a worktree
 func (wm *WorktreeManager) CleanupWorktree(projectName, worktreePath string) error {
+	slog.Info("cleaning up worktree", "project", projectName, "path", worktreePath)
 	bareDir := filepath.Join(wm.reposDir, projectName+".git")
 
 	cmd := exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", worktreePath)
@@ -138,14 +153,17 @@ func (wm *WorktreeManager) CleanupWorktree(projectName, worktreePath string) err
 		return fmt.Errorf("failed to remove worktree: %w: %s", err, output)
 	}
 
+	slog.Info("worktree cleaned up", "project", projectName)
 	return nil
 }
 
 // RunCleanup performs cleanup of worktrees based on task states
 func (wm *WorktreeManager) RunCleanup(tasks []WorktreeTask) error {
+	slog.Info("running worktree cleanup", "task_count", len(tasks))
 	now := time.Now()
 
 	for _, task := range tasks {
+		slog.Debug("evaluating task for cleanup", "task_id", task.TaskID, "status", task.Status, "pr_status", task.PRStatus)
 		shouldCleanup := false
 
 		switch task.Status {
@@ -181,6 +199,7 @@ func (wm *WorktreeManager) RunCleanup(tasks []WorktreeTask) error {
 		}
 	}
 
+	slog.Info("worktree cleanup complete")
 	return nil
 }
 

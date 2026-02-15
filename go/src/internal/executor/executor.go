@@ -42,7 +42,7 @@ type sensitiveFile struct {
 
 // NewExecutor creates a new Executor pod.
 func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord) *Executor {
-	return &Executor{
+	e := &Executor{
 		id:       id,
 		config:   cfg,
 		claude:   NewClaudeCodeRunner(&cfg.Executor),
@@ -52,6 +52,8 @@ func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord) *Exec
 		notifier: discord,
 		stopCh:   make(chan struct{}),
 	}
+	slog.Debug("executor created", "id", id, "manager_url", fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port))
+	return e
 }
 
 // Run is the main execution loop. It polls for tasks and executes them.
@@ -74,6 +76,7 @@ func (e *Executor) Run(ctx context.Context) {
 		case <-e.stopCh:
 			return
 		default:
+			slog.Debug("executor polling for tasks", "id", e.id)
 			e.executeOnce(ctx)
 			time.Sleep(5 * time.Second)
 		}
@@ -87,6 +90,8 @@ func (e *Executor) Stop() {
 
 // executeOnce runs one iteration of the task execution pipeline.
 func (e *Executor) executeOnce(ctx context.Context) {
+	slog.Debug("polling for next task", "executor_id", e.id)
+
 	// 1. Request next task
 	task, err := e.manager.NextTask(e.id, "executor")
 	if err != nil {
@@ -94,6 +99,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		return
 	}
 	if task == nil {
+		slog.Debug("no task available, sleeping", "executor_id", e.id, "sleep_duration", "30s")
 		time.Sleep(30 * time.Second)
 		return
 	}
@@ -107,9 +113,11 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		model = "sonnet" // fallback
 	}
 	task.Model = model
+	slog.Info("model assigned", "task_id", task.ID, "model", model)
 
 	// 3. Build system prompt
 	systemPrompt := e.buildSystemPrompt(task)
+	slog.Debug("system prompt built", "task_id", task.ID, "prompt_length", len(systemPrompt))
 
 	// 4. Get project info
 	project, err := e.manager.GetProject(task.ProjectID)
@@ -118,6 +126,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("failed to get project: %v", err), 0, 0)
 		return
 	}
+	slog.Debug("project loaded", "task_id", task.ID, "project_id", project.ID, "project_name", project.Name)
 
 	// 5. Create or reuse worktree
 	var worktreePath string
@@ -129,6 +138,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("worktree not found: %v", err), 0, 0)
 			return
 		}
+		slog.Info("reusing existing worktree", "task_id", task.ID, "branch", task.BranchName, "path", worktreePath)
 	} else {
 		if err := e.worktree.EnsureBareRepo(project.RepoURL, project.Name); err != nil {
 			slog.Error("failed to ensure bare repo", "error", err)
@@ -141,16 +151,20 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("worktree create failed: %v", err), 0, 0)
 			return
 		}
+		slog.Info("created new worktree", "task_id", task.ID, "branch", task.BranchName, "path", worktreePath)
 	}
 
 	// 6. Build prompt
 	prompt := e.buildPrompt(task)
+	slog.Debug("execution prompt built", "task_id", task.ID, "prompt_length", len(prompt))
 
 	// Snapshot sensitive files before execution
 	preSnapshot := e.snapshotSensitiveFiles()
+	slog.Debug("sensitive files snapshot taken", "task_id", task.ID, "file_count", len(preSnapshot))
 
 	// 7. Execute Claude Code
 	e.executionStartTime = time.Now()
+	slog.Info("starting claude code execution", "task_id", task.ID, "model", model, "workdir", worktreePath)
 	result, err := e.claude.Run(ctx, ClaudeCodeOpts{
 		Prompt:       prompt,
 		WorkDir:      worktreePath,
@@ -162,6 +176,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("execution error: %v", err), 0, 0)
 		return
 	}
+	slog.Info("claude code execution completed", "task_id", task.ID, "duration", result.Duration, "exit_code", result.ExitCode, "tokens", result.TokensUsed, "cost_usd", result.CostUSD)
 
 	// 8. Check rate limit
 	if IsRateLimited(result.ExitCode, result.Stderr) {
@@ -178,9 +193,11 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("integrity violation: %v", err), result.TokensUsed, result.CostUSD)
 		return
 	}
+	slog.Debug("worktree integrity verified", "task_id", task.ID)
 
 	// 10. Check subtask decomposition (Phase 2A stub)
 	_ = e.parseDecomposition(result.Stdout)
+	slog.Debug("decomposition check complete", "task_id", task.ID)
 
 	// 11. QA: run tests if required
 	if task.RequiresTest() {
@@ -191,12 +208,14 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, "tests failed", result.TokensUsed, result.CostUSD)
 			return
 		}
+		slog.Info("tests passed", "task_id", task.ID)
 	}
 
 	// 12. Commit and get diff
 	diffLines, filesChanged := e.commitAndGetDiff(worktreePath, task)
 	task.DiffLines = diffLines
 	task.FilesChanged = filesChanged
+	slog.Info("changes committed and pushed", "task_id", task.ID, "diff_lines", diffLines, "files_changed", filesChanged)
 
 	// Check guardrails
 	if ExceedsGuardrails(&e.config.Executor, diffLines, filesChanged) {
@@ -225,8 +244,10 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 	task.PRUrl = prURL
 	task.PRStatus = "OPEN"
+	slog.Info("pull request created", "task_id", task.ID, "pr_url", prURL, "pr_number", prNumber)
 
 	// 14. Auto-merge decision
+	slog.Info("auto-merge decision", "task_id", task.ID, "should_merge", ShouldAutoMerge(task, diffLines, filesChanged), "diff_lines", diffLines, "files_changed", filesChanged)
 	if ShouldAutoMerge(task, diffLines, filesChanged) {
 		if mergeErr := e.github.MergePR(owner, repo, prNumber); mergeErr != nil {
 			slog.Error("auto-merge failed", "task_id", task.ID, "pr", prNumber, "error", mergeErr)
@@ -249,6 +270,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 
 // buildSystemPrompt creates a system prompt with the current goal context.
 func (e *Executor) buildSystemPrompt(task *models.Task) string {
+	slog.Debug("building system prompt", "task_id", task.ID, "has_goal", task.GoalID != "")
 	var sb strings.Builder
 	sb.WriteString("You are an autonomous coding agent working on a specific task.\n")
 	sb.WriteString("Focus exclusively on the task described in the prompt.\n")
@@ -266,6 +288,7 @@ func (e *Executor) buildSystemPrompt(task *models.Task) string {
 
 // buildPrompt creates the execution prompt for Claude Code.
 func (e *Executor) buildPrompt(task *models.Task) string {
+	slog.Debug("building execution prompt", "task_id", task.ID, "has_custom_prompt", task.Prompt != "")
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# Task: %s\n\n", task.Title))
 	sb.WriteString(fmt.Sprintf("## Description\n%s\n\n", task.Description))
@@ -293,6 +316,7 @@ func (e *Executor) snapshotSensitiveFiles() []sensitiveFile {
 		filepath.Join(home, ".zshrc"),
 		filepath.Join(home, ".bashrc"),
 	}
+	slog.Debug("snapshotting sensitive files", "count", len(paths))
 
 	snapshots := make([]sensitiveFile, 0, len(paths))
 	for _, p := range paths {
@@ -309,6 +333,7 @@ func (e *Executor) snapshotSensitiveFiles() []sensitiveFile {
 
 // verifyWorktreeIntegrity checks that sensitive files were not modified during execution.
 func (e *Executor) verifyWorktreeIntegrity(preSnapshot []sensitiveFile) error {
+	slog.Debug("verifying worktree integrity", "file_count", len(preSnapshot))
 	for _, pre := range preSnapshot {
 		info, err := os.Stat(pre.path)
 		if pre.exists {
@@ -357,6 +382,7 @@ func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
 
 	for _, tc := range testCmds {
 		detectPath := filepath.Join(worktreePath, tc.detectFile)
+		slog.Debug("checking test framework", "file", tc.detectFile, "worktree", worktreePath)
 		if _, err := os.Stat(detectPath); err == nil {
 			slog.Info("running tests", "framework", tc.command, "worktree", worktreePath)
 			cmd := exec.Command(tc.command, tc.args...)
@@ -379,6 +405,7 @@ func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
 // commitAndGetDiff stages, commits, pushes, and returns diff stats.
 func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (diffLines, filesChanged int) {
 	// git add -A
+	slog.Debug("staging changes", "worktree", worktreePath)
 	addCmd := exec.Command("git", "add", "-A")
 	addCmd.Dir = worktreePath
 	if output, err := addCmd.CombinedOutput(); err != nil {
@@ -404,6 +431,7 @@ func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (dif
 		slog.Error("git commit failed", "output", string(output), "error", err)
 		return 0, 0
 	}
+	slog.Info("committed changes", "task_id", task.ID, "message_prefix", "[flux] "+task.Title)
 
 	// git diff --stat HEAD~1
 	diffCmd := exec.Command("git", "diff", "--stat", "HEAD~1")
@@ -416,10 +444,13 @@ func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (dif
 	}
 
 	// git push
+	slog.Debug("pushing to remote", "branch", task.BranchName)
 	pushCmd := exec.Command("git", "push", "-u", "origin", task.BranchName)
 	pushCmd.Dir = worktreePath
 	if output, err := pushCmd.CombinedOutput(); err != nil {
 		slog.Error("git push failed", "output", string(output), "error", err)
+	} else {
+		slog.Info("pushed to remote", "branch", task.BranchName)
 	}
 
 	return diffLines, filesChanged

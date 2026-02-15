@@ -11,6 +11,7 @@ import (
 
 // RecordTaskCompletion records a completed task to the vault.
 func RecordTaskCompletion(vaultWriter *vault.Writer, task *models.Task, result *ClaudeCodeResult) error {
+	slog.Debug("building task summary for vault", "task_id", task.ID)
 	data := buildTaskSummaryData(task, result)
 	markdown := vault.TaskSummaryTemplate(data)
 

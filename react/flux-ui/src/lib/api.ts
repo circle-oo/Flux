@@ -183,6 +183,10 @@ class APIClient {
     await this.fetch(`/api/tasks/${id}/cancel`, { method: 'POST' })
   }
 
+  async retryTask(id: string): Promise<Task> {
+    return this.fetch(`/api/tasks/${id}/retry`, { method: 'POST' })
+  }
+
   // Projects
   async listProjects(): Promise<Project[]> {
     const data = await this.fetch<{ projects: Project[] }>('/api/projects')
@@ -216,6 +220,16 @@ class APIClient {
     return this.fetch(`/api/projects/${id}/reject`, {
       method: 'POST',
     })
+  }
+
+  // Logs
+  async getRecentLogs(): Promise<
+    { time: string; level: string; msg: string; attrs: Record<string, unknown> }[]
+  > {
+    const data = await this.fetch<{
+      logs: { time: string; level: string; msg: string; attrs: Record<string, unknown> }[]
+    }>('/api/logs/recent')
+    return data.logs || []
   }
 }
 

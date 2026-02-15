@@ -12,6 +12,7 @@ export default function Tasks() {
     fetchTasks,
     createTask,
     cancelTask,
+    retryTask,
   } = useTaskStore()
   const { projects, fetchProjects } = useProjectStore()
   const [showForm, setShowForm] = useState(false)
@@ -59,6 +60,16 @@ export default function Tasks() {
         await cancelTask(id)
       } catch (error) {
         console.error('Failed to cancel task:', error)
+      }
+    }
+  }
+
+  const handleRetry = async (id: string, title: string) => {
+    if (confirm(`Retry task: ${title}?`)) {
+      try {
+        await retryTask(id)
+      } catch (error) {
+        console.error('Failed to retry task:', error)
       }
     }
   }
@@ -292,14 +303,24 @@ export default function Tasks() {
                       </div>
                     )}
                   </div>
-                  {(task.status === 'READY' || task.status === 'RUNNING') && (
-                    <button
-                      onClick={() => handleCancel(task.id, task.title)}
-                      className="btn-danger ml-4"
-                    >
-                      Cancel
-                    </button>
-                  )}
+                  <div className="flex gap-2 ml-4">
+                    {(task.status === 'FAILED' || task.status === 'RETRY') && (
+                      <button
+                        onClick={() => handleRetry(task.id, task.title)}
+                        className="px-3 py-1.5 rounded text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                      >
+                        Retry
+                      </button>
+                    )}
+                    {(task.status === 'READY' || task.status === 'RUNNING') && (
+                      <button
+                        onClick={() => handleCancel(task.id, task.title)}
+                        className="btn-danger"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {task.error_log && (
                   <div className="mt-3 p-3 bg-red-900/30 border border-red-600 rounded text-sm text-red-200">

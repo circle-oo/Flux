@@ -89,6 +89,13 @@ func main() {
 	}
 	srv := server.NewServer(cfg, database, discord, webFS)
 
+	// 6b. Wrap logger with broadcast handler so logs stream to the Web UI
+	logBroadcast := server.NewLogBroadcastHandler(slog.Default().Handler(), srv.Hub())
+	broadcastLogger := slog.New(logBroadcast)
+	slog.SetDefault(broadcastLogger)
+	logger = broadcastLogger
+	srv.SetLogHandler(logBroadcast)
+
 	// 7. Send Discord notification
 	discord.Send(notifier.LevelInfo, "Flux initialized. Please set a Goal.")
 

@@ -31,6 +31,8 @@ func (s *Server) handleInternalNextTask(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	slog.Debug("internal API: next task requested", "pod_id", req.PodID, "pod_type", req.PodType)
+
 	// If manager not set, fall back to Phase 1 stub behavior
 	if mgr == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"task": nil})
@@ -42,6 +44,12 @@ func (s *Server) handleInternalNextTask(w http.ResponseWriter, r *http.Request) 
 		slog.Error("failed to pop next task", "pod_type", req.PodType, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
+	}
+
+	if task != nil {
+		slog.Info("internal API: task dispatched", "pod_id", req.PodID, "task_id", task.ID, "task_title", task.Title)
+	} else {
+		slog.Debug("internal API: no task available", "pod_id", req.PodID, "pod_type", req.PodType)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"task": task})
@@ -63,6 +71,8 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+
+	slog.Info("internal API: task done reported", "task_id", id, "status", req.Status, "tokens_used", req.TokensUsed, "cost_usd", req.CostUSD)
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
@@ -106,6 +116,9 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	slog.Info("internal API: task updated successfully", "task_id", id, "status", task.Status)
+
+	slog.Debug("internal API: broadcasting task update", "task_id", id)
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -125,6 +138,8 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+
+	slog.Info("internal API: subtask creation requested", "parent_id", req.ParentID, "count", len(req.Subtasks))
 
 	if req.ParentID == "" {
 		writeError(w, http.StatusBadRequest, "parent_id is required")
@@ -174,8 +189,11 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
+		slog.Info("internal API: subtask created", "parent_id", parent.ID, "subtask_id", task.ID, "title", sub.Title)
 		created = append(created, task)
 	}
+
+	slog.Info("internal API: all subtasks created", "parent_id", req.ParentID, "total", len(created))
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"tasks": created})
 }
@@ -185,12 +203,16 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("task_id")
 
+	slog.Debug("internal API: model query", "task_id", taskID)
+
 	// If manager available, use task.NeedsOpus() logic
 	if mgr != nil {
 		task, err := mgr.GetTask(taskID)
 		if err != nil {
 			slog.Error("failed to get task", "id", taskID, "error", err)
-			writeJSON(w, http.StatusOK, map[string]string{"model": "sonnet"})
+			model := "sonnet"
+			slog.Info("internal API: model assigned", "task_id", taskID, "model", model)
+			writeJSON(w, http.StatusOK, map[string]string{"model": model})
 			return
 		}
 
@@ -198,10 +220,13 @@ func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) 
 		if task.NeedsOpus() {
 			model = "opus"
 		}
+		slog.Info("internal API: model assigned", "task_id", taskID, "model", model)
 		writeJSON(w, http.StatusOK, map[string]string{"model": model})
 		return
 	}
 
 	// Fallback: always sonnet
-	writeJSON(w, http.StatusOK, map[string]string{"model": "sonnet"})
+	model := "sonnet"
+	slog.Info("internal API: model assigned", "task_id", taskID, "model", model)
+	writeJSON(w, http.StatusOK, map[string]string{"model": model})
 }
