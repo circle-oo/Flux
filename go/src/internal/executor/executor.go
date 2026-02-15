@@ -3,6 +3,7 @@ package executor
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -115,16 +116,16 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 	task.Model = model
 
-	// 3. Build system prompt
-	systemPrompt := e.buildSystemPrompt(task)
-
-	// 4. Get project info
+	// 3. Get project info (needed for system prompt and worktree)
 	project, err := e.manager.GetProject(task.ProjectID)
 	if err != nil {
 		slog.Error("failed to get project", "task_id", task.ID, "project_id", task.ProjectID, "error", err)
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("failed to get project: %v", err), 0, 0)
 		return
 	}
+
+	// 4. Build system prompt (with project context)
+	systemPrompt := e.buildSystemPrompt(task, project.Name, "", "")
 
 	// 5. Create or reuse worktree
 	var worktreePath string
@@ -163,8 +164,8 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		}
 	}
 
-	// 6. Build autopilot prompt (includes triage analysis for context)
-	prompt := BuildAutopilotPrompt(task)
+	// 6. Build autopilot prompt (includes triage analysis and project context)
+	prompt := BuildAutopilotPrompt(task, project.Name)
 
 	// Snapshot sensitive files before execution
 	preSnapshot := e.snapshotSensitiveFiles()
@@ -225,9 +226,20 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 
 	// 12. Commit and get diff
-	diffLines, filesChanged := e.commitAndGetDiff(worktreePath, task)
+	diffLines, filesChanged, commitErr := e.commitAndGetDiff(worktreePath, task)
 	task.DiffLines = diffLines
 	task.FilesChanged = filesChanged
+
+	if commitErr != nil {
+		if errors.Is(commitErr, ErrNoChanges) {
+			slog.Info("no changes produced by Claude Code, completing without PR", "task_id", task.ID)
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD)
+			return
+		}
+		slog.Error("commit failed", "task_id", task.ID, "error", commitErr)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("git failed: %v", commitErr), result.TokensUsed, result.CostUSD)
+		return
+	}
 
 	// Check guardrails
 	if ExceedsGuardrails(&e.config.Executor, diffLines, filesChanged) {
@@ -313,11 +325,14 @@ func (e *Executor) executeOnce(ctx context.Context) {
 }
 
 // buildSystemPrompt creates a system prompt with the current goal context.
-func (e *Executor) buildSystemPrompt(task *models.Task) string {
+func (e *Executor) buildSystemPrompt(task *models.Task, projectName, goalTitle, goalDesc string) string {
 	result, err := prompts.Render("system.txt", prompts.SystemPromptData{
-		GoalID:   task.GoalID,
-		TaskType: task.Type,
-		Priority: task.Priority,
+		ProjectName:     projectName,
+		GoalID:          task.GoalID,
+		GoalTitle:       goalTitle,
+		GoalDescription: goalDesc,
+		TaskType:        task.Type,
+		Priority:        task.Priority,
 	})
 	if err != nil {
 		slog.Warn("failed to render system prompt template", "error", err)
@@ -513,23 +528,26 @@ func (e *Executor) registerBuildFailureTask(failedTask *models.Task, buildOutput
 		fmt.Sprintf("Build failed for task %s — auto-registered bugfix task: %s", failedTask.ID, bugfixTask.Title))
 }
 
-// commitAndGetDiff stages, commits, pushes, and returns diff stats.
-func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (diffLines, filesChanged int) {
+// ErrNoChanges indicates Claude Code made no code changes.
+var ErrNoChanges = fmt.Errorf("no changes to commit")
+
+// commitAndGetDiff stages, commits, and returns diff stats.
+// Returns ErrNoChanges if there's nothing to commit.
+// Does NOT push — pushing happens after rebase in the caller.
+func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (diffLines, filesChanged int, err error) {
 	// git add -A
 	addCmd := exec.Command("git", "add", "-A")
 	addCmd.Dir = worktreePath
-	if output, err := addCmd.CombinedOutput(); err != nil {
-		slog.Error("git add failed", "output", string(output), "error", err)
-		return 0, 0
+	if output, addErr := addCmd.CombinedOutput(); addErr != nil {
+		return 0, 0, fmt.Errorf("git add failed: %s", string(output))
 	}
 
 	// Check if there are changes to commit
 	statusCmd := exec.Command("git", "status", "--porcelain")
 	statusCmd.Dir = worktreePath
-	statusOut, err := statusCmd.Output()
-	if err != nil || len(strings.TrimSpace(string(statusOut))) == 0 {
-		slog.Info("no changes to commit", "worktree", worktreePath)
-		return 0, 0
+	statusOut, statusErr := statusCmd.Output()
+	if statusErr != nil || len(strings.TrimSpace(string(statusOut))) == 0 {
+		return 0, 0, ErrNoChanges
 	}
 
 	// git commit
@@ -537,29 +555,21 @@ func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (dif
 		task.Title, task.ID, task.Type, task.Priority)
 	commitCmd := exec.Command("git", "commit", "-m", commitMsg)
 	commitCmd.Dir = worktreePath
-	if output, err := commitCmd.CombinedOutput(); err != nil {
-		slog.Error("git commit failed", "output", string(output), "error", err)
-		return 0, 0
+	if output, commitErr := commitCmd.CombinedOutput(); commitErr != nil {
+		return 0, 0, fmt.Errorf("git commit failed: %s", string(output))
 	}
 
 	// git diff --stat HEAD~1
 	diffCmd := exec.Command("git", "diff", "--stat", "HEAD~1")
 	diffCmd.Dir = worktreePath
-	diffOut, err := diffCmd.Output()
-	if err != nil {
-		slog.Error("git diff --stat failed", "error", err)
+	diffOut, diffErr := diffCmd.Output()
+	if diffErr != nil {
+		slog.Error("git diff --stat failed", "error", diffErr)
 	} else {
 		diffLines, filesChanged = parseDiffStat(string(diffOut))
 	}
 
-	// git push
-	pushCmd := exec.Command("git", "push", "-u", "origin", task.BranchName)
-	pushCmd.Dir = worktreePath
-	if output, err := pushCmd.CombinedOutput(); err != nil {
-		slog.Error("git push failed", "output", string(output), "error", err)
-	}
-
-	return diffLines, filesChanged
+	return diffLines, filesChanged, nil
 }
 
 // parseDiffStat parses the summary line of `git diff --stat` output.

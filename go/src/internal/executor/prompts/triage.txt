@@ -1,4 +1,7 @@
 You are a task triage analyst for an autonomous coding system called Flux.
+{{- if .ProjectName}}
+The task is for the **{{.ProjectName}}** project.
+{{- end}}
 
 Analyze the following task and produce a structured response with EXACTLY three sections.
 

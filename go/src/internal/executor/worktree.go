@@ -125,21 +125,29 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 		_ = pruneCmd.Run()
 	}
 
+	// Fetch latest refs to ensure we branch from the newest main
+	fetchCmd := exec.Command("git", "-C", bareDir, "fetch", "--all", "--prune")
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		slog.Warn("pre-branch fetch failed", "error", err, "output", string(output))
+	}
+
 	// Check if branch already exists (from a previous failed attempt / retry)
 	checkCmd := exec.Command("git", "-C", bareDir, "rev-parse", "--verify", "refs/heads/"+branchName)
 	var cmd *exec.Cmd
 	if checkCmd.Run() == nil {
-		// Branch exists — create worktree using existing branch
-		slog.Info("reusing existing branch for retry", "branch", branchName)
-		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", worktreePath, branchName)
+		// Branch exists — delete it and recreate from latest main for clean retry
+		slog.Info("deleting stale branch for clean retry", "branch", branchName)
+		delCmd := exec.Command("git", "-C", bareDir, "branch", "-D", branchName)
+		_ = delCmd.Run()
+		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "origin/main")
 	} else {
-		// Branch doesn't exist — create new branch from main
-		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "main")
+		// Branch doesn't exist — create new branch from latest main
+		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "origin/main")
 	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("failed to create worktree: %w: %s", err, output)
 	}
-	slog.Debug("worktree directory created", "path", worktreePath)
+	slog.Debug("worktree directory created from latest origin/main", "path", worktreePath)
 
 	// Configure git user and token-based push URL in the worktree
 	if err := wm.configureWorktreeGit(worktreePath); err != nil {
@@ -315,20 +323,30 @@ func (wm *WorktreeManager) RebaseOnMain(worktreePath string) error {
 		return fmt.Errorf("failed to fetch main: %w: %s", err, output)
 	}
 
-	// Rebase onto origin/main
+	// Try rebase first (produces clean linear history)
 	rebaseCmd := exec.Command("git", "rebase", "origin/main")
 	rebaseCmd.Dir = worktreePath
 	output, err := rebaseCmd.CombinedOutput()
 	if err != nil {
-		// Check if it's a conflict
-		if strings.Contains(string(output), "CONFLICT") || strings.Contains(string(output), "conflict") {
-			// Abort the rebase
-			abortCmd := exec.Command("git", "rebase", "--abort")
-			abortCmd.Dir = worktreePath
-			_ = abortCmd.Run()
-			return fmt.Errorf("rebase conflict detected: %s", string(output))
+		// Abort the failed rebase
+		abortCmd := exec.Command("git", "rebase", "--abort")
+		abortCmd.Dir = worktreePath
+		_ = abortCmd.Run()
+
+		slog.Warn("rebase failed, trying merge as fallback", "error", err, "output", string(output))
+
+		// Fallback: try merge instead (handles more conflict scenarios)
+		mergeCmd := exec.Command("git", "merge", "origin/main", "--no-edit")
+		mergeCmd.Dir = worktreePath
+		mergeOutput, mergeErr := mergeCmd.CombinedOutput()
+		if mergeErr != nil {
+			// Merge also failed — abort and report
+			mergeAbortCmd := exec.Command("git", "merge", "--abort")
+			mergeAbortCmd.Dir = worktreePath
+			_ = mergeAbortCmd.Run()
+			return fmt.Errorf("conflict: both rebase and merge failed.\nRebase: %s\nMerge: %s", string(output), string(mergeOutput))
 		}
-		return fmt.Errorf("failed to rebase: %w: %s", err, output)
+		slog.Info("merged origin/main successfully (rebase had conflicts)")
 	}
 
 	return nil

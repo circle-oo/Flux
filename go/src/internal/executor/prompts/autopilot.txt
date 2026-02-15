@@ -1,4 +1,10 @@
 # Task: {{.Title}}
+{{- if .ProjectName}}
+**Project:** {{.ProjectName}}
+{{- end}}
+{{- if .TaskType}}
+**Type:** {{.TaskType}}
+{{- end}}
 
 ## Description
 {{.Description}}
@@ -15,18 +21,36 @@
 
 ## Execution Protocol
 
-Follow this protocol in order:
+Follow this protocol strictly in order:
 
-1. **ANALYZE** — Read the relevant files and understand the current codebase structure. Identify the files that need to change.
+### 1. ANALYZE
+- Read the relevant source files to understand the current codebase structure
+- Identify ALL files that need to change
+- Check for existing tests, conventions, and patterns to follow
+- If the task is unclear, look at related code for context
 
-2. **PLAN** — Before writing any code, state your plan: which files to modify/create, what approach to take, and any risks.
+### 2. PLAN
+Before writing any code, state your plan clearly:
+- Which files to modify or create
+- What approach to take and why
+- Dependencies or ordering between changes
+- Any risks or edge cases to watch for
 
-3. **IMPLEMENT** — Make the changes. Follow existing code conventions. Keep changes focused and minimal.
+### 3. IMPLEMENT
+- Make the changes following existing code conventions
+- Keep changes focused and minimal — do not refactor unrelated code
+- Write or update tests for any new functionality
+- Ensure imports and dependencies are correct
 
-4. **VERIFY** — Run tests and/or build commands to verify your changes work correctly.
+### 4. VERIFY
+- Run the build command to check compilation
+- Run tests to verify your changes work
+- Fix any errors before finishing
 
-## Requirements
-- Follow existing code conventions
+## Rules
+- Follow existing code conventions strictly
 - Write or update tests as needed
 - Keep changes focused and minimal
 - Do not modify files outside the scope of the task
+- Do NOT make git commits — the system handles commits automatically
+- Do NOT push to git — the system handles pushing
