@@ -5,9 +5,16 @@ import type {} from './projectStore' // available for future PR_STATUS handling
 
 type EventType = 'TASK_UPDATED' | 'GOAL_CHANGED' | 'PR_STATUS' | 'POD_STATUS'
 
+interface TaskUpdatedData { task_id: string; status: string }
+interface GoalChangedData { goal_id: string; status: string }
+interface PRStatusData { task_id: string; pr_status: string }
+interface PodStatusData { pod_id: string; status: string }
+
+type WSEventData = TaskUpdatedData | GoalChangedData | PRStatusData | PodStatusData
+
 interface WSEvent {
   type: EventType
-  data: any
+  data: WSEventData
 }
 
 interface WSState {
@@ -49,7 +56,9 @@ export const useWSStore = create<WSState>((set, get) => ({
       const ws = new WebSocket(wsURL)
 
       ws.onopen = () => {
-        console.log('WebSocket connected')
+        if (import.meta.env.DEV) {
+          console.log('WebSocket connected')
+        }
         reconnectAttempts = 0
         set({ connected: true, reconnecting: false, socket: ws })
       }
@@ -68,7 +77,9 @@ export const useWSStore = create<WSState>((set, get) => ({
       }
 
       ws.onclose = () => {
-        console.log('WebSocket disconnected')
+        if (import.meta.env.DEV) {
+          console.log('WebSocket disconnected')
+        }
         set({ connected: false, socket: null })
 
         // Attempt to reconnect with exponential backoff
@@ -81,7 +92,9 @@ export const useWSStore = create<WSState>((set, get) => ({
 
           set({ reconnecting: true })
           reconnectTimeout = setTimeout(() => {
-            console.log(`Reconnecting... (attempt ${reconnectAttempts})`)
+            if (import.meta.env.DEV) {
+              console.log(`Reconnecting... (attempt ${reconnectAttempts})`)
+            }
             get().connect()
           }, delay)
         } else {
@@ -124,7 +137,9 @@ export const useWSStore = create<WSState>((set, get) => ({
 }))
 
 function handleEvent(event: WSEvent) {
-  console.log('WebSocket event received:', event.type, event.data)
+  if (import.meta.env.DEV) {
+    console.log('WebSocket event received:', event.type, event.data)
+  }
 
   switch (event.type) {
     case 'TASK_UPDATED':
@@ -145,7 +160,9 @@ function handleEvent(event: WSEvent) {
 
     case 'POD_STATUS':
       // Pod status updates (Phase 2A)
-      console.log('Pod status update:', event.data)
+      if (import.meta.env.DEV) {
+        console.log('Pod status update:', event.data)
+      }
       break
 
     default:

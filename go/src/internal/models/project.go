@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 )
@@ -62,9 +63,12 @@ func (s *ProjectStore) Create(p *Project) error {
 		p.TechStack = []string{}
 	}
 
-	techStackJSON, _ := json.Marshal(p.TechStack)
+	techStackJSON, err := json.Marshal(p.TechStack)
+	if err != nil {
+		return fmt.Errorf("marshal tech_stack: %w", err)
+	}
 
-	_, err := s.DB.Exec(
+	_, err = s.DB.Exec(
 		`INSERT INTO projects (id, name, type, repo_url, description, vault_path,
 		 status, tech_stack, inspiration, goal_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -114,9 +118,12 @@ func (s *ProjectStore) List(status string) ([]*Project, error) {
 
 // Update modifies an existing project.
 func (s *ProjectStore) Update(p *Project) error {
-	techStackJSON, _ := json.Marshal(p.TechStack)
+	techStackJSON, err := json.Marshal(p.TechStack)
+	if err != nil {
+		return fmt.Errorf("marshal tech_stack: %w", err)
+	}
 
-	_, err := s.DB.Exec(
+	_, err = s.DB.Exec(
 		`UPDATE projects SET name = ?, type = ?, repo_url = ?, description = ?,
 		 vault_path = ?, status = ?, tech_stack = ?, inspiration = ?, goal_id = ?,
 		 updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
@@ -185,7 +192,9 @@ func scanProject(row *sql.Row) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(techStackJSON), &p.TechStack)
+	if err := json.Unmarshal([]byte(techStackJSON), &p.TechStack); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "tech_stack", "error", err)
+	}
 	if p.TechStack == nil {
 		p.TechStack = []string{}
 	}
@@ -203,7 +212,9 @@ func scanProjectRow(rows *sql.Rows) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(techStackJSON), &p.TechStack)
+	if err := json.Unmarshal([]byte(techStackJSON), &p.TechStack); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "tech_stack", "error", err)
+	}
 	if p.TechStack == nil {
 		p.TechStack = []string{}
 	}

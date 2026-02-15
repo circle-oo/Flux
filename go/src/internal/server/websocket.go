@@ -58,12 +58,19 @@ func (h *WebSocketHub) Run() {
 		case <-h.stop:
 			return
 		case event := <-h.broadcast:
+			data, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+
 			h.mu.RLock()
+			clients := make([]*wsClient, 0, len(h.clients))
 			for client := range h.clients {
-				data, err := json.Marshal(event)
-				if err != nil {
-					continue
-				}
+				clients = append(clients, client)
+			}
+			h.mu.RUnlock()
+
+			for _, client := range clients {
 				ctx, cancel := context.WithTimeout(client.ctx, 5*time.Second)
 				err = client.conn.Write(ctx, websocket.MessageText, data)
 				cancel()
@@ -72,7 +79,6 @@ func (h *WebSocketHub) Run() {
 					go h.removeClient(client)
 				}
 			}
-			h.mu.RUnlock()
 		}
 	}
 }

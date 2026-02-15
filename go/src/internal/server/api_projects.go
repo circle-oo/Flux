@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"log/slog"
 	"net/http"
 
 	"github.com/circle-oo/flux/internal/models"
@@ -18,7 +19,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		Inspiration string   `json:"inspiration"`
 		GoalID      string   `json:"goal_id"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -44,7 +45,8 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.projects.Create(project); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to create project", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -57,7 +59,8 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 
 	projects, err := s.projects.List(status)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to list projects", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	if projects == nil {
@@ -76,7 +79,72 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to get project", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, project)
+}
+
+// handleUpdateProject handles PATCH /api/projects/{id}
+func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	project, err := s.projects.GetByID(id)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if err != nil {
+		slog.Error("failed to get project", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	var req struct {
+		Name        *string  `json:"name"`
+		Type        *string  `json:"type"`
+		RepoURL     *string  `json:"repo_url"`
+		Description *string  `json:"description"`
+		TechStack   []string `json:"tech_stack"`
+		Inspiration *string  `json:"inspiration"`
+		GoalID      *string  `json:"goal_id"`
+		Status      *string  `json:"status"`
+	}
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Name != nil {
+		project.Name = *req.Name
+	}
+	if req.Type != nil {
+		project.Type = *req.Type
+	}
+	if req.RepoURL != nil {
+		project.RepoURL = *req.RepoURL
+	}
+	if req.Description != nil {
+		project.Description = *req.Description
+	}
+	if req.TechStack != nil {
+		project.TechStack = req.TechStack
+	}
+	if req.Inspiration != nil {
+		project.Inspiration = *req.Inspiration
+	}
+	if req.GoalID != nil {
+		project.GoalID = *req.GoalID
+	}
+	if req.Status != nil {
+		project.Status = *req.Status
+	}
+
+	if err := s.projects.Update(project); err != nil {
+		slog.Error("failed to update project", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -94,7 +162,8 @@ func (s *Server) handleApproveProject(w http.ResponseWriter, r *http.Request) {
 
 	project, err := s.projects.GetByID(id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to get project after approval", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -112,7 +181,8 @@ func (s *Server) handleRejectProject(w http.ResponseWriter, r *http.Request) {
 
 	project, err := s.projects.GetByID(id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to get project after rejection", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 

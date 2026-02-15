@@ -2,6 +2,7 @@ package server
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -130,7 +131,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -181,21 +182,13 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// extractIP gets the client IP from the request.
+// extractIP gets the client IP from the request using only RemoteAddr.
+// X-Forwarded-For is not trusted since Flux is designed for local/Tailscale use.
 func extractIP(r *http.Request) (string, string, error) {
-	// Try X-Forwarded-For first, then fall back to RemoteAddr
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return xff, "", nil
+	host, port, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		// Fall back to RemoteAddr directly if SplitHostPort fails
+		return r.RemoteAddr, "", nil
 	}
-	host, port, err := splitHostPort(r.RemoteAddr)
-	return host, port, err
-}
-
-func splitHostPort(addr string) (string, string, error) {
-	for i := len(addr) - 1; i >= 0; i-- {
-		if addr[i] == ':' {
-			return addr[:i], addr[i+1:], nil
-		}
-	}
-	return addr, "", nil
+	return host, port, nil
 }

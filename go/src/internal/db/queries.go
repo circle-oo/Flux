@@ -22,8 +22,8 @@ func ScanRows(rows *sql.Rows, scanFn func(*sql.Rows) error) error {
 	return rows.Err()
 }
 
-// Exists checks if a row exists matching the given condition.
-func Exists(db *sql.DB, table, condition string, args ...interface{}) (bool, error) {
+// exists checks if a row exists matching the given condition.
+func exists(db *sql.DB, table, condition string, args ...interface{}) (bool, error) {
 	query := fmt.Sprintf("SELECT 1 FROM %s WHERE %s LIMIT 1", table, condition)
 	var n int
 	err := db.QueryRow(query, args...).Scan(&n)
@@ -36,9 +36,9 @@ func Exists(db *sql.DB, table, condition string, args ...interface{}) (bool, err
 	return true, nil
 }
 
-// BuildUpdateSQL builds a SET clause from a map of column->value pairs.
+// buildUpdateSQL builds a SET clause from a map of column->value pairs.
 // Returns the SET clause string and a slice of args.
-func BuildUpdateSQL(table string, id string, fields map[string]interface{}) (string, []interface{}) {
+func buildUpdateSQL(table string, id string, fields map[string]interface{}) (string, []interface{}) {
 	setClauses := make([]string, 0, len(fields))
 	args := make([]interface{}, 0, len(fields)+1)
 

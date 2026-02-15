@@ -18,7 +18,7 @@ interface ProjectState {
   rejectProject: (id: string) => Promise<void>
 }
 
-export const useProjectStore = create<ProjectState>((set, _get) => ({
+export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
   isLoading: false,
   error: null,

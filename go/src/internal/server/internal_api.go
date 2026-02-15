@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/circle-oo/flux/internal/models"
@@ -26,7 +27,7 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 		TokensUsed int    `json:"tokens_used"`
 		CostUSD   float64 `json:"cost_usd"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -50,7 +51,8 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 	task.CostUSD = req.CostUSD
 
 	if err := s.tasks.Update(task); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to update task", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -69,7 +71,7 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 			Description string `json:"description"`
 		} `json:"subtasks"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -95,7 +97,8 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 	// Validate count: max subtasks per parent
 	existingCount, err := s.tasks.CountByParent(req.ParentID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to count subtasks", "parent_id", req.ParentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	if existingCount+len(req.Subtasks) > s.config.Subtask.MaxPerTask {
@@ -117,7 +120,8 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 			GoalID:    parent.GoalID,
 		}
 		if err := s.tasks.Create(task); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			slog.Error("failed to create subtask", "parent_id", parent.ID, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		created = append(created, task)

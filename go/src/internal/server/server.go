@@ -101,6 +101,7 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle("POST /api/projects", s.authMiddleware(http.HandlerFunc(s.handleCreateProject)))
 	s.mux.Handle("GET /api/projects", s.authMiddleware(http.HandlerFunc(s.handleListProjects)))
 	s.mux.Handle("GET /api/projects/{id}", s.authMiddleware(http.HandlerFunc(s.handleGetProject)))
+	s.mux.Handle("PATCH /api/projects/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateProject)))
 	s.mux.Handle("POST /api/projects/{id}/approve", s.authMiddleware(http.HandlerFunc(s.handleApproveProject)))
 	s.mux.Handle("POST /api/projects/{id}/reject", s.authMiddleware(http.HandlerFunc(s.handleRejectProject)))
 
@@ -191,9 +192,11 @@ func writeError(w http.ResponseWriter, status int, message string) {
 }
 
 // readJSON decodes a JSON request body into v.
-func readJSON(r *http.Request, v interface{}) error {
+// Limits request body to 1MB to prevent abuse.
+func readJSON(w http.ResponseWriter, r *http.Request, v interface{}) error {
 	if r.Body == nil {
 		return fmt.Errorf("empty request body")
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 	return json.NewDecoder(r.Body).Decode(v)
 }

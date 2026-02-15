@@ -69,7 +69,7 @@ func CreateVaultDirs(vaultPath string) error {
 // RegisterSeedProjects inserts seed projects into the database if they don't already exist.
 func RegisterSeedProjects(database *sql.DB, projects []SeedProject) error {
 	for _, p := range projects {
-		exists, err := Exists(database, "projects", "name = ?", p.Name)
+		exists, err := exists(database, "projects", "name = ?", p.Name)
 		if err != nil {
 			return fmt.Errorf("check seed project %s: %w", p.Name, err)
 		}

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -210,8 +211,12 @@ func scanGoal(row *sql.Row) (*Goal, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(prioritiesJSON), &g.Priorities)
-	json.Unmarshal([]byte(metricsJSON), &g.Metrics)
+	if err := json.Unmarshal([]byte(prioritiesJSON), &g.Priorities); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "priorities", "error", err)
+	}
+	if err := json.Unmarshal([]byte(metricsJSON), &g.Metrics); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "metrics", "error", err)
+	}
 	if g.Priorities == nil {
 		g.Priorities = []string{}
 	}
@@ -231,8 +236,12 @@ func scanGoalRow(rows *sql.Rows) (*Goal, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(prioritiesJSON), &g.Priorities)
-	json.Unmarshal([]byte(metricsJSON), &g.Metrics)
+	if err := json.Unmarshal([]byte(prioritiesJSON), &g.Priorities); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "priorities", "error", err)
+	}
+	if err := json.Unmarshal([]byte(metricsJSON), &g.Metrics); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "metrics", "error", err)
+	}
 	if g.Priorities == nil {
 		g.Priorities = []string{}
 	}

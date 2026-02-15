@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -154,10 +155,16 @@ func (s *TaskStore) Create(t *Task) error {
 		t.Status = TaskReady
 	}
 
-	dependsOnJSON, _ := json.Marshal(t.DependsOn)
-	tagsJSON, _ := json.Marshal(t.Tags)
+	dependsOnJSON, err := json.Marshal(t.DependsOn)
+	if err != nil {
+		return fmt.Errorf("marshal depends_on: %w", err)
+	}
+	tagsJSON, err := json.Marshal(t.Tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
 
-	_, err := s.DB.Exec(
+	_, err = s.DB.Exec(
 		`INSERT INTO tasks (id, title, description, type, status, priority, source,
 		 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 		 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
@@ -241,10 +248,16 @@ func (s *TaskStore) List(f ListFilter) ([]*Task, error) {
 
 // Update modifies an existing task.
 func (s *TaskStore) Update(t *Task) error {
-	dependsOnJSON, _ := json.Marshal(t.DependsOn)
-	tagsJSON, _ := json.Marshal(t.Tags)
+	dependsOnJSON, err := json.Marshal(t.DependsOn)
+	if err != nil {
+		return fmt.Errorf("marshal depends_on: %w", err)
+	}
+	tagsJSON, err := json.Marshal(t.Tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
 
-	_, err := s.DB.Exec(
+	_, err = s.DB.Exec(
 		`UPDATE tasks SET title = ?, description = ?, type = ?, status = ?, priority = ?,
 		 source = ?, project_id = ?, parent_id = ?, depth = ?, alert_id = ?, goal_id = ?,
 		 depends_on = ?, tags = ?, prompt = ?, result = ?, error_log = ?, executor_id = ?,
@@ -316,8 +329,12 @@ func scanTask(row *sql.Row) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(dependsOnJSON), &t.DependsOn)
-	json.Unmarshal([]byte(tagsJSON), &t.Tags)
+	if err := json.Unmarshal([]byte(dependsOnJSON), &t.DependsOn); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "depends_on", "error", err)
+	}
+	if err := json.Unmarshal([]byte(tagsJSON), &t.Tags); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "tags", "error", err)
+	}
 	if t.DependsOn == nil {
 		t.DependsOn = []string{}
 	}
@@ -342,8 +359,12 @@ func scanTaskRow(rows *sql.Rows) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(dependsOnJSON), &t.DependsOn)
-	json.Unmarshal([]byte(tagsJSON), &t.Tags)
+	if err := json.Unmarshal([]byte(dependsOnJSON), &t.DependsOn); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "depends_on", "error", err)
+	}
+	if err := json.Unmarshal([]byte(tagsJSON), &t.Tags); err != nil {
+		slog.Warn("corrupt JSON in DB", "field", "tags", "error", err)
+	}
 	if t.DependsOn == nil {
 		t.DependsOn = []string{}
 	}

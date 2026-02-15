@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -22,7 +23,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Tags        []string `json:"tags"`
 		Prompt      string   `json:"prompt"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -56,7 +57,8 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.tasks.Create(task); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to create task", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -82,7 +84,8 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 
 	tasks, err := s.tasks.List(filter)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to list tasks", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	if tasks == nil {
@@ -101,7 +104,8 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to get task", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -118,7 +122,8 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to get task", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -134,7 +139,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		Tags        []string `json:"tags"`
 		Prompt      *string  `json:"prompt"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -171,7 +176,8 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.tasks.Update(task); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to update task", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -185,7 +191,8 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if err := s.tasks.Delete(id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to delete task", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -197,13 +204,15 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if err := s.tasks.Cancel(id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to cancel task", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to get task after cancel", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 

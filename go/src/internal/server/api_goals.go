@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"log/slog"
 	"net/http"
 
 	"github.com/circle-oo/flux/internal/models"
@@ -16,7 +17,7 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 		Metrics     []string `json:"metrics"`
 		Source      string   `json:"source"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -39,7 +40,8 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.goals.Create(goal); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to create goal", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -50,7 +52,8 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListGoals(w http.ResponseWriter, r *http.Request) {
 	goals, err := s.goals.List()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to list goals", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	if goals == nil {
@@ -63,7 +66,8 @@ func (s *Server) handleListGoals(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetCurrentGoal(w http.ResponseWriter, r *http.Request) {
 	goal, err := s.goals.GetCurrent()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to get current goal", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"goal": goal})
@@ -79,7 +83,8 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to get goal", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -90,7 +95,7 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 		Metrics     []string `json:"metrics"`
 		Status      *string  `json:"status"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -112,7 +117,8 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.goals.Update(goal); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to update goal", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -124,13 +130,15 @@ func (s *Server) handleActivateGoal(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if err := s.goals.Activate(id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to activate goal", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	goal, err := s.goals.GetByID(id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Error("failed to get goal after activation", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 

@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"flag"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/circle-oo/flux/internal/config"
@@ -88,7 +91,7 @@ func main() {
 	go func() {
 		if err := srv.Start(); err != nil {
 			// http.ErrServerClosed is expected on graceful shutdown
-			if err.Error() != "http: Server closed" {
+			if !errors.Is(err, http.ErrServerClosed) {
 				logger.Error("HTTP server error", "error", err)
 				os.Exit(1)
 			}
@@ -131,7 +134,7 @@ func setupLogger(lc config.LoggingConfig) (*slog.Logger, error) {
 	opts := &slog.HandlerOptions{Level: level}
 
 	if lc.File != "" {
-		if err := os.MkdirAll("logs", 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(lc.File), 0755); err != nil {
 			return nil, fmt.Errorf("create logs directory: %w", err)
 		}
 		f, err := os.OpenFile(lc.File, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
