@@ -335,6 +335,92 @@ func TestFetchPRComments(t *testing.T) {
 	})
 }
 
+func TestPostComment(t *testing.T) {
+	t.Run("successful comment", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			if !strings.Contains(r.URL.Path, "/issues/42/comments") {
+				t.Errorf("expected path to contain /issues/42/comments, got %s", r.URL.Path)
+			}
+			if r.Header.Get("Authorization") != "Bearer test-token" {
+				t.Errorf("expected Authorization header with Bearer token")
+			}
+
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode body: %v", err)
+			}
+			if body["body"] != "test comment" {
+				t.Errorf("expected body 'test comment', got %s", body["body"])
+			}
+
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":   1,
+				"body": "test comment",
+			})
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:    "test-token",
+			username: "testuser",
+			http:     &http.Client{Timeout: 5 * time.Second},
+		}
+
+		err := client.postCommentWithBaseURL(server.URL, "owner", "repo", 42, "test comment")
+		if err != nil {
+			t.Fatalf("PostComment failed: %v", err)
+		}
+	})
+
+	t.Run("handles 403 error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"message": "Resource not accessible by integration"}`))
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:    "test-token",
+			username: "testuser",
+			http:     &http.Client{Timeout: 5 * time.Second},
+		}
+
+		err := client.postCommentWithBaseURL(server.URL, "owner", "repo", 42, "test comment")
+		if err == nil {
+			t.Fatal("expected error for 403 response")
+		}
+		if !strings.Contains(err.Error(), "403") {
+			t.Errorf("expected error to mention 403, got: %v", err)
+		}
+	})
+
+	t.Run("handles 404 error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"message": "Not Found"}`))
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:    "test-token",
+			username: "testuser",
+			http:     &http.Client{Timeout: 5 * time.Second},
+		}
+
+		err := client.postCommentWithBaseURL(server.URL, "owner", "repo", 42, "test comment")
+		if err == nil {
+			t.Fatal("expected error for 404 response")
+		}
+		if !strings.Contains(err.Error(), "404") {
+			t.Errorf("expected error to mention 404, got: %v", err)
+		}
+	})
+}
+
 func TestRetryLogic(t *testing.T) {
 	t.Run("retries on 502", func(t *testing.T) {
 		attempts := 0
@@ -597,4 +683,31 @@ func (c *Client) fetchPRCommentsWithBaseURL(baseURL, owner, repo string, prNumbe
 	}
 
 	return allComments, nil
+}
+
+func (c *Client) postCommentWithBaseURL(baseURL, owner, repo string, prNumber int, body string) error {
+	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", baseURL, owner, repo, prNumber)
+	reqBody := map[string]string{
+		"body": body,
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	req, _ := http.NewRequest("POST", url, strings.NewReader(string(bodyBytes)))
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.doRequestWithRetry(req, 3)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		respBody := make([]byte, 4096)
+		n, _ := resp.Body.Read(respBody)
+		return fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(respBody[:n]))
+	}
+
+	return nil
 }
