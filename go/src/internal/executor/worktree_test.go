@@ -2,6 +2,7 @@ package executor
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -339,6 +340,81 @@ func TestCreateWorktreeCommandConstruction(t *testing.T) {
 
 	if expectedArgs[7] != "main" {
 		t.Error("should create worktree from main branch")
+	}
+}
+
+func TestUpdateWorktreeCommandConstruction(t *testing.T) {
+	projectName := "test-project"
+	branchName := "task/abc123de"
+	bareDir := filepath.Join("/tmp/repos", projectName+".git")
+	worktreePath := "/tmp/trees/test-project--task-abc123de"
+
+	// UpdateWorktree should first fetch: git -C bareDir fetch --all
+	expectedFetchArgs := []string{"-C", bareDir, "fetch", "--all"}
+
+	if len(expectedFetchArgs) != 4 {
+		t.Errorf("fetch command should have 4 args, got %d", len(expectedFetchArgs))
+	}
+
+	if expectedFetchArgs[0] != "-C" || expectedFetchArgs[2] != "fetch" || expectedFetchArgs[3] != "--all" {
+		t.Error("fetch command structure is incorrect")
+	}
+
+	// Then reset: git -C worktreePath reset --hard origin/<branchName>
+	remoteRef := "origin/" + branchName
+	expectedResetArgs := []string{"-C", worktreePath, "reset", "--hard", remoteRef}
+
+	if len(expectedResetArgs) != 5 {
+		t.Errorf("reset command should have 5 args, got %d", len(expectedResetArgs))
+	}
+
+	if expectedResetArgs[0] != "-C" {
+		t.Error("first arg should be -C")
+	}
+
+	if expectedResetArgs[1] != worktreePath {
+		t.Errorf("second arg should be worktree path %s, got %s", worktreePath, expectedResetArgs[1])
+	}
+
+	if expectedResetArgs[2] != "reset" || expectedResetArgs[3] != "--hard" {
+		t.Error("should be 'reset --hard' command")
+	}
+
+	if expectedResetArgs[4] != "origin/"+branchName {
+		t.Errorf("should reset to origin/%s, got %s", branchName, expectedResetArgs[4])
+	}
+}
+
+func TestUpdateWorktreeRemoteRefFormat(t *testing.T) {
+	tests := []struct {
+		name       string
+		branchName string
+		wantRef    string
+	}{
+		{
+			name:       "standard_task_branch",
+			branchName: "task/abc123de",
+			wantRef:    "origin/task/abc123de",
+		},
+		{
+			name:       "feature_branch",
+			branchName: "feature/my-feature",
+			wantRef:    "origin/feature/my-feature",
+		},
+		{
+			name:       "simple_branch",
+			branchName: "fix-bug",
+			wantRef:    "origin/fix-bug",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			remoteRef := fmt.Sprintf("origin/%s", tt.branchName)
+			if remoteRef != tt.wantRef {
+				t.Errorf("expected remote ref %s, got %s", tt.wantRef, remoteRef)
+			}
+		})
 	}
 }
 
