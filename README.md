@@ -117,6 +117,7 @@ Access is password-protected. For network-level security, run behind [Tailscale]
 flux/
 ├── go/src/                     # Go backend
 │   ├── cmd/flux/               # Entry point
+│   ├── web/                    # Frontend embedding (go:embed)
 │   └── internal/
 │       ├── config/             # YAML config loader
 │       ├── db/                 # SQLite (WAL mode, no CGO)
@@ -130,13 +131,18 @@ flux/
 │       ├── github/             # GitHub API client (repos, PRs)
 │       ├── notifier/           # Discord webhook notifications
 │       ├── server/             # HTTP API + WebSocket + auth
-│       └── shutdown/           # Graceful shutdown + crash recovery
-├── frontend/                   # React frontend (embedded into binary)
-├── data/                       # SQLite database (created at runtime)
-├── workspaces/                 # Git worktrees for parallel execution
-├── logs/                       # Application logs
+│       ├── shutdown/           # Graceful shutdown + crash recovery
+│       └── testutil/           # Test utilities
+├── frontend/                   # React + TypeScript frontend (Vite)
+├── docs/                       # Specifications and phase plans
+│   ├── spec-agent-en.md        # Agent-readable spec
+│   ├── spec-human-en.md        # Human-readable spec
+│   └── phases/                 # Implementation phase documents
 ├── deploy/                     # launchd plist for 24/7 operation
-├── config.yaml                 # Configuration
+├── data/                       # SQLite database (created at runtime)
+├── workspaces/                 # Git worktrees for parallel execution (created at runtime)
+├── logs/                       # Application logs (created at runtime)
+├── config.yaml                 # Configuration (created from template)
 ├── Makefile                    # Build targets
 ├── setup.sh                    # One-time setup
 └── start-up.sh                 # Start the server
@@ -265,12 +271,12 @@ WebSocket: `GET /ws/events` for real-time event streaming.
 
 | Document | Audience | Description |
 |----------|----------|-------------|
-| [`spec-human-en.md`](./spec-human-en.md) | Humans | High-level system overview |
-| [`spec-human-ko.md`](./spec-human-ko.md) | Humans | Korean translation |
-| [`spec-agent-en.md`](./spec-agent-en.md) | AI Agents | Full implementation detail — schemas, structs, APIs |
-| [`spec-agent-ko.md`](./spec-agent-ko.md) | AI Agents | Korean translation |
+| [`docs/spec-human-en.md`](./docs/spec-human-en.md) | Humans | High-level system overview |
+| [`docs/spec-human-ko.md`](./docs/spec-human-ko.md) | Humans | Korean translation |
+| [`docs/spec-agent-en.md`](./docs/spec-agent-en.md) | AI Agents | Full implementation detail — schemas, structs, APIs |
+| [`docs/spec-agent-ko.md`](./docs/spec-agent-ko.md) | AI Agents | Korean translation |
 
-Implementation plans for each phase are in [`plan/`](./plan/).
+Implementation plans for each phase are in [`docs/phases/`](./docs/phases/).
 
 ## Current Status
 
