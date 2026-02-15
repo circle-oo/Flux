@@ -2,7 +2,6 @@ package server
 
 import (
 	"database/sql"
-	"log/slog"
 	"net/http"
 
 	"github.com/circle-oo/flux/internal/models"
@@ -20,7 +19,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		GoalID      string   `json:"goal_id"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, errInvalidBody)
 		return
 	}
 
@@ -45,8 +44,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.projects.Create(project); err != nil {
-		slog.Error("failed to create project", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to create project", "error", err)
 		return
 	}
 
@@ -59,8 +57,7 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 
 	projects, err := s.projects.List(status)
 	if err != nil {
-		slog.Error("failed to list projects", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to list projects", "error", err)
 		return
 	}
 	if projects == nil {
@@ -75,12 +72,11 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 
 	project, err := s.projects.GetByID(id)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "project not found")
+		writeError(w, http.StatusNotFound, errProjectNotFound)
 		return
 	}
 	if err != nil {
-		slog.Error("failed to get project", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get project", "id", id, "error", err)
 		return
 	}
 
@@ -93,12 +89,11 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 
 	project, err := s.projects.GetByID(id)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "project not found")
+		writeError(w, http.StatusNotFound, errProjectNotFound)
 		return
 	}
 	if err != nil {
-		slog.Error("failed to get project", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get project", "id", id, "error", err)
 		return
 	}
 
@@ -113,7 +108,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		Status      *string  `json:"status"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, errInvalidBody)
 		return
 	}
 
@@ -143,8 +138,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.projects.Update(project); err != nil {
-		slog.Error("failed to update project", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to update project", "id", id, "error", err)
 		return
 	}
 
@@ -162,8 +156,7 @@ func (s *Server) handleApproveProject(w http.ResponseWriter, r *http.Request) {
 
 	project, err := s.projects.GetByID(id)
 	if err != nil {
-		slog.Error("failed to get project after approval", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get project after approval", "id", id, "error", err)
 		return
 	}
 
@@ -181,8 +174,7 @@ func (s *Server) handleRejectProject(w http.ResponseWriter, r *http.Request) {
 
 	project, err := s.projects.GetByID(id)
 	if err != nil {
-		slog.Error("failed to get project after rejection", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get project after rejection", "id", id, "error", err)
 		return
 	}
 

@@ -2,9 +2,7 @@ package models
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"log/slog"
 
 	"github.com/google/uuid"
 )
@@ -63,9 +61,9 @@ func (s *ProjectStore) Create(p *Project) error {
 		p.TechStack = []string{}
 	}
 
-	techStackJSON, err := json.Marshal(p.TechStack)
+	techStackJSON, err := marshalStringSlice("tech_stack", p.TechStack)
 	if err != nil {
-		return fmt.Errorf("marshal tech_stack: %w", err)
+		return err
 	}
 
 	_, err = s.DB.Exec(
@@ -73,7 +71,7 @@ func (s *ProjectStore) Create(p *Project) error {
 		 status, tech_stack, inspiration, goal_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID, p.Name, p.Type, p.RepoURL, p.Description, p.VaultPath,
-		p.Status, string(techStackJSON), p.Inspiration, p.GoalID,
+		p.Status, techStackJSON, p.Inspiration, p.GoalID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert project: %w", err)
@@ -107,7 +105,7 @@ func (s *ProjectStore) List(status string) ([]*Project, error) {
 
 	var projects []*Project
 	for rows.Next() {
-		p, err := scanProjectRow(rows)
+		p, err := scanProject(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -118,9 +116,9 @@ func (s *ProjectStore) List(status string) ([]*Project, error) {
 
 // Update modifies an existing project.
 func (s *ProjectStore) Update(p *Project) error {
-	techStackJSON, err := json.Marshal(p.TechStack)
+	techStackJSON, err := marshalStringSlice("tech_stack", p.TechStack)
 	if err != nil {
-		return fmt.Errorf("marshal tech_stack: %w", err)
+		return err
 	}
 
 	_, err = s.DB.Exec(
@@ -128,7 +126,7 @@ func (s *ProjectStore) Update(p *Project) error {
 		 vault_path = ?, status = ?, tech_stack = ?, inspiration = ?, goal_id = ?,
 		 updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 		p.Name, p.Type, p.RepoURL, p.Description,
-		p.VaultPath, p.Status, string(techStackJSON), p.Inspiration, p.GoalID, p.ID,
+		p.VaultPath, p.Status, techStackJSON, p.Inspiration, p.GoalID, p.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update project: %w", err)
@@ -181,10 +179,13 @@ const projectSelectSQL = `SELECT id, name, type, repo_url, description, vault_pa
 	status, tech_stack, inspiration, goal_id, created_at, updated_at
 	FROM projects`
 
-func scanProject(row *sql.Row) (*Project, error) {
+// scanProject scans a project from any source that implements Scan (works with
+// both *sql.Row and *sql.Rows). This is the single source of truth for
+// the scan field order — it must match projectSelectSQL.
+func scanProject(scanner interface{ Scan(...interface{}) error }) (*Project, error) {
 	var p Project
 	var techStackJSON string
-	err := row.Scan(
+	err := scanner.Scan(
 		&p.ID, &p.Name, &p.Type, &p.RepoURL, &p.Description, &p.VaultPath,
 		&p.Status, &techStackJSON, &p.Inspiration, &p.GoalID,
 		&p.CreatedAt, &p.UpdatedAt,
@@ -192,32 +193,7 @@ func scanProject(row *sql.Row) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal([]byte(techStackJSON), &p.TechStack); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "tech_stack", "error", err)
-	}
-	if p.TechStack == nil {
-		p.TechStack = []string{}
-	}
-	return &p, nil
-}
-
-func scanProjectRow(rows *sql.Rows) (*Project, error) {
-	var p Project
-	var techStackJSON string
-	err := rows.Scan(
-		&p.ID, &p.Name, &p.Type, &p.RepoURL, &p.Description, &p.VaultPath,
-		&p.Status, &techStackJSON, &p.Inspiration, &p.GoalID,
-		&p.CreatedAt, &p.UpdatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal([]byte(techStackJSON), &p.TechStack); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "tech_stack", "error", err)
-	}
-	if p.TechStack == nil {
-		p.TechStack = []string{}
-	}
+	p.TechStack = unmarshalStringSlice("tech_stack", techStackJSON)
 	return &p, nil
 }
 
@@ -231,7 +207,7 @@ func (s *ProjectStore) ListByName(name string) ([]*Project, error) {
 
 	var projects []*Project
 	for rows.Next() {
-		p, err := scanProjectRow(rows)
+		p, err := scanProject(rows)
 		if err != nil {
 			return nil, err
 		}

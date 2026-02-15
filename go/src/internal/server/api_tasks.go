@@ -26,7 +26,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Prompt      string   `json:"prompt"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, errInvalidBody)
 		return
 	}
 
@@ -71,8 +71,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.tasks.Create(task); err != nil {
-		slog.Error("failed to create task", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to create task", "error", err)
 		return
 	}
 
@@ -112,8 +111,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 
 	tasks, err := s.tasks.List(filter)
 	if err != nil {
-		slog.Error("failed to list tasks", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to list tasks", "error", err)
 		return
 	}
 	if tasks == nil {
@@ -128,12 +126,11 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 
 	task, err := s.tasks.GetByID(id)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
 	if err != nil {
-		slog.Error("failed to get task", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get task", "id", id, "error", err)
 		return
 	}
 
@@ -146,12 +143,11 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	task, err := s.tasks.GetByID(id)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
 	if err != nil {
-		slog.Error("failed to get task", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get task", "id", id, "error", err)
 		return
 	}
 
@@ -168,7 +164,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		Prompt      *string  `json:"prompt"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, errInvalidBody)
 		return
 	}
 
@@ -204,8 +200,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to update task", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to update task", "id", id, "error", err)
 		return
 	}
 
@@ -219,8 +214,7 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if err := s.tasks.Delete(id); err != nil {
-		slog.Error("failed to delete task", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to delete task", "id", id, "error", err)
 		return
 	}
 
@@ -236,15 +230,14 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(err.Error(), "not in a cancellable state") {
 			writeError(w, http.StatusConflict, err.Error())
 		} else {
-			writeError(w, http.StatusInternalServerError, "internal server error")
+			writeError(w, http.StatusInternalServerError, errInternalServer)
 		}
 		return
 	}
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
-		slog.Error("failed to get task after cancel", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get task after cancel", "id", id, "error", err)
 		return
 	}
 
@@ -272,8 +265,7 @@ func (s *Server) handleListSubtasks(w http.ResponseWriter, r *http.Request) {
 
 	subtasks, err := s.tasks.ListByParent(id)
 	if err != nil {
-		slog.Error("failed to list subtasks", "parent_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to list subtasks", "parent_id", id, "error", err)
 		return
 	}
 	if subtasks == nil {
@@ -312,8 +304,7 @@ func (s *Server) handleRetryTask(w http.ResponseWriter, r *http.Request) {
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
-		slog.Error("failed to get task after retry", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get task after retry", "id", id, "error", err)
 		return
 	}
 
@@ -331,15 +322,14 @@ func (s *Server) handleArchiveTask(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(err.Error(), "not in an archivable state") {
 			writeError(w, http.StatusConflict, err.Error())
 		} else {
-			writeError(w, http.StatusInternalServerError, "internal server error")
+			writeError(w, http.StatusInternalServerError, errInternalServer)
 		}
 		return
 	}
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
-		slog.Error("failed to get task after archive", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get task after archive", "id", id, "error", err)
 		return
 	}
 

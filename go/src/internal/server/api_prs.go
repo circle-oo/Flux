@@ -39,8 +39,7 @@ func (s *Server) handleListPendingPRs(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		slog.Error("failed to query pending PRs", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to query pending PRs", "error", err)
 		return
 	}
 	defer rows.Close()
@@ -49,15 +48,13 @@ func (s *Server) handleListPendingPRs(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		t, err := models.ScanTask(rows)
 		if err != nil {
-			slog.Error("failed to scan task row", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal server error")
+			serverError(w, "failed to scan task row", "error", err)
 			return
 		}
 		tasks = append(tasks, t)
 	}
 	if err := rows.Err(); err != nil {
-		slog.Error("row iteration error", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "row iteration error", "error", err)
 		return
 	}
 	if tasks == nil {
@@ -74,12 +71,11 @@ func (s *Server) handleApprovePR(w http.ResponseWriter, r *http.Request) {
 
 	task, err := s.tasks.GetByID(taskID)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
 	if err != nil {
-		slog.Error("failed to get task", "id", taskID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get task", "id", taskID, "error", err)
 		return
 	}
 
@@ -98,8 +94,7 @@ func (s *Server) handleApprovePR(w http.ResponseWriter, r *http.Request) {
 	// Get project to extract owner/repo
 	project, err := s.projects.GetByID(task.ProjectID)
 	if err != nil {
-		slog.Error("failed to get project", "id", task.ProjectID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get project", "id", task.ProjectID, "error", err)
 		return
 	}
 
@@ -122,8 +117,7 @@ func (s *Server) handleApprovePR(w http.ResponseWriter, r *http.Request) {
 
 	task.PRStatus = "MERGED"
 	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to update task PR status", "id", taskID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to update task PR status", "id", taskID, "error", err)
 		return
 	}
 
@@ -142,12 +136,11 @@ func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
 
 	task, err := s.tasks.GetByID(taskID)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
 	if err != nil {
-		slog.Error("failed to get task", "id", taskID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get task", "id", taskID, "error", err)
 		return
 	}
 
@@ -171,8 +164,7 @@ func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
 	// Get project to extract owner/repo
 	project, err := s.projects.GetByID(task.ProjectID)
 	if err != nil {
-		slog.Error("failed to get project", "id", task.ProjectID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get project", "id", task.ProjectID, "error", err)
 		return
 	}
 
@@ -195,8 +187,7 @@ func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
 
 	task.PRStatus = "CLOSED"
 	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to update task PR status", "id", taskID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to update task PR status", "id", taskID, "error", err)
 		return
 	}
 
@@ -215,12 +206,11 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 
 	task, err := s.tasks.GetByID(taskID)
 	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
 	if err != nil {
-		slog.Error("failed to get task", "id", taskID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get task", "id", taskID, "error", err)
 		return
 	}
 
@@ -239,8 +229,7 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 	// Get project to extract owner/repo
 	project, err := s.projects.GetByID(task.ProjectID)
 	if err != nil {
-		slog.Error("failed to get project", "id", task.ProjectID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to get project", "id", task.ProjectID, "error", err)
 		return
 	}
 
@@ -290,16 +279,14 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.tasks.Create(fixTask); err != nil {
-		slog.Error("failed to create fix task", "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create fix task")
+		serverError(w, "failed to create fix task", "error", err)
 		return
 	}
 
 	// Update original task
 	task.PRStatus = "CHANGES_REQUESTED"
 	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to update original task", "id", taskID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to update original task", "id", taskID, "error", err)
 		return
 	}
 
@@ -348,4 +335,3 @@ func extractOwnerRepoFromURL(repoURL string) (owner, repo string) {
 
 	return "", ""
 }
-
