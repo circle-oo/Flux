@@ -215,9 +215,10 @@ func (s *Server) localhostOnly(next http.Handler) http.Handler {
 
 // handleHealth returns system health status.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status":  "ok",
-		"version": version,
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "ok",
+		"version":      version,
+		"auth_enabled": s.config.Server.Auth.Enabled,
 	})
 }
 
