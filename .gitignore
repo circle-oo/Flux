@@ -1,1 +1,24 @@
 .omc/
+.DS_Store
+
+# Go build output
+bin/
+
+# Go embedded frontend (copied at build time)
+go/web/dist/
+!go/web/dist/.gitkeep
+
+# Runtime data
+data/
+workspaces/
+logs/
+
+# TypeScript
+typescript/node_modules/
+typescript/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
