@@ -248,7 +248,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		return
 	}
 
-	// 13. Create PR
+	// 13. Create PR with rich description
 	owner, repo := extractOwnerRepo(project.RepoURL)
 	if owner == "" || repo == "" {
 		slog.Error("failed to extract owner/repo from URL", "url", project.RepoURL)
@@ -256,9 +256,9 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		return
 	}
 
-	prTitle := fmt.Sprintf("[flux] %s", task.Title)
-	prBody := fmt.Sprintf("## Task\n\n%s\n\n## Description\n\n%s\n\n---\n*Automated by Flux executor %s*",
-		task.Title, task.Description, e.id)
+	// Build rich PR description
+	prBuilder := github.NewPRDescriptionBuilder(task, worktreePath, e.id)
+	prTitle, prBody := prBuilder.Build()
 
 	prURL, prNumber, prErr := e.github.CreatePR(owner, repo, task.BranchName, "main", prTitle, prBody)
 	if prErr != nil {
