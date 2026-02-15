@@ -48,20 +48,26 @@ const typeDescriptions: Record<string, string> = {
   PLANNING: 'Architecture, design, strategy',
 }
 
-const mainStatusFilters = [
-  { value: '', label: 'All' },
-  { value: 'READY', label: 'Ready' },
-  { value: 'RUNNING', label: 'Running' },
-  { value: 'COMPLETED', label: 'Completed' },
-  { value: 'FAILED', label: 'Failed' },
+// Unified filter groups
+const statusFilterGroups = [
+  { id: 'all', label: 'All', statuses: [] as string[] },
+  { id: 'pending', label: 'Pending', statuses: ['PENDING'] },
+  { id: 'active', label: 'Active', statuses: ['READY', 'RUNNING', 'DECOMPOSED'] },
+  { id: 'terminal', label: 'Done', statuses: ['COMPLETED', 'CANCELLED', 'ARCHIVED'] },
+  { id: 'failed', label: 'Failed', statuses: ['FAILED'] },
 ]
 
-const moreStatusFilters = [
+// Individual status filters for advanced filtering
+const detailedStatusFilters = [
+  { value: 'READY', label: 'Ready' },
+  { value: 'RUNNING', label: 'Running' },
   { value: 'PENDING', label: 'Pending' },
   { value: 'DECOMPOSED', label: 'Decomposed' },
+  { value: 'COMPLETED', label: 'Completed' },
   { value: 'CANCELLED', label: 'Cancelled' },
   { value: 'RETRY', label: 'Retry' },
   { value: 'ARCHIVED', label: 'Archived' },
+  { value: 'FAILED', label: 'Failed' },
 ]
 
 type SortOption = 'priority' | 'newest' | 'updated' | 'status'
@@ -101,8 +107,9 @@ export default function Tasks() {
   const { currentGoal, fetchCurrentGoal } = useGoalStore()
   const navigate = useNavigate()
   const [showForm, setShowForm] = useState(false)
-  const [showMoreStatuses, setShowMoreStatuses] = useState(false)
-  const [sortBy, setSortBy] = useState<SortOption>('priority')
+  const [showDetailedFilters, setShowDetailedFilters] = useState(false)
+  const [sortBy, setSortBy] = useState<SortOption>('newest')
+  const [activeFilterGroup, setActiveFilterGroup] = useState<string>('active')
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -140,19 +147,28 @@ export default function Tasks() {
     if (tasks.length > 0) fetchSubtaskCounts()
   }, [tasks, fetchSubtaskCounts])
 
-  // Filter out archived tasks and subtasks by default (unless explicitly filtering)
+  // Filter tasks based on active group or individual status filter
   const visibleTasks = useMemo(() => {
     let filtered = tasks
-    // Hide subtasks from top-level list
-    if (!filters.status) {
-      filtered = filtered.filter((t) => !t.parent_id && t.status !== 'ARCHIVED')
-    } else if (filters.status === 'ARCHIVED') {
-      // Show all when filtering archived
+
+    // Find the active group to determine which statuses to show
+    const group = statusFilterGroups.find((g) => g.id === activeFilterGroup)
+
+    if (group && group.statuses.length > 0) {
+      // Filter by group statuses
+      filtered = filtered.filter((t) => !t.parent_id && group.statuses.includes(t.status))
+    } else if (filters.status) {
+      // Individual status filter (detailed filter mode)
+      filtered = filtered.filter((t) => !t.parent_id && (
+        filters.status === 'ARCHIVED' || t.status === filters.status
+      ))
     } else {
-      filtered = filtered.filter((t) => !t.parent_id)
+      // 'All' group or no filter - hide archived by default, hide subtasks
+      filtered = filtered.filter((t) => !t.parent_id && t.status !== 'ARCHIVED')
     }
+
     return filtered
-  }, [tasks, filters.status])
+  }, [tasks, filters.status, activeFilterGroup])
 
   const sortedTasks = useMemo(() => {
     const sorted = [...visibleTasks]
@@ -239,9 +255,26 @@ export default function Tasks() {
     }
   }
 
-  const handleStatusFilter = (value: string) => {
+  const handleFilterGroupChange = (groupId: string) => {
+    setActiveFilterGroup(groupId)
+    const group = statusFilterGroups.find((g) => g.id === groupId)
+    if (!group) return
+
+    if (group.statuses.length === 0) {
+      // 'All' group - clear status filter
+      setFilters({ ...filters, status: undefined })
+    } else {
+      // Set status filter to the first status in the group
+      // The filtering logic will handle showing all tasks matching any status in the group
+      setFilters({ ...filters, status: group.statuses[0] })
+    }
+  }
+
+  const handleDetailedStatusFilter = (value: string) => {
     const newStatus = filters.status === value ? undefined : value || undefined
     setFilters({ ...filters, status: newStatus })
+    // Clear group selection when using detailed filters
+    setActiveFilterGroup('')
   }
 
   const activeProjects = projects.filter((p) => p.status === 'ACTIVE')
@@ -273,35 +306,35 @@ export default function Tasks() {
       {/* Filters */}
       <div className="card p-3 sm:p-4 space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-3">
-          {/* Status filter buttons */}
+          {/* Status filter groups */}
           <div className="flex items-center gap-1.5 flex-wrap overflow-x-auto scrollbar-hide">
-            {mainStatusFilters.map((sf) => (
+            {statusFilterGroups.map((group) => (
               <button
-                key={sf.value}
-                onClick={() => handleStatusFilter(sf.value)}
+                key={group.id}
+                onClick={() => handleFilterGroupChange(group.id)}
                 className={
-                  (filters.status || '') === sf.value
+                  activeFilterGroup === group.id
                     ? 'btn-filter-active'
                     : 'btn-filter-inactive'
                 }
               >
-                {sf.label}
+                {group.label}
               </button>
             ))}
-            {/* More statuses toggle */}
+            {/* Detailed filters toggle */}
             <button
-              onClick={() => setShowMoreStatuses(!showMoreStatuses)}
+              onClick={() => setShowDetailedFilters(!showDetailedFilters)}
               className="btn-filter-inactive text-slate-500"
             >
-              {showMoreStatuses ? 'Less' : 'More'}
+              {showDetailedFilters ? 'Less' : 'More'}
             </button>
-            {showMoreStatuses &&
-              moreStatusFilters.map((sf) => (
+            {showDetailedFilters &&
+              detailedStatusFilters.map((sf) => (
                 <button
                   key={sf.value}
-                  onClick={() => handleStatusFilter(sf.value)}
+                  onClick={() => handleDetailedStatusFilter(sf.value)}
                   className={
-                    filters.status === sf.value
+                    filters.status === sf.value && !activeFilterGroup
                       ? 'btn-filter-active'
                       : 'btn-filter-inactive'
                   }
