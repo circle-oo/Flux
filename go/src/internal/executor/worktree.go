@@ -85,19 +85,15 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 		return "", "", fmt.Errorf("failed to create trees directory: %w", err)
 	}
 
-	// Clean up stale worktree directory if it exists from a previous attempt
+	// Clean up ANY existing worktree using this branch (may be at old wrong paths)
+	wm.cleanupBranchWorktree(bareDir, branchName)
+
+	// Clean up stale worktree directory if it still exists
 	if _, statErr := os.Stat(worktreePath); statErr == nil {
-		slog.Info("removing stale worktree from previous attempt", "path", worktreePath)
-		// Try git worktree remove first
-		rmCmd := exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", worktreePath)
-		if rmOut, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
-			slog.Warn("git worktree remove failed, falling back to manual cleanup", "error", rmErr, "output", string(rmOut))
-			// Manual fallback: remove directory and prune
-			if err := os.RemoveAll(worktreePath); err != nil {
-				return "", "", fmt.Errorf("failed to remove stale worktree directory: %w", err)
-			}
+		slog.Info("removing stale worktree directory", "path", worktreePath)
+		if err := os.RemoveAll(worktreePath); err != nil {
+			return "", "", fmt.Errorf("failed to remove stale worktree directory: %w", err)
 		}
-		// Always prune dangling worktree references
 		pruneCmd := exec.Command("git", "-C", bareDir, "worktree", "prune")
 		_ = pruneCmd.Run()
 	}
@@ -130,6 +126,45 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 
 	slog.Info("worktree ready", "project", projectName, "branch", branchName, "path", worktreePath)
 	return worktreePath, branchName, nil
+}
+
+// cleanupBranchWorktree finds and removes any existing worktree checked out on the given branch.
+// This handles stale worktrees at old paths (e.g. from before the absolute path fix).
+func (wm *WorktreeManager) cleanupBranchWorktree(bareDir, branchName string) {
+	// List all worktrees and find the one using this branch
+	listCmd := exec.Command("git", "-C", bareDir, "worktree", "list", "--porcelain")
+	output, err := listCmd.CombinedOutput()
+	if err != nil {
+		return
+	}
+
+	lines := strings.Split(string(output), "\n")
+	var currentPath string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			currentPath = ""
+			continue
+		}
+		if strings.HasPrefix(line, "worktree ") {
+			currentPath = strings.TrimPrefix(line, "worktree ")
+		} else if strings.HasPrefix(line, "branch refs/heads/") {
+			branch := strings.TrimPrefix(line, "branch refs/heads/")
+			if branch == branchName && currentPath != "" && currentPath != bareDir {
+				slog.Info("cleaning up existing worktree for branch", "branch", branchName, "path", currentPath)
+				// Try git worktree remove
+				rmCmd := exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", currentPath)
+				if rmOut, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
+					slog.Warn("git worktree remove failed, removing directory manually", "error", rmErr, "output", string(rmOut))
+					_ = os.RemoveAll(currentPath)
+				}
+			}
+		}
+	}
+
+	// Prune any dangling references
+	pruneCmd := exec.Command("git", "-C", bareDir, "worktree", "prune")
+	_ = pruneCmd.Run()
 }
 
 // FindByBranch finds a worktree by its branch name
