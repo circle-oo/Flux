@@ -162,11 +162,11 @@ func (c *ManagerClient) GetModel(taskID string) (string, error) {
 	return result.Model, nil
 }
 
-// GetProject retrieves project information.
-// GET /api/projects/{id}
+// GetProject retrieves project information via the internal API.
+// GET /internal/projects/{id}
 func (c *ManagerClient) GetProject(projectID string) (*models.Project, error) {
 	slog.Debug("requesting project info", "project_id", projectID)
-	url := fmt.Sprintf("%s/api/projects/%s", c.baseURL, projectID)
+	url := fmt.Sprintf("%s/internal/projects/%s", c.baseURL, projectID)
 	resp, err := c.http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("get request: %w", err)

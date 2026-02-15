@@ -230,3 +230,18 @@ func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) 
 	slog.Info("internal API: model assigned", "task_id", taskID, "model", model)
 	writeJSON(w, http.StatusOK, map[string]string{"model": model})
 }
+
+// handleInternalGetProject handles GET /internal/projects/{id}
+// Executor retrieves project info without auth.
+func (s *Server) handleInternalGetProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	project, err := s.projects.GetByID(id)
+	if err != nil {
+		slog.Error("internal API: failed to get project", "id", id, "error", err)
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, project)
+}
