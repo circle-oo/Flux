@@ -144,38 +144,38 @@ export default function Dashboard() {
           label="Pending"
           value={tasksByStatus.PENDING}
           color="text-slate-400"
-          onClick={() => navigate('/tasks')}
+          onClick={() => navigate('/tasks?status=PENDING')}
         />
         <StatCard
           label="Ready"
           value={tasksByStatus.READY}
           color="text-blue-400"
-          onClick={() => navigate('/tasks')}
+          onClick={() => navigate('/tasks?status=READY')}
         />
         <StatCard
           label="Running"
           value={tasksByStatus.RUNNING}
           color="text-amber-400"
-          onClick={() => navigate('/tasks')}
+          onClick={() => navigate('/tasks?status=RUNNING')}
         />
         <StatCard
           label="Completed"
           value={tasksByStatus.COMPLETED}
           color="text-green-400"
-          onClick={() => navigate('/tasks')}
+          onClick={() => navigate('/tasks?status=COMPLETED')}
         />
         <StatCard
           label="Failed"
           value={tasksByStatus.FAILED}
           color="text-red-400"
-          onClick={() => navigate('/tasks')}
+          onClick={() => navigate('/tasks?status=FAILED')}
         />
         {tasksByStatus.DECOMPOSED > 0 && (
           <StatCard
             label="Decomposed"
             value={tasksByStatus.DECOMPOSED}
             color="text-purple-400"
-            onClick={() => navigate('/tasks')}
+            onClick={() => navigate('/tasks?status=DECOMPOSED')}
           />
         )}
         <StatCard
