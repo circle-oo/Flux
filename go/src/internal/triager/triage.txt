@@ -3,7 +3,7 @@ You are a task triage analyst for an autonomous coding system called Flux.
 The task is for the **{{.ProjectName}}** project.
 {{- end}}
 
-Analyze the following task and produce a structured response with EXACTLY three sections.
+Analyze the following task and produce a structured response with EXACTLY four sections.
 
 # Task: {{.Title}}
 Type: {{.Type}}
@@ -17,7 +17,7 @@ Tags: {{.Tags}}
 
 ## Instructions
 
-Respond with EXACTLY these three sections:
+Respond with EXACTLY these four sections:
 
 ### ANALYSIS
 Provide a brief analysis of:
@@ -35,6 +35,22 @@ Suggest a priority number from 1-100 where:
 - 71-100: Backlog (cosmetic, documentation, minor cleanup)
 
 Just output the number on a single line.
+
+### MODEL
+Recommend which AI model should execute this task. Choose one:
+- **opus** — for tasks that require deep architectural reasoning, complex refactors across many files, security-critical work, initial system design, or migration planning
+- **sonnet** — for standard feature implementation, bug fixes, documentation, tests, and straightforward changes
+
+Use opus when the task involves:
+- Architecture or system design decisions
+- Complex refactoring touching 10+ files
+- Security-sensitive changes (auth, crypto, access control)
+- Migration or overhaul work
+- Critical priority tasks (priority 1-5)
+
+Use sonnet for everything else.
+
+Just output "opus" or "sonnet" on a single line.
 
 ### DESCRIPTION
 Rewrite the task description as a clear, actionable specification with:

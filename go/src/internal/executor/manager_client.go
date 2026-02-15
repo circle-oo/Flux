@@ -287,12 +287,13 @@ func (c *ManagerClient) NextPending(triagerID string) (*models.Task, error) {
 
 // ReportTriaged reports triage completion for a task, promoting it to READY.
 // POST /internal/tasks/{id}/triaged
-func (c *ManagerClient) ReportTriaged(taskID, analysis, description string, priority int) error {
-	slog.Info("reporting triage completion", "task_id", taskID)
+func (c *ManagerClient) ReportTriaged(taskID, analysis, description string, priority int, model string) error {
+	slog.Info("reporting triage completion", "task_id", taskID, "model", model)
 	req := map[string]interface{}{
 		"analysis":    analysis,
 		"description": description,
 		"priority":    priority,
+		"model":       model,
 	}
 
 	body, err := json.Marshal(req)

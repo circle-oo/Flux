@@ -306,6 +306,9 @@ func (s *Server) triageTask(task *models.Task) {
 		slog.Info("triage adjusted priority", "task_id", task.ID, "old", task.Priority, "new", result.Priority)
 		task.Priority = result.Priority
 	}
+	if result.Model != "" {
+		task.Model = result.Model
+	}
 
 	// Move to READY after triage
 	task.Status = models.TaskReady
