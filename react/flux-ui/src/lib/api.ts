@@ -217,6 +217,13 @@ class APIClient {
       method: 'POST',
     })
   }
+
+  // System
+  async restart(): Promise<{ status: string; message: string }> {
+    return this.fetch('/api/system/restart', {
+      method: 'POST',
+    })
+  }
 }
 
 export const api = new APIClient()
