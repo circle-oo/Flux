@@ -254,13 +254,14 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 		Analysis    string `json:"analysis"`
 		Description string `json:"description"`
 		Priority    int    `json:"priority"`
+		Model       string `json:"model"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	slog.Info("internal API: triage result reported", "task_id", id)
+	slog.Info("internal API: triage result reported", "task_id", id, "model", req.Model)
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
@@ -278,6 +279,9 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 	if req.Priority > 0 && req.Priority != task.Priority {
 		slog.Info("triage adjusted priority", "task_id", id, "old", task.Priority, "new", req.Priority)
 		task.Priority = req.Priority
+	}
+	if req.Model != "" {
+		task.Model = req.Model
 	}
 
 	// Promote to READY
@@ -441,34 +445,53 @@ func (s *Server) handleInternalTaskStatus(w http.ResponseWriter, r *http.Request
 
 // handleInternalGetModel handles GET /internal/model/{task_id}
 // Pod queries which model to use for a task.
+// Priority: triager recommendation > NeedsOpus heuristic > default sonnet.
 func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("task_id")
 
 	slog.Debug("internal API: model query", "task_id", taskID)
 
-	// If manager available, use task.NeedsOpus() logic
 	if mgr != nil {
 		task, err := mgr.GetTask(taskID)
 		if err != nil {
 			slog.Error("failed to get task", "id", taskID, "error", err)
 			model := "sonnet"
-			slog.Info("internal API: model assigned", "task_id", taskID, "model", model)
+			slog.Info("internal API: model assigned (fallback)", "task_id", taskID, "model", model)
 			writeJSON(w, http.StatusOK, map[string]string{"model": model})
 			return
 		}
 
+		// If triager already set a model, use it
+		if task.Model != "" && task.Model != "sonnet" {
+			slog.Info("internal API: model assigned (triager)", "task_id", taskID, "model", task.Model)
+			writeJSON(w, http.StatusOK, map[string]string{"model": task.Model})
+			return
+		}
+
+		// If task was triaged (has analysis), trust the triager's default sonnet
+		if task.TriageAnalysis != "" {
+			model := task.Model
+			if model == "" {
+				model = "sonnet"
+			}
+			slog.Info("internal API: model assigned (triaged)", "task_id", taskID, "model", model)
+			writeJSON(w, http.StatusOK, map[string]string{"model": model})
+			return
+		}
+
+		// Fallback heuristic for non-triaged tasks
 		model := "sonnet"
 		if task.NeedsOpus() {
 			model = "opus"
 		}
-		slog.Info("internal API: model assigned", "task_id", taskID, "model", model)
+		slog.Info("internal API: model assigned (heuristic)", "task_id", taskID, "model", model)
 		writeJSON(w, http.StatusOK, map[string]string{"model": model})
 		return
 	}
 
-	// Fallback: always sonnet
+	// No manager: fallback
 	model := "sonnet"
-	slog.Info("internal API: model assigned", "task_id", taskID, "model", model)
+	slog.Info("internal API: model assigned (default)", "task_id", taskID, "model", model)
 	writeJSON(w, http.StatusOK, map[string]string{"model": model})
 }
 
