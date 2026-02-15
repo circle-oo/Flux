@@ -26,11 +26,16 @@ type WorktreeTask struct {
 	CompletedAt time.Time
 }
 
-// NewWorktreeManager creates a new WorktreeManager
+// NewWorktreeManager creates a new WorktreeManager.
+// Paths are resolved to absolute to avoid mismatches between git -C and executor CWD.
 func NewWorktreeManager(workspaceBase string) *WorktreeManager {
+	absBase, err := filepath.Abs(workspaceBase)
+	if err != nil {
+		absBase = workspaceBase
+	}
 	wm := &WorktreeManager{
-		reposDir: filepath.Join(workspaceBase, "repos"),
-		treesDir: filepath.Join(workspaceBase, "trees"),
+		reposDir: filepath.Join(absBase, "repos"),
+		treesDir: filepath.Join(absBase, "trees"),
 	}
 	slog.Debug("worktree manager created", "repos_dir", wm.reposDir, "trees_dir", wm.treesDir)
 	return wm

@@ -55,8 +55,8 @@ func initTestRepo(t *testing.T) string {
 	bare := filepath.Join(base, "remote.git")
 	work := filepath.Join(base, "work")
 
-	// Create bare remote
-	run(t, base, "git", "init", "--bare", bare)
+	// Create bare remote with explicit main branch
+	run(t, base, "git", "init", "--bare", "--initial-branch=main", bare)
 
 	// Clone it
 	run(t, base, "git", "clone", bare, work)
@@ -65,14 +65,15 @@ func initTestRepo(t *testing.T) string {
 	run(t, work, "git", "config", "user.email", "test@test.com")
 	run(t, work, "git", "config", "user.name", "Test")
 
-	// Create initial commit
+	// Create initial commit on main
 	initial := filepath.Join(work, "README.md")
 	if err := os.WriteFile(initial, []byte("# Test\n"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 	run(t, work, "git", "add", ".")
 	run(t, work, "git", "commit", "-m", "initial")
-	run(t, work, "git", "push", "origin", "main")
+	run(t, work, "git", "branch", "-M", "main")
+	run(t, work, "git", "push", "-u", "origin", "main")
 
 	return work
 }
@@ -131,8 +132,8 @@ func TestCheckAndUpdate_DetectsNewCommit(t *testing.T) {
 	work1 := filepath.Join(base, "work1") // simulates "deployed" clone
 	work2 := filepath.Join(base, "work2") // simulates a developer pushing
 
-	// Create bare remote
-	run(t, base, "git", "init", "--bare", bare)
+	// Create bare remote with explicit main branch
+	run(t, base, "git", "init", "--bare", "--initial-branch=main", bare)
 
 	// Clone twice
 	run(t, base, "git", "clone", bare, work1)
@@ -150,7 +151,8 @@ func TestCheckAndUpdate_DetectsNewCommit(t *testing.T) {
 	}
 	run(t, work1, "git", "add", ".")
 	run(t, work1, "git", "commit", "-m", "v1")
-	run(t, work1, "git", "push", "origin", "main")
+	run(t, work1, "git", "branch", "-M", "main")
+	run(t, work1, "git", "push", "-u", "origin", "main")
 
 	// Sync work2
 	run(t, work2, "git", "pull", "origin", "main")
