@@ -25,8 +25,20 @@ const statusFilters = [
 ]
 
 export default function PRs() {
-  const { pendingPRs, loading, error, statusFilter, setStatusFilter, fetchPendingPRs, approvePR, requestChanges, closePR } =
-    usePRStore()
+  const {
+    pendingPRs,
+    loading,
+    error,
+    statusFilter,
+    sortBy,
+    sortOrder,
+    setStatusFilter,
+    setSortBy,
+    fetchPendingPRs,
+    approvePR,
+    requestChanges,
+    closePR,
+  } = usePRStore()
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -119,23 +131,62 @@ export default function PRs() {
         </button>
       </div>
 
-      {/* Filter buttons */}
-      <div className="card p-4">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {statusFilters.map((sf) => (
+      {/* Filter and Sort Controls */}
+      <div className="card p-4 space-y-3">
+        {/* Status Filters */}
+        <div>
+          <label className="text-xs text-slate-400 mb-1.5 block">Status</label>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {statusFilters.map((sf) => (
+              <button
+                key={sf.value}
+                onClick={() => handleStatusFilter(sf.value)}
+                className={
+                  statusFilter === sf.value
+                    ? 'btn-filter-active'
+                    : 'btn-filter-inactive'
+                }
+                disabled={loading}
+              >
+                {sf.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Sort Controls */}
+        <div>
+          <label className="text-xs text-slate-400 mb-1.5 block">Sort by</label>
+          <div className="flex items-center gap-2 flex-wrap">
             <button
-              key={sf.value}
-              onClick={() => handleStatusFilter(sf.value)}
+              onClick={() => setSortBy('created_at')}
               className={
-                statusFilter === sf.value
-                  ? 'btn-filter-active'
-                  : 'btn-filter-inactive'
+                sortBy === 'created_at'
+                  ? 'btn-filter-active flex items-center gap-1'
+                  : 'btn-filter-inactive flex items-center gap-1'
               }
               disabled={loading}
             >
-              {sf.label}
+              Created
+              {sortBy === 'created_at' && (
+                <span className="text-xs">{sortOrder === 'desc' ? '↓' : '↑'}</span>
+              )}
             </button>
-          ))}
+            <button
+              onClick={() => setSortBy('updated_at')}
+              className={
+                sortBy === 'updated_at'
+                  ? 'btn-filter-active flex items-center gap-1'
+                  : 'btn-filter-inactive flex items-center gap-1'
+              }
+              disabled={loading}
+            >
+              Updated
+              {sortBy === 'updated_at' && (
+                <span className="text-xs">{sortOrder === 'desc' ? '↓' : '↑'}</span>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
