@@ -313,6 +313,12 @@ class APIClient {
     })
   }
 
+  async checkRemoteCommit(): Promise<{ status: string; message: string }> {
+    return this.fetch('/api/system/deploy/check-remote', {
+      method: 'POST',
+    })
+  }
+
   // Logs
   async getRecentLogs(): Promise<
     { time: string; level: string; msg: string; attrs: Record<string, unknown> }[]

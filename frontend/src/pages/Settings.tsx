@@ -35,7 +35,7 @@ function StateIndicator({ state }: { state: string }) {
 }
 
 export default function Settings() {
-  const { status, isLoading, isDeploying, error, fetchStatus, triggerDeploy } = useDeployStore()
+  const { status, isLoading, isDeploying, isCheckingRemote, error, fetchStatus, triggerDeploy, checkRemoteCommit } = useDeployStore()
   const wsConnected = useWSStore((s) => s.connected)
 
   useEffect(() => {
@@ -152,7 +152,17 @@ export default function Settings() {
             {/* Git Info */}
             {updater?.local_commit && (
               <div className="border-t border-slate-700 pt-4">
-                <h3 className="text-sm font-medium text-slate-300 mb-3">Git</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-medium text-slate-300">Git</h3>
+                  <button
+                    onClick={checkRemoteCommit}
+                    disabled={isCheckingRemote || isLoading}
+                    className="text-xs px-3 py-1 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-300 rounded transition-colors"
+                    title="Fetch latest remote commit hash"
+                  >
+                    {isCheckingRemote ? 'Checking...' : 'Check Remote'}
+                  </button>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <div className="text-xs text-slate-500 mb-1">Local Commit</div>
