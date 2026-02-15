@@ -218,6 +218,73 @@ func (c *ManagerClient) CreateSubtasks(parentID string, subtasks []SubtaskReques
 	return nil
 }
 
+// NextPending requests the next PENDING task for the triager.
+// POST /internal/tasks/next-pending
+func (c *ManagerClient) NextPending(triagerID string) (*models.Task, error) {
+	slog.Debug("requesting next pending task", "triager_id", triagerID)
+	req := map[string]string{
+		"triager_id": triagerID,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	resp, err := c.http.Post(
+		c.baseURL+"/internal/tasks/next-pending",
+		"application/json",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("post request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Task *models.Task `json:"task"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return result.Task, nil
+}
+
+// ReportTriaged reports triage completion for a task, promoting it to READY.
+// POST /internal/tasks/{id}/triaged
+func (c *ManagerClient) ReportTriaged(taskID, analysis, description string, priority int) error {
+	slog.Info("reporting triage completion", "task_id", taskID)
+	req := map[string]interface{}{
+		"analysis":    analysis,
+		"description": description,
+		"priority":    priority,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/internal/tasks/%s/triaged", c.baseURL, taskID)
+	resp, err := c.http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("post request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
+}
+
 // GetModel queries which model to use for a task.
 // GET /internal/model/{task_id}
 func (c *ManagerClient) GetModel(taskID string) (string, error) {

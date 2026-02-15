@@ -2,6 +2,20 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { Task } from '../lib/api'
+import ContentRenderer from '../components/ContentRenderer'
+import MarkdownRenderer from '../components/MarkdownRenderer'
+
+const subtaskStatusColor: Record<string, string> = {
+  PENDING: 'badge-secondary',
+  READY: 'badge-info',
+  RUNNING: 'badge-warning',
+  COMPLETED: 'badge-success',
+  FAILED: 'badge-danger',
+  RETRY: 'badge-warning',
+  DECOMPOSED: 'bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold',
+  CANCELLED: 'bg-slate-500 text-white px-2 py-1 rounded text-xs font-semibold',
+  ARCHIVED: 'badge-secondary',
+}
 
 const statusColor: Record<string, string> = {
   PENDING: 'badge-secondary',
@@ -11,6 +25,8 @@ const statusColor: Record<string, string> = {
   FAILED: 'badge-danger',
   RETRY: 'badge-warning',
   ARCHIVED: 'badge-secondary',
+  DECOMPOSED: 'bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold',
+  CANCELLED: 'bg-slate-500 text-white px-2 py-1 rounded text-xs font-semibold',
 }
 
 const prStatusColor: Record<string, string> = {
@@ -68,8 +84,9 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { getTask, cancelTask, retryTask } = useTaskStore()
+  const { getTask, cancelTask, retryTask, fetchSubtasks } = useTaskStore()
   const [task, setTask] = useState<Task | null>(null)
+  const [subtasks, setSubtasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -77,10 +94,14 @@ export default function TaskDetail() {
     if (!id) return
     setLoading(true)
     getTask(id)
-      .then(setTask)
+      .then((t) => {
+        setTask(t)
+        // Fetch subtasks if task has any potential children
+        fetchSubtasks(t.id).then(setSubtasks)
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
-  }, [id, getTask])
+  }, [id, getTask, fetchSubtasks])
 
   const handleRetry = async () => {
     if (!task || !confirm(`Retry task: ${task.title}?`)) return
@@ -152,7 +173,7 @@ export default function TaskDetail() {
               Retry
             </button>
           )}
-          {(task.status === 'READY' || task.status === 'RUNNING') && (
+          {(task.status === 'READY' || task.status === 'RUNNING' || task.status === 'DECOMPOSED') && (
             <button onClick={handleCancel} className="btn-danger">
               Cancel
             </button>
@@ -163,7 +184,11 @@ export default function TaskDetail() {
       {/* Description */}
       <div className="card p-6">
         <h2 className="text-lg font-semibold text-slate-200 mb-3">Description</h2>
-        <p className="text-slate-300 whitespace-pre-wrap">{task.description || '—'}</p>
+        {task.description ? (
+          <MarkdownRenderer content={task.description} />
+        ) : (
+          <p className="text-slate-400">—</p>
+        )}
       </div>
 
       {/* Overview */}
@@ -217,6 +242,44 @@ export default function TaskDetail() {
           </InfoRow>
         )}
       </div>
+
+      {/* Subtasks */}
+      {subtasks.length > 0 && (
+        <div className="card p-6">
+          <h2 className="text-lg font-semibold text-slate-200 mb-3">
+            Subtasks
+            <span className="ml-2 text-sm font-normal text-slate-400">
+              ({subtasks.filter((s) => s.status === 'COMPLETED').length}/{subtasks.length} completed)
+            </span>
+          </h2>
+          {/* Progress bar */}
+          <div className="w-full bg-slate-700 rounded-full h-2 mb-4">
+            <div
+              className="bg-green-500 h-2 rounded-full transition-all"
+              style={{
+                width: `${(subtasks.filter((s) => s.status === 'COMPLETED').length / subtasks.length) * 100}%`,
+              }}
+            />
+          </div>
+          <div className="space-y-2">
+            {subtasks.map((sub) => (
+              <div
+                key={sub.id}
+                className="flex items-center justify-between p-3 bg-slate-800 rounded-lg hover:bg-slate-750 cursor-pointer transition-colors"
+                onClick={() => navigate(`/tasks/${sub.id}`)}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`badge shrink-0 ${subtaskStatusColor[sub.status] || 'badge-secondary'}`}>
+                    {sub.status}
+                  </span>
+                  <span className="text-sm text-slate-200 truncate">{sub.title}</span>
+                </div>
+                <span className="text-xs text-slate-500 shrink-0 ml-2">P{sub.priority}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Execution */}
       <div className="card p-6">
@@ -288,9 +351,7 @@ export default function TaskDetail() {
       {task.triage_analysis && (
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Triage Analysis</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.triage_analysis}
-          </pre>
+          <ContentRenderer content={task.triage_analysis} />
         </div>
       )}
 
@@ -298,9 +359,7 @@ export default function TaskDetail() {
       {task.plan && (
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Plan</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.plan}
-          </pre>
+          <ContentRenderer content={task.plan} />
         </div>
       )}
 
@@ -318,9 +377,7 @@ export default function TaskDetail() {
       {task.result && (
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Result</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.result}
-          </pre>
+          <ContentRenderer content={task.result} />
         </div>
       )}
 
@@ -328,9 +385,7 @@ export default function TaskDetail() {
       {task.prompt && (
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Prompt</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.prompt}
-          </pre>
+          <ContentRenderer content={task.prompt} />
         </div>
       )}
     </div>

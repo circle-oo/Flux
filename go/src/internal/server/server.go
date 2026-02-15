@@ -126,9 +126,14 @@ func (s *Server) setupRoutes() {
 	// Archive endpoint (requires auth)
 	s.mux.Handle("POST /api/tasks/{id}/archive", s.authMiddleware(http.HandlerFunc(s.handleArchiveTask)))
 
+	// Subtasks API (requires auth)
+	s.mux.Handle("GET /api/tasks/{id}/subtasks", s.authMiddleware(http.HandlerFunc(s.handleListSubtasks)))
+
 	// Internal API (localhost only, no auth)
 	s.mux.Handle("POST /internal/tasks/next", s.localhostOnly(http.HandlerFunc(s.handleInternalNextTask)))
+	s.mux.Handle("POST /internal/tasks/next-pending", s.localhostOnly(http.HandlerFunc(s.handleInternalNextPending)))
 	s.mux.Handle("POST /internal/tasks/{id}/done", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskDone)))
+	s.mux.Handle("POST /internal/tasks/{id}/triaged", s.localhostOnly(http.HandlerFunc(s.handleInternalTriaged)))
 	s.mux.Handle("POST /internal/tasks", s.localhostOnly(http.HandlerFunc(s.handleInternalCreateTask)))
 	s.mux.Handle("POST /internal/subtasks", s.localhostOnly(http.HandlerFunc(s.handleInternalCreateSubtasks)))
 	s.mux.Handle("GET /internal/model/{task_id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetModel)))

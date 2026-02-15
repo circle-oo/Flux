@@ -58,6 +58,7 @@ const mainStatusFilters = [
 
 const moreStatusFilters = [
   { value: 'PENDING', label: 'Pending' },
+  { value: 'DECOMPOSED', label: 'Decomposed' },
   { value: 'CANCELLED', label: 'Cancelled' },
   { value: 'RETRY', label: 'Retry' },
   { value: 'ARCHIVED', label: 'Archived' },
@@ -77,10 +78,11 @@ const statusOrder: Record<string, number> = {
   READY: 1,
   RETRY: 2,
   PENDING: 3,
-  FAILED: 4,
-  CANCELLED: 5,
-  COMPLETED: 6,
-  ARCHIVED: 7,
+  DECOMPOSED: 4,
+  FAILED: 5,
+  CANCELLED: 6,
+  COMPLETED: 7,
+  ARCHIVED: 8,
 }
 
 export default function Tasks() {
@@ -119,11 +121,18 @@ export default function Tasks() {
     fetchCurrentGoal()
   }, [fetchTasks, fetchProjects, fetchCurrentGoal])
 
-  // Filter out archived tasks by default (unless explicitly filtering for them)
+  // Filter out archived tasks and subtasks by default (unless explicitly filtering)
   const visibleTasks = useMemo(() => {
-    if (filters.status === 'ARCHIVED') return tasks
-    if (!filters.status) return tasks.filter((t) => t.status !== 'ARCHIVED')
-    return tasks
+    let filtered = tasks
+    // Hide subtasks from top-level list
+    if (!filters.status) {
+      filtered = filtered.filter((t) => !t.parent_id && t.status !== 'ARCHIVED')
+    } else if (filters.status === 'ARCHIVED') {
+      // Show all when filtering archived
+    } else {
+      filtered = filtered.filter((t) => !t.parent_id)
+    }
+    return filtered
   }, [tasks, filters.status])
 
   const sortedTasks = useMemo(() => {
@@ -572,6 +581,8 @@ export default function Tasks() {
                               ? 'badge-info'
                               : task.status === 'RETRY'
                               ? 'badge-warning'
+                              : task.status === 'DECOMPOSED'
+                              ? 'bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold'
                               : task.status === 'CANCELLED'
                               ? 'bg-slate-500 text-white px-2 py-1 rounded text-xs font-semibold'
                               : 'badge-secondary'
@@ -658,7 +669,7 @@ export default function Tasks() {
                           Retry
                         </button>
                       )}
-                      {(task.status === 'READY' || task.status === 'RUNNING') && (
+                      {(task.status === 'READY' || task.status === 'RUNNING' || task.status === 'DECOMPOSED') && (
                         <button
                           onClick={() => handleCancel(task.id, task.title)}
                           className="btn-danger"

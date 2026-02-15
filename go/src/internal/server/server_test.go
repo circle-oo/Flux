@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/circle-oo/flux/internal/config"
+	"github.com/circle-oo/flux/internal/manager"
 	"github.com/circle-oo/flux/internal/testutil"
 )
 
@@ -1051,6 +1052,204 @@ func TestInternal_CreateTask(t *testing.T) {
 	}
 	if resp["branch_name"] != "task/abc12345" {
 		t.Errorf("expected branch_name task/abc12345, got %v", resp["branch_name"])
+	}
+}
+
+func TestAPI_ListSubtasks(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Create parent task
+	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title": "Parent task", "type": "CODING",
+	})
+	var created map[string]interface{}
+	parseResponse(t, rr, &created)
+	parentID := created["id"].(string)
+
+	// Create subtasks via internal API
+	body, _ := json.Marshal(map[string]interface{}{
+		"parent_id": parentID,
+		"subtasks": []map[string]string{
+			{"title": "Sub 1", "description": "First subtask"},
+			{"title": "Sub 2", "description": "Second subtask"},
+		},
+	})
+	req := httptest.NewRequest("POST", "/internal/subtasks", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// List subtasks via public API
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/"+parentID+"/subtasks", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+	tasks := resp["tasks"].([]interface{})
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 subtasks, got %d", len(tasks))
+	}
+}
+
+func TestAPI_ListSubtasks_Empty(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Create task with no subtasks
+	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title": "No children", "type": "CODING",
+	})
+	var created map[string]interface{}
+	parseResponse(t, rr, &created)
+	id := created["id"].(string)
+
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/"+id+"/subtasks", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+	tasks := resp["tasks"].([]interface{})
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 subtasks, got %d", len(tasks))
+	}
+}
+
+func TestInternal_NextPending(t *testing.T) {
+	srv, database := setupTestServer(t)
+
+	// Wire up manager so PopNextPending works
+	cfg := &config.Config{}
+	m := manager.NewManager(database, cfg)
+	SetManager(m)
+	defer SetManager(nil)
+
+	// Create a PENDING operator task directly in DB
+	_, err := database.Exec(
+		`INSERT INTO tasks (id, title, type, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"test-pending-001", "Pending task", "CODING", "PENDING", 50, "OPERATOR",
+	)
+	if err != nil {
+		t.Fatalf("insert pending task: %v", err)
+	}
+
+	// Request next pending
+	body, _ := json.Marshal(map[string]string{"triager_id": "triager-01"})
+	req := httptest.NewRequest("POST", "/internal/tasks/next-pending", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+	task := resp["task"]
+	if task == nil {
+		t.Fatal("expected a pending task, got nil")
+	}
+}
+
+func TestInternal_Triaged(t *testing.T) {
+	srv, database := setupTestServer(t)
+
+	// Create a PENDING task
+	_, err := database.Exec(
+		`INSERT INTO tasks (id, title, type, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"test-triage-001", "Triage me", "CODING", "PENDING", 50, "OPERATOR",
+	)
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	// Report triage completion
+	body, _ := json.Marshal(map[string]interface{}{
+		"analysis":    "This task is well-defined",
+		"description": "Updated description with clear requirements",
+		"priority":    30,
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks/test-triage-001/triaged", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify task was promoted to READY with triage results
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/test-triage-001", nil)
+	var task map[string]interface{}
+	parseResponse(t, rr, &task)
+
+	if task["status"] != "READY" {
+		t.Errorf("expected READY, got %v", task["status"])
+	}
+	if task["triage_analysis"] != "This task is well-defined" {
+		t.Errorf("expected triage analysis, got %v", task["triage_analysis"])
+	}
+	if task["description"] != "Updated description with clear requirements" {
+		t.Errorf("expected updated description, got %v", task["description"])
+	}
+	if int(task["priority"].(float64)) != 30 {
+		t.Errorf("expected priority 30, got %v", task["priority"])
+	}
+}
+
+func TestTasks_CancelCascade(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Create parent task
+	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title": "Parent", "type": "CODING",
+	})
+	var parent map[string]interface{}
+	parseResponse(t, rr, &parent)
+	parentID := parent["id"].(string)
+
+	// Create subtasks
+	body, _ := json.Marshal(map[string]interface{}{
+		"parent_id": parentID,
+		"subtasks": []map[string]string{
+			{"title": "Sub 1"},
+			{"title": "Sub 2"},
+		},
+	})
+	req := httptest.NewRequest("POST", "/internal/subtasks", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	// Cancel parent
+	rr = doAuthRequest(t, srv, "POST", "/api/tasks/"+parentID+"/cancel", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify subtasks are cancelled
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/"+parentID+"/subtasks", nil)
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+	tasks := resp["tasks"].([]interface{})
+	for _, st := range tasks {
+		sub := st.(map[string]interface{})
+		if sub["status"] != "CANCELLED" {
+			t.Errorf("expected subtask CANCELLED, got %v", sub["status"])
+		}
 	}
 }
 

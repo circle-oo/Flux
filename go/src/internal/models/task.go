@@ -23,14 +23,15 @@ const (
 
 // Task status constants
 const (
-	TaskPending   = "PENDING"
-	TaskReady     = "READY"
-	TaskRunning   = "RUNNING"
-	TaskCompleted = "COMPLETED"
-	TaskFailed    = "FAILED"
-	TaskCancelled = "CANCELLED"
-	TaskRetry     = "RETRY"
-	TaskArchived  = "ARCHIVED"
+	TaskPending    = "PENDING"
+	TaskReady      = "READY"
+	TaskRunning    = "RUNNING"
+	TaskCompleted  = "COMPLETED"
+	TaskFailed     = "FAILED"
+	TaskCancelled  = "CANCELLED"
+	TaskRetry      = "RETRY"
+	TaskArchived   = "ARCHIVED"
+	TaskDecomposed = "DECOMPOSED"
 )
 
 // Task source constants
@@ -198,10 +199,11 @@ func (s *TaskStore) GetByID(id string) (*Task, error) {
 
 // ListFilter holds optional filter parameters for listing tasks.
 type ListFilter struct {
-	Status    string
-	ProjectID string
-	Page      int
-	Limit     int
+	Status          string
+	ProjectID       string
+	ExcludeSubtasks bool
+	Page            int
+	Limit           int
 }
 
 // List retrieves tasks matching the given filters.
@@ -217,6 +219,9 @@ func (s *TaskStore) List(f ListFilter) ([]*Task, error) {
 	if f.ProjectID != "" {
 		conditions = append(conditions, "project_id = ?")
 		args = append(args, f.ProjectID)
+	}
+	if f.ExcludeSubtasks {
+		conditions = append(conditions, "(parent_id = '' OR parent_id IS NULL)")
 	}
 
 	if len(conditions) > 0 {
@@ -300,8 +305,8 @@ func (s *TaskStore) Cancel(id string) error {
 	result, err := s.DB.Exec(
 		`UPDATE tasks SET status = ?, error_log = 'cancelled by operator',
 		 updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
-		 WHERE id = ? AND status IN (?, ?, ?)`,
-		TaskCancelled, id, TaskPending, TaskReady, TaskRunning,
+		 WHERE id = ? AND status IN (?, ?, ?, ?)`,
+		TaskCancelled, id, TaskPending, TaskReady, TaskRunning, TaskDecomposed,
 	)
 	if err != nil {
 		return fmt.Errorf("cancel task: %w", err)
@@ -355,6 +360,60 @@ func (s *TaskStore) CountByParent(parentID string) (int, error) {
 	var count int
 	err := s.DB.QueryRow(`SELECT COUNT(*) FROM tasks WHERE parent_id = ?`, parentID).Scan(&count)
 	return count, err
+}
+
+// ListByParent retrieves all subtasks for a given parent task.
+func (s *TaskStore) ListByParent(parentID string) ([]*Task, error) {
+	query := taskSelectSQL + " WHERE parent_id = ? ORDER BY priority ASC, created_at ASC"
+	rows, err := s.DB.Query(query, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("query subtasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		t, err := scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// ListPending retrieves tasks with PENDING status, ordered by priority.
+func (s *TaskStore) ListPending() ([]*Task, error) {
+	query := taskSelectSQL + " WHERE status = ? ORDER BY priority ASC, created_at ASC"
+	rows, err := s.DB.Query(query, TaskPending)
+	if err != nil {
+		return nil, fmt.Errorf("query pending tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		t, err := scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// CancelChildren cancels all active subtasks of a parent task.
+func (s *TaskStore) CancelChildren(parentID string) (int64, error) {
+	result, err := s.DB.Exec(
+		`UPDATE tasks SET status = ?, error_log = 'parent cancelled',
+		 updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
+		 WHERE parent_id = ? AND status IN (?, ?, ?, ?)`,
+		TaskCancelled, parentID, TaskPending, TaskReady, TaskRunning, TaskDecomposed,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("cancel children: %w", err)
+	}
+	return result.RowsAffected()
 }
 
 const taskSelectSQL = `SELECT id, title, description, type, status, priority, source,

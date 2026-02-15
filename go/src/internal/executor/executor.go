@@ -201,8 +201,18 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		return
 	}
 
-	// 10. Check subtask decomposition (Phase 2A stub)
-	_ = e.parseDecomposition(result.Stdout)
+	// 10. Check subtask decomposition
+	decomp := e.parseDecomposition(result.Stdout)
+	if decomp != nil && len(decomp) > 0 {
+		slog.Info("task decomposed into subtasks", "task_id", task.ID, "subtask_count", len(decomp))
+		if err := e.manager.CreateSubtasks(task.ID, decomp); err != nil {
+			slog.Error("failed to create subtasks", "task_id", task.ID, "error", err)
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("subtask creation failed: %v", err), result.TokensUsed, result.CostUSD)
+			return
+		}
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskDecomposed, result.Stdout, "", result.TokensUsed, result.CostUSD)
+		return
+	}
 
 	// 10.5. Build verification: run build if applicable
 	if task.RequiresTest() {
@@ -511,6 +521,8 @@ func buildFailureTask(failedTask *models.Task, buildOutput string) *models.Task 
 		Priority:    min(failedTask.Priority, 10), // High priority — build is broken
 		Source:      models.TaskSourceSystem,
 		ProjectID:   failedTask.ProjectID,
+		ParentID:    failedTask.ID,
+		Depth:       failedTask.Depth + 1,
 		GoalID:      failedTask.GoalID,
 		BranchName:  failedTask.BranchName, // Reuse the same branch
 		Tags:        []string{"build-failure", "auto-registered"},

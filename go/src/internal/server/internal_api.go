@@ -155,6 +155,100 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 	slog.Debug("internal API: broadcasting task update", "task_id", id)
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
+	// Check parent completion if this task has a parent
+	if task.ParentID != "" && mgr != nil {
+		if err := mgr.CheckParentCompletion(task.ParentID); err != nil {
+			slog.Error("parent completion check failed", "parent_id", task.ParentID, "error", err)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleInternalNextPending handles POST /internal/tasks/next-pending
+// Triager requests next PENDING task.
+func (s *Server) handleInternalNextPending(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TriagerID string `json:"triager_id"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := readJSON(w, r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	slog.Debug("internal API: next pending task requested", "triager_id", req.TriagerID)
+
+	if mgr == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"task": nil})
+		return
+	}
+
+	task, err := mgr.PopNextPending(req.TriagerID)
+	if err != nil {
+		slog.Error("failed to pop next pending task", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if task != nil {
+		slog.Info("internal API: pending task dispatched to triager", "triager_id", req.TriagerID, "task_id", task.ID)
+	} else {
+		slog.Debug("internal API: no pending task available", "triager_id", req.TriagerID)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"task": task})
+}
+
+// handleInternalTriaged handles POST /internal/tasks/{id}/triaged
+// Triager reports triage completion — updates analysis/priority/description and promotes to READY.
+func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req struct {
+		Analysis    string `json:"analysis"`
+		Description string `json:"description"`
+		Priority    int    `json:"priority"`
+	}
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	slog.Info("internal API: triage result reported", "task_id", id)
+
+	task, err := s.tasks.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	// Update triage results
+	if req.Analysis != "" {
+		task.TriageAnalysis = req.Analysis
+	}
+	if req.Description != "" && req.Description != task.Description {
+		task.Description = req.Description
+	}
+	if req.Priority > 0 && req.Priority != task.Priority {
+		slog.Info("triage adjusted priority", "task_id", id, "old", task.Priority, "new", req.Priority)
+		task.Priority = req.Priority
+	}
+
+	// Promote to READY
+	task.Status = models.TaskReady
+	task.ExecutorID = "" // Clear triager claim
+
+	if err := s.tasks.Update(task); err != nil {
+		slog.Error("failed to update task after triage", "task_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	slog.Info("internal API: task triaged and promoted to READY", "task_id", id)
+	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

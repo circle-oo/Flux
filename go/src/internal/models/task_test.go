@@ -244,3 +244,115 @@ func TestTaskStore_CountByParent(t *testing.T) {
 		t.Errorf("expected 3, got %d", count)
 	}
 }
+
+func TestTaskStore_ListByParent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	store.Create(&Task{Title: "Child A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Priority: 20})
+	store.Create(&Task{Title: "Child B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Priority: 10})
+
+	subtasks, err := store.ListByParent(parent.ID)
+	if err != nil {
+		t.Fatalf("ListByParent: %v", err)
+	}
+	if len(subtasks) != 2 {
+		t.Errorf("expected 2 subtasks, got %d", len(subtasks))
+	}
+	// Should be ordered by priority ASC
+	if subtasks[0].Priority > subtasks[1].Priority {
+		t.Error("expected ascending priority order")
+	}
+}
+
+func TestTaskStore_CancelChildren(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	store.Create(&Task{Title: "Child Ready", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1})
+	store.Create(&Task{Title: "Child Completed", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Status: TaskCompleted})
+
+	cancelled, err := store.CancelChildren(parent.ID)
+	if err != nil {
+		t.Fatalf("CancelChildren: %v", err)
+	}
+	// Only the READY child should be cancelled (COMPLETED is not cancellable)
+	if cancelled != 1 {
+		t.Errorf("expected 1 cancelled, got %d", cancelled)
+	}
+
+	subtasks, _ := store.ListByParent(parent.ID)
+	for _, sub := range subtasks {
+		if sub.Title == "Child Ready" && sub.Status != TaskCancelled {
+			t.Errorf("expected CANCELLED for 'Child Ready', got %s", sub.Status)
+		}
+		if sub.Title == "Child Completed" && sub.Status != TaskCompleted {
+			t.Errorf("expected COMPLETED for 'Child Completed', got %s", sub.Status)
+		}
+	}
+}
+
+func TestTaskStore_DecomposedStatus(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	task := &Task{Title: "Decomposed Task", Type: TaskTypeCoding, Status: TaskDecomposed}
+	if err := store.Create(task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := store.GetByID(task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Status != TaskDecomposed {
+		t.Errorf("expected DECOMPOSED, got %s", got.Status)
+	}
+}
+
+func TestTaskStore_ListPending(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	store.Create(&Task{Title: "Pending 1", Type: TaskTypeCoding, Source: TaskSourceOperator})
+	store.Create(&Task{Title: "Ready 1", Type: TaskTypeCoding, Status: TaskReady})
+
+	pending, err := store.ListPending()
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Errorf("expected 1 pending task, got %d", len(pending))
+	}
+	if pending[0].Title != "Pending 1" {
+		t.Errorf("expected 'Pending 1', got %s", pending[0].Title)
+	}
+}
+
+func TestTaskStore_List_ExcludeSubtasks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+	store.Create(&Task{Title: "Child", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1})
+	store.Create(&Task{Title: "Top-level", Type: TaskTypeCoding})
+
+	// Without exclude
+	all, _ := store.List(ListFilter{})
+	if len(all) != 3 {
+		t.Errorf("expected 3 total tasks, got %d", len(all))
+	}
+
+	// With exclude
+	topLevel, _ := store.List(ListFilter{ExcludeSubtasks: true})
+	if len(topLevel) != 2 {
+		t.Errorf("expected 2 top-level tasks, got %d", len(topLevel))
+	}
+}

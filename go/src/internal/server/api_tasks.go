@@ -69,13 +69,19 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Broadcast task update via WebSocket
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
-	// Run triage asynchronously for operator-created tasks.
-	// Only run if executor config has a valid timeout (indicates triage is available).
-	if task.Source == models.TaskSourceOperator && s.config.Executor.MaxExecutionTime > 0 {
-		go s.triageTask(task)
-	} else if task.Source == models.TaskSourceOperator && task.Status == models.TaskPending {
-		// No triage available — promote directly to READY
-		s.promoteToReady(task)
+	// If triager is enabled, operator tasks stay PENDING for the triager to pick up.
+	// If triager is disabled, run inline triage or promote directly.
+	if task.Source == models.TaskSourceOperator && task.Status == models.TaskPending {
+		if s.config.Triager.Enabled {
+			// Triager component will poll and pick up PENDING tasks
+			slog.Info("task created as PENDING, triager will process", "task_id", task.ID)
+		} else if s.config.Executor.MaxExecutionTime > 0 {
+			// Fallback: inline triage if triager is disabled but executor is configured
+			go s.triageTask(task)
+		} else {
+			// No triage available — promote directly to READY
+			s.promoteToReady(task)
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, task)
@@ -89,10 +95,11 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(q.Get("limit"))
 
 	filter := models.ListFilter{
-		Status:    q.Get("status"),
-		ProjectID: q.Get("project_id"),
-		Page:      page,
-		Limit:     limit,
+		Status:          q.Get("status"),
+		ProjectID:       q.Get("project_id"),
+		ExcludeSubtasks: q.Get("exclude_subtasks") == "true",
+		Page:            page,
+		Limit:           limit,
 	}
 
 	tasks, err := s.tasks.List(filter)
@@ -234,12 +241,37 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task cancelled by operator", "task_id", id, "title", task.Title)
+
+	// Cascade cancel to children
+	cancelled, err := s.tasks.CancelChildren(id)
+	if err != nil {
+		slog.Error("failed to cascade cancel to children", "task_id", id, "error", err)
+	} else if cancelled > 0 {
+		slog.Info("cascade cancelled subtasks", "parent_id", id, "count", cancelled)
+	}
+
 	if s.notifier != nil {
 		s.notifier.Send("info", fmt.Sprintf("Task cancelled: %s", task.Title))
 	}
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
 	writeJSON(w, http.StatusOK, task)
+}
+
+// handleListSubtasks handles GET /api/tasks/{id}/subtasks
+func (s *Server) handleListSubtasks(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	subtasks, err := s.tasks.ListByParent(id)
+	if err != nil {
+		slog.Error("failed to list subtasks", "parent_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if subtasks == nil {
+		subtasks = []*models.Task{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": subtasks})
 }
 
 // triageTask runs async triage on a task using Claude to analyze requirements,

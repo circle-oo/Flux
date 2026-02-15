@@ -13,13 +13,14 @@ import (
 
 // validTransitions defines the state machine for task status transitions.
 var validTransitions = map[string][]string{
-	models.TaskPending:   {models.TaskReady, models.TaskCancelled},
-	models.TaskReady:     {models.TaskRunning, models.TaskCancelled},
-	models.TaskRunning:   {models.TaskCompleted, models.TaskFailed, models.TaskRetry, models.TaskCancelled},
-	models.TaskFailed:    {models.TaskRetry, models.TaskArchived},
-	models.TaskRetry:     {models.TaskRunning},
-	models.TaskCompleted: {models.TaskArchived},
-	models.TaskCancelled: {models.TaskArchived},
+	models.TaskPending:    {models.TaskReady, models.TaskCancelled},
+	models.TaskReady:      {models.TaskRunning, models.TaskCancelled},
+	models.TaskRunning:    {models.TaskCompleted, models.TaskFailed, models.TaskRetry, models.TaskCancelled, models.TaskDecomposed},
+	models.TaskFailed:     {models.TaskRetry, models.TaskArchived},
+	models.TaskRetry:      {models.TaskRunning},
+	models.TaskCompleted:  {models.TaskArchived},
+	models.TaskCancelled:  {models.TaskArchived},
+	models.TaskDecomposed: {models.TaskCompleted, models.TaskFailed, models.TaskCancelled},
 }
 
 // Manager coordinates task distribution and state transitions.
@@ -340,6 +341,113 @@ func (m *Manager) GetTask(taskID string) (*models.Task, error) {
 // GetProject retrieves a project by ID.
 func (m *Manager) GetProject(projectID string) (*models.Project, error) {
 	return m.projects.GetByID(projectID)
+}
+
+// PopNextPending atomically retrieves and claims the next PENDING task for the triager.
+// Sets executor_id to the triager's ID to prevent other triagers from grabbing it.
+func (m *Manager) PopNextPending(triagerID string) (*models.Task, error) {
+	const maxRetries = 5
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		task, err := m.popNextPendingOnce(triagerID)
+		if err == nil {
+			return task, nil
+		}
+		if isSQLiteBusy(err) {
+			time.Sleep(time.Duration(10*(attempt+1)) * time.Millisecond)
+			continue
+		}
+		return nil, err
+	}
+	return nil, fmt.Errorf("pop next pending: max retries exceeded")
+}
+
+func (m *Manager) popNextPendingOnce(triagerID string) (*models.Task, error) {
+	tx, err := m.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `SELECT id, title, description, type, status, priority, source,
+		project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
+		result, error_log, executor_id, model, branch_name, pr_url, pr_status,
+		diff_lines, files_changed, test_passed, retry_count, crash_recovery,
+		tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
+		FROM tasks
+		WHERE status = ? AND (executor_id = '' OR executor_id IS NULL)
+		ORDER BY priority ASC, created_at ASC
+		LIMIT 1`
+
+	task, err := scanTaskFromRows(tx.QueryRow(query, models.TaskPending))
+	if err != nil {
+		return nil, nil // No pending task available
+	}
+
+	// Claim the task by setting executor_id to the triager
+	_, err = tx.Exec(
+		`UPDATE tasks SET executor_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		triagerID, task.ID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("claim pending task: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	task.ExecutorID = triagerID
+	slog.Info("triager claimed pending task", "task_id", task.ID, "triager_id", triagerID)
+	return task, nil
+}
+
+// CheckParentCompletion checks if all subtasks of a parent are done
+// and auto-transitions the parent accordingly.
+func (m *Manager) CheckParentCompletion(parentID string) error {
+	parent, err := m.tasks.GetByID(parentID)
+	if err != nil {
+		return fmt.Errorf("get parent: %w", err)
+	}
+
+	// Only auto-transition DECOMPOSED parents
+	if parent.Status != models.TaskDecomposed {
+		return nil
+	}
+
+	subtasks, err := m.tasks.ListByParent(parentID)
+	if err != nil {
+		return fmt.Errorf("list subtasks: %w", err)
+	}
+	if len(subtasks) == 0 {
+		return nil
+	}
+
+	allDone := true
+	anyFailed := false
+	for _, sub := range subtasks {
+		switch sub.Status {
+		case models.TaskCompleted, models.TaskArchived:
+			// done
+		case models.TaskFailed:
+			anyFailed = true
+		case models.TaskCancelled:
+			// treat as done
+		default:
+			allDone = false
+		}
+	}
+
+	if !allDone {
+		return nil
+	}
+
+	newStatus := models.TaskCompleted
+	if anyFailed {
+		newStatus = models.TaskFailed
+	}
+
+	slog.Info("auto-transitioning parent task", "parent_id", parentID, "new_status", newStatus)
+	return m.TransitionTask(parentID, newStatus)
 }
 
 // scanTaskFromRow is a helper to scan a task from a sql.Row.

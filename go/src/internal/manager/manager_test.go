@@ -708,6 +708,223 @@ func TestPopNextTask_DependencyResolved(t *testing.T) {
 	}
 }
 
+func TestTransitionTask_DecomposedTransitions(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	task := &models.Task{
+		Title:    "Decompose me",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// READY -> RUNNING
+	if err := mgr.TransitionTask(task.ID, models.TaskRunning); err != nil {
+		t.Fatalf("transition to RUNNING: %v", err)
+	}
+
+	// RUNNING -> DECOMPOSED
+	if err := mgr.TransitionTask(task.ID, models.TaskDecomposed); err != nil {
+		t.Errorf("transition RUNNING -> DECOMPOSED: %v", err)
+	}
+
+	updated, _ := mgr.GetTask(task.ID)
+	if updated.Status != models.TaskDecomposed {
+		t.Errorf("expected DECOMPOSED, got %s", updated.Status)
+	}
+
+	// DECOMPOSED -> COMPLETED (when all subtasks done)
+	if err := mgr.TransitionTask(task.ID, models.TaskCompleted); err != nil {
+		t.Errorf("transition DECOMPOSED -> COMPLETED: %v", err)
+	}
+}
+
+func TestTransitionTask_DecomposedInvalidTransition(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	task := &models.Task{
+		Title:    "Decompose me",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	mgr.TransitionTask(task.ID, models.TaskRunning)
+	mgr.TransitionTask(task.ID, models.TaskDecomposed)
+
+	// DECOMPOSED -> RUNNING is invalid
+	err := mgr.TransitionTask(task.ID, models.TaskRunning)
+	if err == nil {
+		t.Error("expected error for invalid transition DECOMPOSED -> RUNNING")
+	}
+}
+
+func TestCheckParentCompletion_AllCompleted(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create parent task and transition to DECOMPOSED
+	parent := &models.Task{
+		Title:    "Parent",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	mgr.TransitionTask(parent.ID, models.TaskRunning)
+	mgr.TransitionTask(parent.ID, models.TaskDecomposed)
+
+	// Create subtasks as COMPLETED
+	for i := 0; i < 3; i++ {
+		sub := &models.Task{
+			Title:    "Subtask",
+			Type:     models.TaskTypeCoding,
+			Status:   models.TaskCompleted,
+			Priority: 50,
+			ParentID: parent.ID,
+			Depth:    1,
+		}
+		if err := mgr.CreateTask(sub); err != nil {
+			t.Fatalf("create subtask: %v", err)
+		}
+	}
+
+	// Check parent completion
+	if err := mgr.CheckParentCompletion(parent.ID); err != nil {
+		t.Fatalf("check parent completion: %v", err)
+	}
+
+	updated, _ := mgr.GetTask(parent.ID)
+	if updated.Status != models.TaskCompleted {
+		t.Errorf("expected parent COMPLETED, got %s", updated.Status)
+	}
+}
+
+func TestCheckParentCompletion_SomeFailed(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	parent := &models.Task{
+		Title:    "Parent",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	mgr.TransitionTask(parent.ID, models.TaskRunning)
+	mgr.TransitionTask(parent.ID, models.TaskDecomposed)
+
+	// One completed, one failed
+	mgr.CreateTask(&models.Task{
+		Title: "Sub OK", Type: models.TaskTypeCoding, Status: models.TaskCompleted,
+		Priority: 50, ParentID: parent.ID, Depth: 1,
+	})
+	mgr.CreateTask(&models.Task{
+		Title: "Sub Fail", Type: models.TaskTypeCoding, Status: models.TaskFailed,
+		Priority: 50, ParentID: parent.ID, Depth: 1,
+	})
+
+	if err := mgr.CheckParentCompletion(parent.ID); err != nil {
+		t.Fatalf("check parent completion: %v", err)
+	}
+
+	updated, _ := mgr.GetTask(parent.ID)
+	if updated.Status != models.TaskFailed {
+		t.Errorf("expected parent FAILED, got %s", updated.Status)
+	}
+}
+
+func TestCheckParentCompletion_StillRunning(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	parent := &models.Task{
+		Title:    "Parent",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	mgr.TransitionTask(parent.ID, models.TaskRunning)
+	mgr.TransitionTask(parent.ID, models.TaskDecomposed)
+
+	mgr.CreateTask(&models.Task{
+		Title: "Sub Done", Type: models.TaskTypeCoding, Status: models.TaskCompleted,
+		Priority: 50, ParentID: parent.ID, Depth: 1,
+	})
+	mgr.CreateTask(&models.Task{
+		Title: "Sub Running", Type: models.TaskTypeCoding, Status: models.TaskRunning,
+		Priority: 50, ParentID: parent.ID, Depth: 1,
+	})
+
+	if err := mgr.CheckParentCompletion(parent.ID); err != nil {
+		t.Fatalf("check parent completion: %v", err)
+	}
+
+	updated, _ := mgr.GetTask(parent.ID)
+	if updated.Status != models.TaskDecomposed {
+		t.Errorf("expected parent still DECOMPOSED, got %s", updated.Status)
+	}
+}
+
+func TestPopNextPending(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create PENDING operator task
+	task := &models.Task{
+		Title:    "Needs triage",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskPending,
+		Source:   models.TaskSourceOperator,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Pop pending task
+	pending, err := mgr.PopNextPending("triager-01")
+	if err != nil {
+		t.Fatalf("pop next pending: %v", err)
+	}
+	if pending == nil {
+		t.Fatal("expected pending task, got nil")
+	}
+	if pending.ExecutorID != "triager-01" {
+		t.Errorf("expected executor_id triager-01, got %s", pending.ExecutorID)
+	}
+
+	// Second pop should return nil (task already claimed)
+	pending2, err := mgr.PopNextPending("triager-02")
+	if err != nil {
+		t.Fatalf("pop next pending 2: %v", err)
+	}
+	if pending2 != nil {
+		t.Error("expected nil for already-claimed task")
+	}
+}
+
 func TestAreDependenciesMet(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	cfg := &config.Config{}

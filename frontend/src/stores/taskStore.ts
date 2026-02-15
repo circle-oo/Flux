@@ -12,6 +12,7 @@ interface TaskState {
   setFilters: (filters: { status?: string; project_id?: string }) => void
   fetchTasks: () => Promise<void>
   getTask: (id: string) => Promise<Task>
+  fetchSubtasks: (parentId: string) => Promise<Task[]>
   createTask: (task: {
     title: string
     description: string
@@ -58,6 +59,15 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       return await api.getTask(id)
     } catch (error) {
       throw error
+    }
+  },
+
+  fetchSubtasks: async (parentId) => {
+    try {
+      return await api.listSubtasks(parentId)
+    } catch (error) {
+      console.error('Failed to fetch subtasks:', error)
+      return []
     }
   },
 

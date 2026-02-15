@@ -19,6 +19,7 @@ type Config struct {
 	CCUsage       CCUsageConfig       `yaml:"ccusage"`
 	Orchestrator  OrchestratorConfig  `yaml:"orchestrator"`
 	Executor      ExecutorConfig      `yaml:"executor"`
+	Triager       TriagerConfig       `yaml:"triager"`
 	Subtask       SubtaskConfig       `yaml:"subtask"`
 	Shutdown      ShutdownConfig      `yaml:"shutdown"`
 	Notifications NotificationsConfig `yaml:"notifications"`
@@ -27,6 +28,12 @@ type Config struct {
 	AutoUpdate    AutoUpdateConfig    `yaml:"auto_update"`
 	Projects      []ProjectSeed       `yaml:"projects"`
 	Logging       LoggingConfig       `yaml:"logging"`
+}
+
+type TriagerConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Model    string `yaml:"model"`
+	MaxTurns int    `yaml:"max_turns"`
 }
 
 type ServerConfig struct {

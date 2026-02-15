@@ -20,6 +20,7 @@ import (
 	"github.com/circle-oo/flux/internal/notifier"
 	"github.com/circle-oo/flux/internal/server"
 	"github.com/circle-oo/flux/internal/shutdown"
+	"github.com/circle-oo/flux/internal/triager"
 	"github.com/circle-oo/flux/internal/updater"
 	"github.com/circle-oo/flux/internal/vault"
 	"github.com/circle-oo/flux/web"
@@ -132,6 +133,16 @@ func main() {
 		exec.Run(ctx)
 	}()
 
+	// 9b. Start Triager component (if enabled)
+	var triage *triager.Triager
+	if cfg.Triager.Enabled {
+		triage = triager.New("triager-01", cfg, discord)
+		go func() {
+			logger.Info("triager started", "id", "triager-01")
+			triage.Run(ctx)
+		}()
+	}
+
 	// 10. Start auto-updater (polls git remote, rebuilds, and restarts via SIGTERM)
 	var autoUpdater *updater.Updater
 	if cfg.AutoUpdate.Enabled {
@@ -165,9 +176,12 @@ func main() {
 		autoUpdater.Stop()
 	}
 
-	// Stop executor
+	// Stop executor and triager
 	ctxCancel()
 	exec.Stop()
+	if triage != nil {
+		triage.Stop()
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Shutdown.PodGracePeriod)
 	defer shutdownCancel()
