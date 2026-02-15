@@ -39,11 +39,14 @@ fi
 echo "  npm: $(npm --version)"
 echo ""
 
+DEFAULT_CONFIG="$SCRIPT_DIR/config.yaml"
+TEMPLATE_CONFIG="$SCRIPT_DIR/config.yaml.template"
+
 # 2. Create config from template
-if [ ! -f config.yaml ]; then
+if [ ! -f "$DEFAULT_CONFIG" ]; then
     echo "Creating config.yaml from template..."
-    cp config.yaml.template config.yaml
-    echo "  Created config.yaml"
+    cp "$TEMPLATE_CONFIG" "$DEFAULT_CONFIG"
+    echo "  Created: $DEFAULT_CONFIG"
     echo "  IMPORTANT: Edit config.yaml and set your environment variables:"
     echo "    export FLUX_UI_PASSWORD='your-password'"
     echo "    export GITHUB_TOKEN='your-github-token'"
@@ -105,6 +108,7 @@ echo "Before starting, set required environment variables:"
 echo "  export FLUX_UI_PASSWORD='your-password'"
 echo ""
 echo "To start Flux:"
-echo "  ./go/bin/flux --config config.yaml"
+echo "  bash start.sh"
+echo "  # or: ./go/bin/flux --config config.yaml"
 echo ""
 echo "Then open http://localhost:8080 in your browser."
