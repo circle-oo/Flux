@@ -68,4 +68,16 @@
   .label {
     @apply block text-sm font-medium text-slate-300 mb-1;
   }
+
+  .btn-filter {
+    @apply px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors;
+  }
+
+  .btn-filter-active {
+    @apply btn-filter bg-slate-600 border-blue-500 text-white;
+  }
+
+  .btn-filter-inactive {
+    @apply btn-filter bg-slate-800 border-slate-600 text-slate-400 hover:border-slate-500 hover:text-slate-300;
+  }
 }

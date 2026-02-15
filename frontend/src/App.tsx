@@ -8,6 +8,7 @@ import Tasks from './pages/Tasks'
 import Projects from './pages/Projects'
 import PRs from './pages/PRs'
 import Logs from './pages/Logs'
+import Settings from './pages/Settings'
 import TaskDetail from './pages/TaskDetail'
 
 function App() {
@@ -28,6 +29,7 @@ function App() {
         <Route path="projects" element={<Projects />} />
         <Route path="prs" element={<PRs />} />
         <Route path="logs" element={<Logs />} />
+        <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
   )

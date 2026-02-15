@@ -140,8 +140,16 @@ func main() {
 			logger.Error("failed to get working directory for auto-updater", "error", err)
 		} else {
 			autoUpdater = updater.New(cfg.AutoUpdate, repoDir)
+			autoUpdater.OnStatusChange = func(status updater.Status) {
+				srv.Hub().Broadcast(server.Event{Type: "DEPLOY_STATUS", Data: status})
+			}
 			go autoUpdater.Start(ctx)
 		}
+	}
+
+	// Wire updater into server for deploy API
+	if autoUpdater != nil {
+		srv.SetUpdater(autoUpdater)
 	}
 
 	logger.Info("flux ready", "port", cfg.Server.Port)

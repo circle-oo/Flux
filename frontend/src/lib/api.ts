@@ -64,6 +64,26 @@ export interface Project {
   updated_at?: string
 }
 
+export interface UpdaterStatus {
+  enabled: boolean
+  running: boolean
+  state: string
+  branch: string
+  check_interval: string
+  last_check_at: string | null
+  last_update_at: string | null
+  last_error?: string
+  local_commit?: string
+  remote_commit?: string
+  update_count: number
+  next_check_at: string | null
+}
+
+export interface DeployStatusResponse {
+  version: string
+  updater: UpdaterStatus
+}
+
 class APIClient {
   private baseURL = ''
 
@@ -269,6 +289,17 @@ class APIClient {
   // System
   async restart(): Promise<{ status: string; message: string }> {
     return this.fetch('/api/system/restart', {
+      method: 'POST',
+    })
+  }
+
+  // Deploy
+  async getDeployStatus(): Promise<DeployStatusResponse> {
+    return this.fetch('/api/system/deploy/status')
+  }
+
+  async triggerDeploy(): Promise<{ status: string; message: string }> {
+    return this.fetch('/api/system/deploy', {
       method: 'POST',
     })
   }

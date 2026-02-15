@@ -13,6 +13,7 @@ import (
 	"github.com/circle-oo/flux/internal/config"
 	"github.com/circle-oo/flux/internal/models"
 	"github.com/circle-oo/flux/internal/notifier"
+	"github.com/circle-oo/flux/internal/updater"
 )
 
 // Server is the main HTTP server for Flux.
@@ -25,6 +26,7 @@ type Server struct {
 	ws         *WebSocketHub
 	logHandler *LogBroadcastHandler
 	notifier   *notifier.Discord
+	updater    *updater.Updater
 	webFS      fs.FS
 
 	goals    *models.GoalStore
@@ -113,6 +115,10 @@ func (s *Server) setupRoutes() {
 
 	// System endpoints (requires auth)
 	s.mux.Handle("POST /api/system/restart", s.authMiddleware(http.HandlerFunc(s.handleRestart)))
+
+	// Deploy endpoints (requires auth)
+	s.mux.Handle("GET /api/system/deploy/status", s.authMiddleware(http.HandlerFunc(s.handleDeployStatus)))
+	s.mux.Handle("POST /api/system/deploy", s.authMiddleware(http.HandlerFunc(s.handleDeploy)))
 
 	// Internal API (localhost only, no auth)
 	s.mux.Handle("POST /internal/tasks/next", s.localhostOnly(http.HandlerFunc(s.handleInternalNextTask)))

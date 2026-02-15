@@ -1,9 +1,34 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useGoalStore } from '../stores/goalStore'
 import { Task } from '../lib/api'
+
+function timeAgo(iso: string): string {
+  const now = Date.now()
+  const then = new Date(iso).getTime()
+  const seconds = Math.floor((now - then) / 1000)
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function duration(startIso: string, endIso: string): string {
+  const ms = new Date(endIso).getTime() - new Date(startIso).getTime()
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const remainMins = minutes % 60
+  return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
+}
 
 const priorityPresets = [
   { value: 1, label: 'Critical', color: 'text-red-400' },
@@ -23,6 +48,39 @@ const typeDescriptions: Record<string, string> = {
   PLANNING: 'Architecture, design, strategy',
 }
 
+const mainStatusFilters = [
+  { value: '', label: 'All' },
+  { value: 'READY', label: 'Ready' },
+  { value: 'RUNNING', label: 'Running' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'FAILED', label: 'Failed' },
+]
+
+const moreStatusFilters = [
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'RETRY', label: 'Retry' },
+  { value: 'ARCHIVED', label: 'Archived' },
+]
+
+type SortOption = 'priority' | 'newest' | 'updated' | 'status'
+
+const sortOptions: { value: SortOption; label: string }[] = [
+  { value: 'priority', label: 'Priority' },
+  { value: 'newest', label: 'Newest' },
+  { value: 'updated', label: 'Updated' },
+  { value: 'status', label: 'Status' },
+]
+
+const statusOrder: Record<string, number> = {
+  RUNNING: 0,
+  READY: 1,
+  RETRY: 2,
+  PENDING: 3,
+  FAILED: 4,
+  COMPLETED: 5,
+  ARCHIVED: 6,
+}
+
 export default function Tasks() {
   const {
     tasks,
@@ -38,6 +96,8 @@ export default function Tasks() {
   const { currentGoal, fetchCurrentGoal } = useGoalStore()
   const navigate = useNavigate()
   const [showForm, setShowForm] = useState(false)
+  const [showMoreStatuses, setShowMoreStatuses] = useState(false)
+  const [sortBy, setSortBy] = useState<SortOption>('priority')
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -55,6 +115,29 @@ export default function Tasks() {
     fetchProjects()
     fetchCurrentGoal()
   }, [fetchTasks, fetchProjects, fetchCurrentGoal])
+
+  const sortedTasks = useMemo(() => {
+    const sorted = [...tasks]
+    switch (sortBy) {
+      case 'priority':
+        sorted.sort((a, b) => a.priority - b.priority || new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        break
+      case 'newest':
+        sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        break
+      case 'updated':
+        sorted.sort((a, b) => {
+          const aTime = new Date(a.updated_at || a.created_at).getTime()
+          const bTime = new Date(b.updated_at || b.created_at).getTime()
+          return bTime - aTime
+        })
+        break
+      case 'status':
+        sorted.sort((a, b) => (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99))
+        break
+    }
+    return sorted
+  }, [tasks, sortBy])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -108,6 +191,11 @@ export default function Tasks() {
     }
   }
 
+  const handleStatusFilter = (value: string) => {
+    const newStatus = filters.status === value ? undefined : value || undefined
+    setFilters({ ...filters, status: newStatus })
+  }
+
   const activeProjects = projects.filter((p) => p.status === 'ACTIVE')
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]))
 
@@ -116,7 +204,14 @@ export default function Tasks() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-100 mb-2">Tasks</h1>
+          <div className="flex items-center gap-3 mb-2">
+            <h1 className="text-3xl font-bold text-slate-100">Tasks</h1>
+            {tasks.length > 0 && (
+              <span className="badge badge-info text-lg px-3 py-1">
+                {tasks.length}
+              </span>
+            )}
+          </div>
           <p className="text-slate-400">Manage and track system tasks</p>
         </div>
         <button
@@ -128,28 +223,49 @@ export default function Tasks() {
       </div>
 
       {/* Filters */}
-      <div className="card p-4 flex gap-4">
-        <div className="flex-1">
-          <label className="label">Status</label>
-          <select
-            value={filters.status || ''}
-            onChange={(e) =>
-              setFilters({ ...filters, status: e.target.value || undefined })
-            }
-            className="input"
-          >
-            <option value="">All</option>
-            <option value="PENDING">Pending</option>
-            <option value="READY">Ready</option>
-            <option value="RUNNING">Running</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="FAILED">Failed</option>
-            <option value="RETRY">Retry</option>
-            <option value="ARCHIVED">Archived</option>
-          </select>
-        </div>
-        <div className="flex-1">
-          <label className="label">Project</label>
+      <div className="card p-4 space-y-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Status filter buttons */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {mainStatusFilters.map((sf) => (
+              <button
+                key={sf.value}
+                onClick={() => handleStatusFilter(sf.value)}
+                className={
+                  (filters.status || '') === sf.value
+                    ? 'btn-filter-active'
+                    : 'btn-filter-inactive'
+                }
+              >
+                {sf.label}
+              </button>
+            ))}
+            {/* More statuses toggle */}
+            <button
+              onClick={() => setShowMoreStatuses(!showMoreStatuses)}
+              className="btn-filter-inactive text-slate-500"
+            >
+              {showMoreStatuses ? 'Less' : 'More'}
+            </button>
+            {showMoreStatuses &&
+              moreStatusFilters.map((sf) => (
+                <button
+                  key={sf.value}
+                  onClick={() => handleStatusFilter(sf.value)}
+                  className={
+                    filters.status === sf.value
+                      ? 'btn-filter-active'
+                      : 'btn-filter-inactive'
+                  }
+                >
+                  {sf.label}
+                </button>
+              ))}
+          </div>
+
+          <div className="w-px h-6 bg-slate-700" />
+
+          {/* Project dropdown (kept as-is since there can be many) */}
           <select
             value={filters.project_id || ''}
             onChange={(e) =>
@@ -158,16 +274,43 @@ export default function Tasks() {
                 project_id: e.target.value || undefined,
               })
             }
-            className="input"
+            className="input w-auto text-xs py-1.5"
           >
-            <option value="">All</option>
+            <option value="">All Projects</option>
             {activeProjects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
               </option>
             ))}
           </select>
+
+          <div className="w-px h-6 bg-slate-700" />
+
+          {/* Sort */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">Sort:</span>
+            {sortOptions.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setSortBy(opt.value)}
+                className={
+                  sortBy === opt.value
+                    ? 'btn-filter-active'
+                    : 'btn-filter-inactive'
+                }
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {/* Result count */}
+        {!isLoading && tasks.length > 0 && (
+          <p className="text-xs text-slate-500">
+            Showing {sortedTasks.length} task{sortedTasks.length !== 1 ? 's' : ''}
+          </p>
+        )}
       </div>
 
       {/* Create Form */}
@@ -382,18 +525,19 @@ export default function Tasks() {
           </div>
         ) : (
           <div className="space-y-3">
-            {tasks.map((task) => {
+            {sortedTasks.map((task) => {
               const project = projectMap[task.project_id]
               return (
-                <div key={task.id} className="card p-5 hover:border-slate-600 transition-colors">
+                <div
+                  key={task.id}
+                  className="card p-5 hover:border-slate-600 transition-colors cursor-pointer"
+                  onClick={() => navigate(`/tasks/${task.id}`)}
+                >
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       {/* Title row */}
                       <div className="flex items-center gap-2 mb-1.5">
-                        <h3
-                          className="text-base font-medium text-slate-100 hover:text-blue-400 cursor-pointer transition-colors truncate"
-                          onClick={() => navigate(`/tasks/${task.id}`)}
-                        >
+                        <h3 className="text-base font-medium text-slate-100 hover:text-blue-400 transition-colors truncate">
                           {task.title}
                         </h3>
                         <span
@@ -454,6 +598,22 @@ export default function Tasks() {
                         ) : null}
                       </div>
 
+                      {/* Timestamps row */}
+                      <div className="flex items-center gap-3 text-xs text-slate-600 mt-1">
+                        <span>Created {timeAgo(task.created_at)}</span>
+                        {task.started_at && (
+                          <span>Started {timeAgo(task.started_at)}</span>
+                        )}
+                        {task.completed_at && (
+                          <span>Done {timeAgo(task.completed_at)}</span>
+                        )}
+                        {task.started_at && task.completed_at && (
+                          <span className="text-slate-500">
+                            ({duration(task.started_at, task.completed_at)})
+                          </span>
+                        )}
+                      </div>
+
                       {/* Tags */}
                       {task.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 mt-2">
@@ -467,7 +627,7 @@ export default function Tasks() {
                     </div>
 
                     {/* Actions */}
-                    <div className="flex gap-2 ml-4 shrink-0">
+                    <div className="flex gap-2 ml-4 shrink-0" onClick={(e) => e.stopPropagation()}>
                       {(task.status === 'FAILED' || task.status === 'RETRY') && (
                         <button
                           onClick={() => handleRetry(task.id, task.title)}

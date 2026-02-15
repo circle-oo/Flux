@@ -9,10 +9,17 @@ import (
 	"syscall"
 )
 
-// handleRestart handles the restart endpoint.
+// handleRestart handles the legacy restart endpoint.
 // It updates the flux binary and restarts the service.
+// Prefer POST /api/system/deploy for the improved deploy flow.
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
-	slog.Info("restart requested")
+	slog.Info("restart requested (legacy endpoint)")
+
+	// If updater is available, delegate to the deploy endpoint
+	if s.updater != nil {
+		s.handleDeploy(w, r)
+		return
+	}
 
 	// Send success response before restarting
 	writeJSON(w, http.StatusOK, map[string]string{
@@ -25,66 +32,70 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	// Trigger restart in a goroutine to allow response to be sent
-	go func() {
-		slog.Info("executing restart sequence")
+	go s.legacyRestart()
+}
 
-		// Get the directory of the currently running binary
-		exePath, err := os.Executable()
-		if err != nil {
-			slog.Error("failed to get executable path", "error", err)
-			return
-		}
+// legacyRestart performs the git pull + make build + SIGTERM restart sequence.
+// Used when no auto-updater is configured.
+func (s *Server) legacyRestart() {
+	slog.Info("executing legacy restart sequence")
 
-		// Resolve symlinks
-		exePath, err = filepath.EvalSymlinks(exePath)
-		if err != nil {
-			slog.Error("failed to resolve symlinks", "error", err)
-			return
-		}
+	// Get the directory of the currently running binary
+	exePath, err := os.Executable()
+	if err != nil {
+		slog.Error("failed to get executable path", "error", err)
+		return
+	}
 
-		// Get the project root (assuming binary is in go/bin/)
-		projectRoot := filepath.Join(filepath.Dir(exePath), "..", "..")
-		projectRoot, err = filepath.Abs(projectRoot)
-		if err != nil {
-			slog.Error("failed to get absolute path", "error", err)
-			return
-		}
+	// Resolve symlinks
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		slog.Error("failed to resolve symlinks", "error", err)
+		return
+	}
 
-		slog.Info("project root detected", "path", projectRoot)
+	// Get the project root (assuming binary is in go/bin/)
+	projectRoot := filepath.Join(filepath.Dir(exePath), "..", "..")
+	projectRoot, err = filepath.Abs(projectRoot)
+	if err != nil {
+		slog.Error("failed to get absolute path", "error", err)
+		return
+	}
 
-		// Pull latest changes
-		slog.Info("pulling latest changes from git")
-		gitCmd := exec.Command("git", "pull")
-		gitCmd.Dir = projectRoot
-		if output, err := gitCmd.CombinedOutput(); err != nil {
-			slog.Error("git pull failed", "error", err, "output", string(output))
-			// Continue anyway - the update might not be necessary
-		} else {
-			slog.Info("git pull completed", "output", string(output))
-		}
+	slog.Info("project root detected", "path", projectRoot)
 
-		// Rebuild the binary
-		slog.Info("rebuilding flux binary")
-		buildCmd := exec.Command("make", "build")
-		buildCmd.Dir = projectRoot
-		if output, err := buildCmd.CombinedOutput(); err != nil {
-			slog.Error("build failed", "error", err, "output", string(output))
-			s.notifier.Send("error", "Restart failed: build error")
-			return
-		}
-		slog.Info("build completed successfully")
+	// Pull latest changes
+	slog.Info("pulling latest changes from git")
+	gitCmd := exec.Command("git", "pull")
+	gitCmd.Dir = projectRoot
+	if output, err := gitCmd.CombinedOutput(); err != nil {
+		slog.Error("git pull failed", "error", err, "output", string(output))
+		s.notifier.Send("error", "Restart failed: git pull error")
+		// Continue anyway - the update might not be necessary
+	} else {
+		slog.Info("git pull completed", "output", string(output))
+	}
 
-		// Send notification
-		s.notifier.Send("info", "Flux updated successfully, restarting...")
+	// Rebuild the binary
+	slog.Info("rebuilding flux binary")
+	buildCmd := exec.Command("make", "build")
+	buildCmd.Dir = projectRoot
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		slog.Error("build failed", "error", err, "output", string(output))
+		s.notifier.Send("error", "Restart failed: build error")
+		return
+	}
+	slog.Info("build completed successfully")
 
-		// Restart the process
-		slog.Info("restarting process", "pid", os.Getpid())
+	// Send notification
+	s.notifier.Send("info", "Flux updated successfully, restarting...")
 
-		// Send SIGTERM to self to trigger graceful shutdown
-		// The process manager (launchd, systemd, or manual restart) should restart it
-		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-			slog.Error("failed to send SIGTERM", "error", err)
-		}
-	}()
+	// Restart the process
+	slog.Info("restarting process", "pid", os.Getpid())
+
+	// Send SIGTERM to self to trigger graceful shutdown
+	// The process manager (launchd, systemd, or manual restart) should restart it
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		slog.Error("failed to send SIGTERM", "error", err)
+	}
 }
