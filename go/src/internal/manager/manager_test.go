@@ -182,6 +182,7 @@ func TestTransitionTask_ValidTransitions(t *testing.T) {
 		Title:    "Test Task",
 		Type:     models.TaskTypeCoding,
 		Status:   models.TaskPending,
+		Source:   models.TaskSourceOperator, // stays PENDING (awaiting triage)
 		Priority: 50,
 	}
 	if err := mgr.CreateTask(task); err != nil {
@@ -259,6 +260,7 @@ func TestTransitionTask_InvalidTransitions(t *testing.T) {
 		Title:    "Test Task",
 		Type:     models.TaskTypeCoding,
 		Status:   models.TaskPending,
+		Source:   models.TaskSourceOperator, // stays PENDING (awaiting triage)
 		Priority: 50,
 	}
 	if err := mgr.CreateTask(task); err != nil {

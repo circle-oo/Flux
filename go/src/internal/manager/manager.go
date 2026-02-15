@@ -13,12 +13,13 @@ import (
 
 // validTransitions defines the state machine for task status transitions.
 var validTransitions = map[string][]string{
-	models.TaskPending:   {models.TaskReady},
-	models.TaskReady:     {models.TaskRunning},
-	models.TaskRunning:   {models.TaskCompleted, models.TaskFailed, models.TaskRetry},
+	models.TaskPending:   {models.TaskReady, models.TaskCancelled},
+	models.TaskReady:     {models.TaskRunning, models.TaskCancelled},
+	models.TaskRunning:   {models.TaskCompleted, models.TaskFailed, models.TaskRetry, models.TaskCancelled},
 	models.TaskFailed:    {models.TaskRetry, models.TaskArchived},
 	models.TaskRetry:     {models.TaskRunning},
 	models.TaskCompleted: {models.TaskArchived},
+	models.TaskCancelled: {models.TaskArchived},
 }
 
 // Manager coordinates task distribution and state transitions.

@@ -69,9 +69,13 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Broadcast task update via WebSocket
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
-	// Run triage asynchronously for operator-created tasks
-	if task.Source == models.TaskSourceOperator {
+	// Run triage asynchronously for operator-created tasks.
+	// Only run if executor config has a valid timeout (indicates triage is available).
+	if task.Source == models.TaskSourceOperator && s.config.Executor.MaxExecutionTime > 0 {
 		go s.triageTask(task)
+	} else if task.Source == models.TaskSourceOperator && task.Status == models.TaskPending {
+		// No triage available — promote directly to READY
+		s.promoteToReady(task)
 	}
 
 	writeJSON(w, http.StatusCreated, task)
@@ -239,7 +243,8 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // triageTask runs async triage on a task using Claude to analyze requirements,
-// rewrite the description, and suggest priority.
+// rewrite the description, and suggest priority. After triage completes (or fails),
+// the task is moved from PENDING to READY so the executor can pick it up.
 func (s *Server) triageTask(task *models.Task) {
 	slog.Info("starting async triage", "task_id", task.ID, "title", task.Title)
 
@@ -249,6 +254,8 @@ func (s *Server) triageTask(task *models.Task) {
 	result, err := executor.TriageTask(ctx, runner, task)
 	if err != nil {
 		slog.Warn("triage failed, task will use original description", "task_id", task.ID, "error", err)
+		// Even on failure, move PENDING -> READY so the task doesn't get stuck
+		s.promoteToReady(task)
 		return
 	}
 
@@ -262,12 +269,26 @@ func (s *Server) triageTask(task *models.Task) {
 		task.Priority = result.Priority
 	}
 
+	// Move to READY after triage
+	task.Status = models.TaskReady
+
 	if err := s.tasks.Update(task); err != nil {
 		slog.Error("failed to update task after triage", "task_id", task.ID, "error", err)
 		return
 	}
 
 	slog.Info("triage complete, task updated", "task_id", task.ID)
+	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
+}
+
+// promoteToReady moves a PENDING task to READY status.
+func (s *Server) promoteToReady(task *models.Task) {
+	task.Status = models.TaskReady
+	if err := s.tasks.Update(task); err != nil {
+		slog.Error("failed to promote task to READY", "task_id", task.ID, "error", err)
+		return
+	}
+	slog.Info("task promoted to READY", "task_id", task.ID)
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 }
 

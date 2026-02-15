@@ -142,7 +142,7 @@ func TestTaskStore_CreateAndGet(t *testing.T) {
 	}
 }
 
-func TestTaskStore_OperatorGoesToReady(t *testing.T) {
+func TestTaskStore_OperatorStaysPendingForTriage(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	store := NewTaskStore(db)
 
@@ -156,8 +156,9 @@ func TestTaskStore_OperatorGoesToReady(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if task.Status != TaskReady {
-		t.Errorf("expected READY for operator task, got %s", task.Status)
+	// Operator tasks stay PENDING until triage promotes them to READY
+	if task.Status != TaskPending {
+		t.Errorf("expected PENDING for operator task (awaiting triage), got %s", task.Status)
 	}
 }
 

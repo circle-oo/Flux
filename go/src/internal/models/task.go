@@ -153,8 +153,9 @@ func (s *TaskStore) Create(t *Task) error {
 		t.Tags = []string{}
 	}
 
-	// Operator tasks go directly to READY
-	if t.Source == TaskSourceOperator && t.Status == TaskPending {
+	// Operator tasks stay PENDING until triage completes, then move to READY.
+	// Non-operator tasks (SYSTEM, SELF) go directly to READY.
+	if t.Source != TaskSourceOperator && t.Status == TaskPending {
 		t.Status = TaskReady
 	}
 
