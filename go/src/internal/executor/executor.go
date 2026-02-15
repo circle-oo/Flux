@@ -123,10 +123,22 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	var worktreePath string
 	if task.BranchName != "" {
 		// CHANGES_REQUESTED fix: reuse existing worktree
+		// Fetch latest refs first so we can reset to the newest branch commit
+		if err := e.worktree.EnsureBareRepo(project.RepoURL, project.Name); err != nil {
+			slog.Error("failed to ensure bare repo", "error", err)
+			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("bare repo failed: %v", err), 0, 0)
+			return
+		}
 		worktreePath, err = e.worktree.FindByBranch(project.Name, task.BranchName)
 		if err != nil {
 			slog.Error("failed to find worktree by branch", "branch", task.BranchName, "error", err)
 			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("worktree not found: %v", err), 0, 0)
+			return
+		}
+		// Update worktree to latest branch commit
+		if err := e.worktree.UpdateWorktree(project.Name, worktreePath, task.BranchName); err != nil {
+			slog.Error("failed to update worktree", "branch", task.BranchName, "error", err)
+			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("worktree update failed: %v", err), 0, 0)
 			return
 		}
 	} else {

@@ -3,6 +3,7 @@ package executor
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,32 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 	}
 
 	return worktreePath, branchName, nil
+}
+
+// UpdateWorktree fetches the latest remote refs and resets the worktree to the
+// latest commit on its branch. This ensures the executor always starts a task
+// with the most recent code, even if commits were pushed externally.
+func (wm *WorktreeManager) UpdateWorktree(projectName, worktreePath, branchName string) error {
+	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+
+	// Fetch latest from remote into the bare repo
+	fetchCmd := exec.Command("git", "-C", bareDir, "fetch", "--all")
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to fetch updates: %w: %s", err, output)
+	}
+
+	// Reset the worktree to the latest remote branch commit
+	// Use origin/<branch> to get the remote tracking ref
+	remoteRef := fmt.Sprintf("origin/%s", branchName)
+	resetCmd := exec.Command("git", "-C", worktreePath, "reset", "--hard", remoteRef)
+	if output, err := resetCmd.CombinedOutput(); err != nil {
+		// If the remote ref doesn't exist (new branch not yet pushed), that's OK —
+		// fall back to just making sure we're on the right local branch
+		slog.Warn("reset to remote ref failed, staying on local branch",
+			"branch", branchName, "error", err, "output", string(output))
+	}
+
+	return nil
 }
 
 // FindByBranch finds a worktree by its branch name
