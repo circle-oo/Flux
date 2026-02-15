@@ -25,7 +25,7 @@ func (s *Server) handleInternalNextTask(w http.ResponseWriter, r *http.Request) 
 	// Accept empty body gracefully (backwards compat with Phase 1 stub tests)
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := readJSON(w, r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid request body")
+			writeError(w, http.StatusBadRequest, errInvalidBody)
 			return
 		}
 	}
@@ -40,8 +40,7 @@ func (s *Server) handleInternalNextTask(w http.ResponseWriter, r *http.Request) 
 
 	task, err := s.mgr.PopNextTask(req.PodType)
 	if err != nil {
-		slog.Error("failed to pop next task", "pod_type", req.PodType, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to pop next task", "pod_type", req.PodType, "error", err)
 		return
 	}
 
@@ -75,7 +74,7 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 		PRStatus     string  `json:"pr_status"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, errInvalidBody)
 		return
 	}
 
@@ -83,7 +82,7 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
 
@@ -105,7 +104,7 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 		// Reload task to get updated state
 		task, err = s.tasks.GetByID(id)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "task not found")
+			writeError(w, http.StatusNotFound, errTaskNotFound)
 			return
 		}
 	} else {
@@ -152,8 +151,7 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to update task", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to update task", "id", id, "error", err)
 		return
 	}
 
@@ -183,13 +181,13 @@ func (s *Server) handleInternalTaskStarted(w http.ResponseWriter, r *http.Reques
 		BranchName string `json:"branch_name"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, errInvalidBody)
 		return
 	}
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
 
@@ -204,8 +202,7 @@ func (s *Server) handleInternalTaskStarted(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to update task on start", "task_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to update task on start", "task_id", id, "error", err)
 		return
 	}
 
@@ -224,7 +221,7 @@ func (s *Server) handleInternalNextPending(w http.ResponseWriter, r *http.Reques
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := readJSON(w, r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid request body")
+			writeError(w, http.StatusBadRequest, errInvalidBody)
 			return
 		}
 	}
@@ -238,8 +235,7 @@ func (s *Server) handleInternalNextPending(w http.ResponseWriter, r *http.Reques
 
 	task, err := s.mgr.PopNextPending(req.TriagerID)
 	if err != nil {
-		slog.Error("failed to pop next pending task", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to pop next pending task", "error", err)
 		return
 	}
 
@@ -263,7 +259,7 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 		Priority    int    `json:"priority"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, errInvalidBody)
 		return
 	}
 
@@ -271,7 +267,7 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
 
@@ -292,8 +288,7 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 	task.ExecutorID = "" // Clear triager claim
 
 	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to update task after triage", "task_id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to update task after triage", "task_id", id, "error", err)
 		return
 	}
 
@@ -314,7 +309,7 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 		} `json:"subtasks"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, errInvalidBody)
 		return
 	}
 
@@ -341,8 +336,7 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 	// Validate count: max subtasks per parent
 	existingCount, err := s.tasks.CountByParent(req.ParentID)
 	if err != nil {
-		slog.Error("failed to count subtasks", "parent_id", req.ParentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to count subtasks", "parent_id", req.ParentID, "error", err)
 		return
 	}
 	if existingCount+len(req.Subtasks) > s.config.Subtask.MaxPerTask {
@@ -353,19 +347,18 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 	var created []*models.Task
 	for _, sub := range req.Subtasks {
 		task := &models.Task{
-			Title:     sub.Title,
+			Title:       sub.Title,
 			Description: sub.Description,
-			Type:      parent.Type,
-			Priority:  parent.Priority,
-			Source:    models.TaskSourceSelf,
-			ProjectID: parent.ProjectID,
-			ParentID:  parent.ID,
-			Depth:     parent.Depth + 1,
-			GoalID:    parent.GoalID,
+			Type:        parent.Type,
+			Priority:    parent.Priority,
+			Source:      models.TaskSourceSelf,
+			ProjectID:   parent.ProjectID,
+			ParentID:    parent.ID,
+			Depth:       parent.Depth + 1,
+			GoalID:      parent.GoalID,
 		}
 		if err := s.tasks.Create(task); err != nil {
-			slog.Error("failed to create subtask", "parent_id", parent.ID, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal server error")
+			serverError(w, "failed to create subtask", "parent_id", parent.ID, "error", err)
 			return
 		}
 		slog.Info("internal API: subtask created", "parent_id", parent.ID, "subtask_id", task.ID, "title", sub.Title)
@@ -392,7 +385,7 @@ func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request
 		Tags        []string `json:"tags"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, errInvalidBody)
 		return
 	}
 
@@ -430,8 +423,7 @@ func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := s.tasks.Create(task); err != nil {
-		slog.Error("failed to create internal task", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		serverError(w, "failed to create internal task", "error", err)
 		return
 	}
 
@@ -446,7 +438,7 @@ func (s *Server) handleInternalTaskStatus(w http.ResponseWriter, r *http.Request
 	id := r.PathValue("id")
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": task.Status})
@@ -494,7 +486,7 @@ func (s *Server) handleInternalGetProject(w http.ResponseWriter, r *http.Request
 	project, err := s.projects.GetByID(id)
 	if err != nil {
 		slog.Error("internal API: failed to get project", "id", id, "error", err)
-		writeError(w, http.StatusNotFound, "project not found")
+		writeError(w, http.StatusNotFound, errProjectNotFound)
 		return
 	}
 

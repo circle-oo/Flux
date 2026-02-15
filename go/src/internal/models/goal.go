@@ -2,9 +2,7 @@ package models
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -65,19 +63,19 @@ func (s *GoalStore) Create(g *Goal) error {
 		g.Metrics = []string{}
 	}
 
-	prioritiesJSON, err := json.Marshal(g.Priorities)
+	prioritiesJSON, err := marshalStringSlice("priorities", g.Priorities)
 	if err != nil {
-		return fmt.Errorf("marshal priorities: %w", err)
+		return err
 	}
-	metricsJSON, err := json.Marshal(g.Metrics)
+	metricsJSON, err := marshalStringSlice("metrics", g.Metrics)
 	if err != nil {
-		return fmt.Errorf("marshal metrics: %w", err)
+		return err
 	}
 
 	_, err = s.DB.Exec(
 		`INSERT INTO goals (id, title, description, priorities, metrics, status, source, active_since)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		g.ID, g.Title, g.Description, string(prioritiesJSON), string(metricsJSON),
+		g.ID, g.Title, g.Description, prioritiesJSON, metricsJSON,
 		g.Status, g.Source, g.ActiveSince,
 	)
 	if err != nil {
@@ -88,19 +86,13 @@ func (s *GoalStore) Create(g *Goal) error {
 
 // GetByID retrieves a goal by its ID.
 func (s *GoalStore) GetByID(id string) (*Goal, error) {
-	row := s.DB.QueryRow(
-		`SELECT id, title, description, priorities, metrics, status, source, created_at, active_since
-		 FROM goals WHERE id = ?`, id,
-	)
+	row := s.DB.QueryRow(goalSelectSQL+" WHERE id = ?", id)
 	return scanGoal(row)
 }
 
 // GetCurrent retrieves the current ACTIVE goal (at most one).
 func (s *GoalStore) GetCurrent() (*Goal, error) {
-	row := s.DB.QueryRow(
-		`SELECT id, title, description, priorities, metrics, status, source, created_at, active_since
-		 FROM goals WHERE status = ? LIMIT 1`, GoalActive,
-	)
+	row := s.DB.QueryRow(goalSelectSQL+" WHERE status = ? LIMIT 1", GoalActive)
 	g, err := scanGoal(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -110,10 +102,7 @@ func (s *GoalStore) GetCurrent() (*Goal, error) {
 
 // List retrieves all goals ordered by created_at descending.
 func (s *GoalStore) List() ([]*Goal, error) {
-	rows, err := s.DB.Query(
-		`SELECT id, title, description, priorities, metrics, status, source, created_at, active_since
-		 FROM goals ORDER BY created_at DESC`,
-	)
+	rows, err := s.DB.Query(goalSelectSQL + " ORDER BY created_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("query goals: %w", err)
 	}
@@ -121,7 +110,7 @@ func (s *GoalStore) List() ([]*Goal, error) {
 
 	var goals []*Goal
 	for rows.Next() {
-		g, err := scanGoalRow(rows)
+		g, err := scanGoal(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -132,19 +121,19 @@ func (s *GoalStore) List() ([]*Goal, error) {
 
 // Update modifies an existing goal.
 func (s *GoalStore) Update(g *Goal) error {
-	prioritiesJSON, err := json.Marshal(g.Priorities)
+	prioritiesJSON, err := marshalStringSlice("priorities", g.Priorities)
 	if err != nil {
-		return fmt.Errorf("marshal priorities: %w", err)
+		return err
 	}
-	metricsJSON, err := json.Marshal(g.Metrics)
+	metricsJSON, err := marshalStringSlice("metrics", g.Metrics)
 	if err != nil {
-		return fmt.Errorf("marshal metrics: %w", err)
+		return err
 	}
 
 	_, err = s.DB.Exec(
 		`UPDATE goals SET title = ?, description = ?, priorities = ?, metrics = ?,
 		 status = ?, source = ?, active_since = ? WHERE id = ?`,
-		g.Title, g.Description, string(prioritiesJSON), string(metricsJSON),
+		g.Title, g.Description, prioritiesJSON, metricsJSON,
 		g.Status, g.Source, g.ActiveSince, g.ID,
 	)
 	if err != nil {
@@ -201,52 +190,23 @@ func (s *GoalStore) Activate(id string) error {
 	return tx.Commit()
 }
 
-func scanGoal(row *sql.Row) (*Goal, error) {
-	var g Goal
-	var prioritiesJSON, metricsJSON string
-	err := row.Scan(
-		&g.ID, &g.Title, &g.Description, &prioritiesJSON, &metricsJSON,
-		&g.Status, &g.Source, &g.CreatedAt, &g.ActiveSince,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal([]byte(prioritiesJSON), &g.Priorities); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "priorities", "error", err)
-	}
-	if err := json.Unmarshal([]byte(metricsJSON), &g.Metrics); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "metrics", "error", err)
-	}
-	if g.Priorities == nil {
-		g.Priorities = []string{}
-	}
-	if g.Metrics == nil {
-		g.Metrics = []string{}
-	}
-	return &g, nil
-}
+const goalSelectSQL = `SELECT id, title, description, priorities, metrics, status, source, created_at, active_since
+	FROM goals`
 
-func scanGoalRow(rows *sql.Rows) (*Goal, error) {
+// scanGoal scans a goal from any source that implements Scan (works with
+// both *sql.Row and *sql.Rows). This is the single source of truth for
+// the scan field order — it must match goalSelectSQL.
+func scanGoal(scanner interface{ Scan(...interface{}) error }) (*Goal, error) {
 	var g Goal
 	var prioritiesJSON, metricsJSON string
-	err := rows.Scan(
+	err := scanner.Scan(
 		&g.ID, &g.Title, &g.Description, &prioritiesJSON, &metricsJSON,
 		&g.Status, &g.Source, &g.CreatedAt, &g.ActiveSince,
 	)
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal([]byte(prioritiesJSON), &g.Priorities); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "priorities", "error", err)
-	}
-	if err := json.Unmarshal([]byte(metricsJSON), &g.Metrics); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "metrics", "error", err)
-	}
-	if g.Priorities == nil {
-		g.Priorities = []string{}
-	}
-	if g.Metrics == nil {
-		g.Metrics = []string{}
-	}
+	g.Priorities = unmarshalStringSlice("priorities", prioritiesJSON)
+	g.Metrics = unmarshalStringSlice("metrics", metricsJSON)
 	return &g, nil
 }

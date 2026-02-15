@@ -97,7 +97,7 @@ func (s *AlertStore) List(status string) ([]*Alert, error) {
 
 	var alerts []*Alert
 	for rows.Next() {
-		a, err := scanAlertRow(rows)
+		a, err := scanAlert(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -131,21 +131,12 @@ func (s *AlertStore) Delete(id string) error {
 const alertSelectSQL = `SELECT id, service_name, severity, type, message, task_id, status, created_at, resolved_at
 	FROM alerts`
 
-func scanAlert(row *sql.Row) (*Alert, error) {
+// scanAlert scans an alert from any source that implements Scan (works with
+// both *sql.Row and *sql.Rows). This is the single source of truth for
+// the scan field order — it must match alertSelectSQL.
+func scanAlert(scanner interface{ Scan(...interface{}) error }) (*Alert, error) {
 	var a Alert
-	err := row.Scan(
-		&a.ID, &a.ServiceName, &a.Severity, &a.Type, &a.Message,
-		&a.TaskID, &a.Status, &a.CreatedAt, &a.ResolvedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &a, nil
-}
-
-func scanAlertRow(rows *sql.Rows) (*Alert, error) {
-	var a Alert
-	err := rows.Scan(
+	err := scanner.Scan(
 		&a.ID, &a.ServiceName, &a.Severity, &a.Type, &a.Message,
 		&a.TaskID, &a.Status, &a.CreatedAt, &a.ResolvedAt,
 	)

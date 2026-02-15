@@ -2,7 +2,6 @@ package models
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -160,13 +159,13 @@ func (s *TaskStore) Create(t *Task) error {
 		t.Status = TaskReady
 	}
 
-	dependsOnJSON, err := json.Marshal(t.DependsOn)
+	dependsOnJSON, err := marshalStringSlice("depends_on", t.DependsOn)
 	if err != nil {
-		return fmt.Errorf("marshal depends_on: %w", err)
+		return err
 	}
-	tagsJSON, err := json.Marshal(t.Tags)
+	tagsJSON, err := marshalStringSlice("tags", t.Tags)
 	if err != nil {
-		return fmt.Errorf("marshal tags: %w", err)
+		return err
 	}
 
 	_, err = s.DB.Exec(
@@ -178,7 +177,7 @@ func (s *TaskStore) Create(t *Task) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Title, t.Description, t.Type, t.Status, t.Priority, t.Source,
 		t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
-		string(dependsOnJSON), string(tagsJSON), t.Prompt,
+		dependsOnJSON, tagsJSON, t.Prompt,
 		t.Result, t.ErrorLog, t.ExecutorID, t.Model, t.BranchName,
 		t.PRUrl, t.PRStatus, t.DiffLines, t.FilesChanged,
 		t.TriageAnalysis, t.Plan, t.TestPassed,
@@ -258,13 +257,13 @@ func (s *TaskStore) List(f ListFilter) ([]*Task, error) {
 
 // Update modifies an existing task.
 func (s *TaskStore) Update(t *Task) error {
-	dependsOnJSON, err := json.Marshal(t.DependsOn)
+	dependsOnJSON, err := marshalStringSlice("depends_on", t.DependsOn)
 	if err != nil {
-		return fmt.Errorf("marshal depends_on: %w", err)
+		return err
 	}
-	tagsJSON, err := json.Marshal(t.Tags)
+	tagsJSON, err := marshalStringSlice("tags", t.Tags)
 	if err != nil {
-		return fmt.Errorf("marshal tags: %w", err)
+		return err
 	}
 
 	_, err = s.DB.Exec(
@@ -278,7 +277,7 @@ func (s *TaskStore) Update(t *Task) error {
 		 started_at = ?, completed_at = ? WHERE id = ?`,
 		t.Title, t.Description, t.Type, t.Status, t.Priority,
 		t.Source, t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
-		string(dependsOnJSON), string(tagsJSON), t.Prompt, t.Result, t.ErrorLog,
+		dependsOnJSON, tagsJSON, t.Prompt, t.Result, t.ErrorLog,
 		t.ExecutorID, t.Model, t.BranchName, t.PRUrl, t.PRStatus, t.DiffLines,
 		t.FilesChanged, t.TriageAnalysis, t.Plan, t.TestPassed,
 		t.RetryCount, t.CrashRecovery,
@@ -507,17 +506,7 @@ func ScanTask(scanner interface{ Scan(...interface{}) error }) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal([]byte(dependsOnJSON), &t.DependsOn); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "depends_on", "error", err)
-	}
-	if err := json.Unmarshal([]byte(tagsJSON), &t.Tags); err != nil {
-		slog.Warn("corrupt JSON in DB", "field", "tags", "error", err)
-	}
-	if t.DependsOn == nil {
-		t.DependsOn = []string{}
-	}
-	if t.Tags == nil {
-		t.Tags = []string{}
-	}
+	t.DependsOn = unmarshalStringSlice("depends_on", dependsOnJSON)
+	t.Tags = unmarshalStringSlice("tags", tagsJSON)
 	return &t, nil
 }

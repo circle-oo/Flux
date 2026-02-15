@@ -220,11 +220,26 @@ func SetVersion(v string) {
 	version = v
 }
 
+// Common error messages returned by API handlers.
+const (
+	errInternalServer   = "internal server error"
+	errInvalidBody      = "invalid request body"
+	errTaskNotFound     = "task not found"
+	errGoalNotFound     = "goal not found"
+	errProjectNotFound  = "project not found"
+)
+
 // writeJSON writes a JSON response with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// serverError logs the error and writes a 500 JSON response.
+func serverError(w http.ResponseWriter, msg string, args ...any) {
+	slog.Error(msg, args...)
+	writeError(w, http.StatusInternalServerError, errInternalServer)
 }
 
 // Hub returns the WebSocket hub for external wiring (e.g. log broadcasting).
