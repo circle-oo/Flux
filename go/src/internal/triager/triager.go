@@ -105,7 +105,7 @@ func (t *Triager) processNext(ctx context.Context) {
 	result, err := TriageTask(ctx, t.claude, task)
 	if err != nil {
 		slog.Warn("triage failed, promoting with original description",
-			"task_id", task.ID, "error", err, "component", component)
+			"task_id", task.ID, "title", task.Title, "error", err, "component", component)
 		// Even on failure, promote to READY so the task doesn't get stuck
 		if reportErr := t.client.ReportTriaged(task.ID, "", "", 0, ""); reportErr != nil {
 			slog.Error("failed to promote task after triage failure",
@@ -113,6 +113,11 @@ func (t *Triager) processNext(ctx context.Context) {
 		}
 		return
 	}
+
+	slog.Info("reporting triage results",
+		"task_id", task.ID, "has_analysis", result.Analysis != "",
+		"analysis_len", len(result.Analysis), "priority", result.Priority, "model", result.Model,
+		"component", component)
 
 	if reportErr := t.client.ReportTriaged(task.ID, result.Analysis, result.Description, result.Priority, result.Model); reportErr != nil {
 		slog.Error("failed to report triage results",
@@ -187,22 +192,46 @@ func TriageTask(ctx context.Context, runner *executor.ClaudeCodeRunner, task *mo
 		WorkDir:  "/tmp",
 	})
 	if err != nil {
+		stderr, stdoutLen := "", 0
+		if result != nil {
+			stderr = truncate(result.Stderr, 500)
+			stdoutLen = len(result.Stdout)
+		}
+		slog.Error("triage CLI execution failed",
+			"task_id", task.ID, "error", err,
+			"stderr", stderr, "stdout_len", stdoutLen)
 		return nil, fmt.Errorf("triage execution failed: %w", err)
 	}
 
 	if result.ExitCode != 0 {
-		return nil, fmt.Errorf("triage exited with code %d", result.ExitCode)
+		slog.Error("triage CLI exited with error",
+			"task_id", task.ID, "exit_code", result.ExitCode,
+			"stderr", truncate(result.Stderr, 500),
+			"stdout_len", len(result.Stdout))
+		return nil, fmt.Errorf("triage exited with code %d: %s", result.ExitCode, truncate(result.Stderr, 200))
 	}
 
 	// Parse the response
 	parsed, err := executor.ParseResponse(result.Stdout)
 	if err != nil {
+		slog.Error("triage response parse failed",
+			"task_id", task.ID, "error", err,
+			"stdout_prefix", truncate(result.Stdout, 500))
 		return nil, fmt.Errorf("failed to parse triage response: %w", err)
 	}
 
+	slog.Info("triage raw response",
+		"task_id", task.ID,
+		"result_text_len", len(parsed.ResultText),
+		"result_text_prefix", truncate(parsed.ResultText, 300))
+
 	triage := parseTriageResponse(parsed.ResultText, task)
 	slog.Info("triage complete",
-		"task_id", task.ID, "suggested_priority", triage.Priority, "suggested_model", triage.Model)
+		"task_id", task.ID,
+		"suggested_priority", triage.Priority,
+		"suggested_model", triage.Model,
+		"has_analysis", triage.Analysis != "",
+		"analysis_len", len(triage.Analysis))
 
 	return triage, nil
 }
@@ -304,4 +333,12 @@ func parseTriageResponse(text string, task *models.Task) *TriageResult {
 	}
 
 	return result
+}
+
+// truncate returns s truncated to maxLen characters.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
