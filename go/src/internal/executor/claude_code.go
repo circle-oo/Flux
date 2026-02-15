@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -51,6 +52,8 @@ func NewClaudeCodeRunner(cfg *config.ExecutorConfig) *ClaudeCodeRunner {
 
 // Run executes the Claude Code CLI with the given options.
 func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*ClaudeCodeResult, error) {
+	slog.Info("starting claude code CLI", "model", opts.Model, "workdir", opts.WorkDir, "has_system_prompt", opts.SystemPrompt != "")
+
 	// Create timeout context BEFORE exec.CommandContext (CRITICAL TIMEOUT BUG FIX)
 	timeoutCtx, cancel := context.WithTimeout(ctx, r.cfg.MaxExecutionTime)
 	defer cancel()
@@ -64,6 +67,7 @@ func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*Claud
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 	}
+	slog.Debug("claude code CLI args", "args", args)
 
 	if opts.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", opts.SystemPrompt)
@@ -101,8 +105,11 @@ func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*Claud
 		}
 	}
 
+	slog.Info("claude code CLI completed", "exit_code", result.ExitCode, "duration", duration, "stdout_size", len(result.Stdout), "stderr_size", len(result.Stderr))
+
 	// Check output size guardrail
 	if stdoutBuf.truncated {
+		slog.Warn("stdout exceeded max output size", "max_bytes", r.cfg.MaxOutputSize)
 		return result, fmt.Errorf("stdout exceeded max output size (%d bytes)", r.cfg.MaxOutputSize)
 	}
 
@@ -113,6 +120,9 @@ func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*Claud
 			result.SessionID = parsed.SessionID
 			result.TokensUsed = parsed.TokensUsed
 			result.CostUSD = parsed.CostUSD
+			slog.Debug("claude code parsed response", "session_id", result.SessionID, "tokens", result.TokensUsed, "cost_usd", result.CostUSD)
+		} else {
+			slog.Warn("failed to parse claude code response", "error", parseErr)
 		}
 		// Don't fail on parse errors - just log them (caller should handle)
 	}
@@ -131,6 +141,7 @@ func ParseResponse(stdout string) (*ParsedResponse, error) {
 	if jsonStart < 0 {
 		return nil, fmt.Errorf("no JSON object found in response")
 	}
+	slog.Debug("parsing claude code response", "json_start_offset", jsonStart)
 	jsonStr := stdout[jsonStart:]
 
 	var resp map[string]interface{}
@@ -178,7 +189,9 @@ func ParseResponse(stdout string) (*ParsedResponse, error) {
 
 // IsRateLimited checks if the error is due to rate limiting.
 func IsRateLimited(exitCode int, stderr string) bool {
+	slog.Debug("checking rate limit", "exit_code", exitCode, "stderr_length", len(stderr))
 	if exitCode == 429 {
+		slog.Warn("rate limit detected", "exit_code", exitCode)
 		return true
 	}
 
@@ -186,6 +199,7 @@ func IsRateLimited(exitCode int, stderr string) bool {
 	rateLimitPatterns := []string{"rate limit", "too many requests", "429", "capacity", "try again"}
 	for _, pattern := range rateLimitPatterns {
 		if strings.Contains(lower, pattern) {
+			slog.Warn("rate limit detected", "exit_code", exitCode)
 			return true
 		}
 	}

@@ -6,7 +6,7 @@
     <string>com.circle-oo.flux</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/flux</string>
+        <string>/Users/won.park/workspace/flux/go/bin/flux</string>
         <string>--config</string>
         <string>/Users/won.park/workspace/flux/config.yaml</string>
     </array>
