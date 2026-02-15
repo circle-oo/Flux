@@ -902,6 +902,81 @@ func TestInternal_TaskDone_ExecutionDetails(t *testing.T) {
 	}
 }
 
+func TestInternal_TaskDone_CancelledTask(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Create a task and transition it to RUNNING
+	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title": "Running task", "type": "CODING",
+	})
+	var created map[string]interface{}
+	parseResponse(t, rr, &created)
+	id := created["id"].(string)
+
+	// Transition to RUNNING (simulating executor picking it up)
+	body, _ := json.Marshal(map[string]interface{}{
+		"status": "RUNNING",
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks/"+id+"/done", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for RUNNING transition, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Cancel the task while it's running
+	rr = doAuthRequest(t, srv, "POST", "/api/tasks/"+id+"/cancel", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for cancel, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify task is CANCELLED
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/"+id, nil)
+	var cancelled map[string]interface{}
+	parseResponse(t, rr, &cancelled)
+	if cancelled["status"] != "CANCELLED" {
+		t.Fatalf("expected CANCELLED after cancel, got %v", cancelled["status"])
+	}
+
+	// Executor tries to report completion (simulating it finishing work)
+	body, _ = json.Marshal(map[string]interface{}{
+		"status":      "COMPLETED",
+		"result":      "work completed",
+		"tokens_used": 2000,
+		"cost_usd":    0.10,
+		"executor_id": "executor-1",
+	})
+	req = httptest.NewRequest("POST", "/internal/tasks/"+id+"/done", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	// Should return 200 (allowing executor to move on)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for cancelled task completion, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify task remains CANCELLED (status not changed to COMPLETED)
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/"+id, nil)
+	var final map[string]interface{}
+	parseResponse(t, rr, &final)
+	if final["status"] != "CANCELLED" {
+		t.Errorf("expected status to remain CANCELLED, got %v", final["status"])
+	}
+
+	// Verify cost/tokens were still recorded for accounting
+	if int(final["tokens_used"].(float64)) != 2000 {
+		t.Errorf("expected tokens_used 2000, got %v", final["tokens_used"])
+	}
+	if final["cost_usd"].(float64) != 0.10 {
+		t.Errorf("expected cost_usd 0.10, got %v", final["cost_usd"])
+	}
+}
+
 func TestInternal_CreateSubtasks(t *testing.T) {
 	srv, _ := setupTestServer(t)
 

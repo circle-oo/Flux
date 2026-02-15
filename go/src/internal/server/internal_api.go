@@ -88,8 +88,16 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Use manager for state validation if available
-	if mgr != nil && req.Status != "" {
+	// Special case: if task was already cancelled, log it and skip state transition
+	if task.Status == models.TaskCancelled {
+		slog.Info("task was cancelled during execution, keeping CANCELLED status",
+			"task_id", id,
+			"attempted_status", req.Status,
+			"executor_id", req.ExecutorID)
+		// Don't change status, but still update cost/tokens for accounting
+		// This allows the executor to move on and pop the next task
+	} else if mgr != nil && req.Status != "" {
+		// Use manager for state validation if available
 		if err := mgr.TransitionTask(id, req.Status); err != nil {
 			slog.Error("invalid state transition", "id", id, "status", req.Status, "error", err)
 			writeError(w, http.StatusBadRequest, err.Error())
