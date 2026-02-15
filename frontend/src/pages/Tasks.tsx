@@ -610,12 +610,24 @@ export default function Tasks() {
                           {task.status}
                         </span>
                         <span className="badge-secondary shrink-0">{task.type}</span>
+                        {task.triage_analysis && (
+                          <span className="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0">
+                            Triaged
+                          </span>
+                        )}
                         {subtaskCounts[task.id] && (
                           <span className="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded shrink-0">
                             {subtaskCounts[task.id]} subtask{subtaskCounts[task.id] !== 1 ? 's' : ''}
                           </span>
                         )}
                       </div>
+
+                      {/* Triage Analysis (preview) */}
+                      {task.triage_analysis && (
+                        <p className="text-sm text-cyan-400/80 mb-1.5 line-clamp-2 border-l-2 border-cyan-600/40 pl-2">
+                          {task.triage_analysis}
+                        </p>
+                      )}
 
                       {/* Description (clamped) */}
                       <p className="text-sm text-slate-400 mb-2 line-clamp-2">
