@@ -45,7 +45,6 @@ export interface Task {
   depth?: number
   depends_on: string[]
   tags: string[]
-  requires_test: boolean
   diff_lines?: number
   files_changed?: number
 }
@@ -53,7 +52,7 @@ export interface Task {
 export interface Project {
   id: string
   name: string
-  type: 'LIBRARY' | 'SERVICE' | 'TOOL' | 'RESEARCH'
+  type: 'REPO' | 'SERVICE' | 'LIBRARY' | 'TOOL'
   repo_url?: string
   description: string
   vault_path: string
@@ -62,6 +61,7 @@ export interface Project {
   inspiration?: string
   goal_id?: string
   created_at: string
+  updated_at?: string
 }
 
 class APIClient {
@@ -217,6 +217,8 @@ class APIClient {
     description: string
     tech_stack: string[]
     inspiration?: string
+    repo_url?: string
+    goal_id?: string
   }): Promise<Project> {
     return this.fetch('/api/projects', {
       method: 'POST',

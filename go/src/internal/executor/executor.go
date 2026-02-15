@@ -277,7 +277,9 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	prBuilder := github.NewPRDescriptionBuilder(task, worktreePath, e.id)
 	prTitle, prBody := prBuilder.Build()
 
-	prURL, prNumber, prErr := e.github.CreatePR(owner, repo, task.BranchName, "main", prTitle, prBody)
+	// Detect the default branch for PR base (main, master, etc.)
+	defaultBranch := e.worktree.detectDefaultBranchFromWorktree(worktreePath)
+	prURL, prNumber, prErr := e.github.CreatePR(owner, repo, task.BranchName, defaultBranch, prTitle, prBody)
 	if prErr != nil {
 		slog.Error("failed to create PR", "task_id", task.ID, "error", prErr)
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("PR creation failed: %v", prErr), result.TokensUsed, result.CostUSD)

@@ -13,6 +13,8 @@ interface ProjectState {
     description: string
     tech_stack: string[]
     inspiration?: string
+    repo_url?: string
+    goal_id?: string
   }) => Promise<Project>
   approveProject: (id: string) => Promise<void>
   rejectProject: (id: string) => Promise<void>

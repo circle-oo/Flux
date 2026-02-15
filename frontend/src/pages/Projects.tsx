@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore } from '../stores/projectStore'
+import { useGoalStore } from '../stores/goalStore'
 import { Project } from '../lib/api'
 
 export default function Projects() {
@@ -11,36 +12,47 @@ export default function Projects() {
     approveProject,
     rejectProject,
   } = useProjectStore()
+  const { goals, fetchGoals } = useGoalStore()
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     type: 'LIBRARY' as Project['type'],
     description: '',
+    repo_url: '',
     tech_stack: '',
     inspiration: '',
+    goal_id: '',
   })
 
   useEffect(() => {
     fetchProjects()
-  }, [fetchProjects])
+    fetchGoals()
+  }, [fetchProjects, fetchGoals])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
       await createProject({
-        ...formData,
+        name: formData.name,
+        type: formData.type,
+        description: formData.description,
         tech_stack: formData.tech_stack
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean),
+        inspiration: formData.inspiration || undefined,
+        repo_url: formData.repo_url || undefined,
+        goal_id: formData.goal_id || undefined,
       })
       setShowForm(false)
       setFormData({
         name: '',
         type: 'LIBRARY',
         description: '',
+        repo_url: '',
         tech_stack: '',
         inspiration: '',
+        goal_id: '',
       })
     } catch (error) {
       console.error('Failed to create project:', error)
@@ -120,10 +132,10 @@ export default function Projects() {
                 }
                 className="input"
               >
-                <option value="LIBRARY">Library</option>
+                <option value="REPO">Repo</option>
                 <option value="SERVICE">Service</option>
+                <option value="LIBRARY">Library</option>
                 <option value="TOOL">Tool</option>
-                <option value="RESEARCH">Research</option>
               </select>
             </div>
             <div>
@@ -135,6 +147,18 @@ export default function Projects() {
                 }
                 className="input h-24 resize-none"
                 required
+              />
+            </div>
+            <div>
+              <label className="label">Repository URL (optional)</label>
+              <input
+                type="text"
+                value={formData.repo_url}
+                onChange={(e) =>
+                  setFormData({ ...formData, repo_url: e.target.value })
+                }
+                className="input"
+                placeholder="https://github.com/..."
               />
             </div>
             <div>
@@ -161,6 +185,25 @@ export default function Projects() {
                 className="input"
                 placeholder="Inspired by..."
               />
+            </div>
+            <div>
+              <label className="label">Link to Goal (optional)</label>
+              <select
+                value={formData.goal_id}
+                onChange={(e) =>
+                  setFormData({ ...formData, goal_id: e.target.value })
+                }
+                className="input"
+              >
+                <option value="">None</option>
+                {goals
+                  .filter((g) => g.status === 'ACTIVE')
+                  .map((goal) => (
+                    <option key={goal.id} value={goal.id}>
+                      {goal.title}
+                    </option>
+                  ))}
+              </select>
             </div>
             <button type="submit" className="btn-primary">
               Register Project
@@ -196,6 +239,18 @@ export default function Projects() {
                     <div className="text-sm text-slate-500 mb-3">
                       Created: {new Date(project.created_at).toLocaleString()}
                     </div>
+                    {project.repo_url && (
+                      <div className="mb-2">
+                        <a
+                          href={project.repo_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-400 hover:underline text-sm"
+                        >
+                          {project.repo_url}
+                        </a>
+                      </div>
+                    )}
                     {project.tech_stack.length > 0 && (
                       <div className="flex flex-wrap gap-2">
                         {project.tech_stack.map((tech, i) => (

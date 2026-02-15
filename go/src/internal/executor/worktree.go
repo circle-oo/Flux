@@ -47,6 +47,7 @@ func NewWorktreeManager(workspaceBase, githubToken, githubUser string) *Worktree
 
 // EnsureBareRepo ensures a bare repository exists and is up to date.
 // Uses token-based HTTPS URL when GitHub credentials are available.
+// After cloning, configures remote tracking refs so origin/<branch> works.
 func (wm *WorktreeManager) EnsureBareRepo(repoURL, projectName string) error {
 	slog.Debug("ensuring bare repo", "repo_url", repoURL, "project", projectName)
 	bareDir := filepath.Join(wm.reposDir, projectName+".git")
@@ -59,9 +60,11 @@ func (wm *WorktreeManager) EnsureBareRepo(repoURL, projectName string) error {
 			setURLCmd := exec.Command("git", "-C", bareDir, "remote", "set-url", "origin", cloneURL)
 			_ = setURLCmd.Run()
 		}
+		// Ensure remote tracking refs are configured (upgrade existing bare repos)
+		wm.configureBareFetchRefspec(bareDir)
 		// Repository exists, fetch updates
 		slog.Debug("fetching updates for bare repo", "project", projectName)
-		cmd := exec.Command("git", "-C", bareDir, "fetch", "--all")
+		cmd := exec.Command("git", "-C", bareDir, "fetch", "--all", "--prune")
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to fetch repo: %w: %s", err, output)
 		}
@@ -80,8 +83,111 @@ func (wm *WorktreeManager) EnsureBareRepo(repoURL, projectName string) error {
 		return fmt.Errorf("failed to clone bare repo: %w: %s", err, output)
 	}
 
+	// Configure remote tracking refs so origin/<branch> works in worktrees.
+	// By default, bare clones use +refs/heads/*:refs/heads/* which doesn't
+	// create refs/remotes/origin/* — causing "invalid reference: origin/main".
+	wm.configureBareFetchRefspec(bareDir)
+
+	// Fetch again with the new refspec to populate refs/remotes/origin/*
+	fetchCmd := exec.Command("git", "-C", bareDir, "fetch", "--all", "--prune")
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		slog.Warn("post-clone fetch failed", "error", err, "output", string(output))
+	}
+
 	slog.Info("bare repo ready", "project", projectName)
 	return nil
+}
+
+// configureBareFetchRefspec sets the fetch refspec on a bare repo so that
+// remote tracking refs (refs/remotes/origin/*) are created. Without this,
+// bare repos only have refs/heads/* and "origin/main" doesn't resolve.
+func (wm *WorktreeManager) configureBareFetchRefspec(bareDir string) {
+	// Check current refspec
+	getCmd := exec.Command("git", "-C", bareDir, "config", "remote.origin.fetch")
+	out, err := getCmd.Output()
+	if err == nil {
+		current := strings.TrimSpace(string(out))
+		if strings.Contains(current, "refs/remotes/origin") {
+			return // Already configured correctly
+		}
+	}
+
+	// Set the standard non-bare fetch refspec
+	setCmd := exec.Command("git", "-C", bareDir, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	if err := setCmd.Run(); err != nil {
+		slog.Warn("failed to configure bare repo fetch refspec", "error", err)
+	} else {
+		slog.Info("configured remote tracking refs for bare repo", "dir", bareDir)
+	}
+}
+
+// detectDefaultBranch returns the default branch name for a bare repo.
+// Checks origin/HEAD, then falls back to probing origin/main, origin/master.
+func (wm *WorktreeManager) detectDefaultBranch(bareDir string) string {
+	// Try symbolic-ref for origin HEAD (set by git remote set-head --auto)
+	cmd := exec.Command("git", "-C", bareDir, "symbolic-ref", "refs/remotes/origin/HEAD")
+	out, err := cmd.Output()
+	if err == nil {
+		ref := strings.TrimSpace(string(out))
+		// refs/remotes/origin/main -> main
+		if idx := strings.LastIndex(ref, "/"); idx >= 0 {
+			branch := ref[idx+1:]
+			slog.Debug("detected default branch from origin/HEAD", "branch", branch)
+			return branch
+		}
+	}
+
+	// Try to auto-detect origin HEAD
+	autoCmd := exec.Command("git", "-C", bareDir, "remote", "set-head", "origin", "--auto")
+	if autoOut, autoErr := autoCmd.CombinedOutput(); autoErr == nil {
+		// Re-read after auto-detect
+		cmd2 := exec.Command("git", "-C", bareDir, "symbolic-ref", "refs/remotes/origin/HEAD")
+		if out2, err2 := cmd2.Output(); err2 == nil {
+			ref := strings.TrimSpace(string(out2))
+			if idx := strings.LastIndex(ref, "/"); idx >= 0 {
+				branch := ref[idx+1:]
+				slog.Debug("detected default branch via set-head --auto", "branch", branch)
+				return branch
+			}
+		}
+	} else {
+		slog.Debug("remote set-head --auto failed", "output", string(autoOut))
+	}
+
+	// Probe common branch names
+	for _, branch := range []string{"main", "master"} {
+		checkCmd := exec.Command("git", "-C", bareDir, "rev-parse", "--verify", "refs/remotes/origin/"+branch)
+		if checkCmd.Run() == nil {
+			slog.Debug("detected default branch by probing", "branch", branch)
+			return branch
+		}
+	}
+
+	slog.Warn("could not detect default branch, falling back to main")
+	return "main"
+}
+
+// detectDefaultBranchFromWorktree detects the default branch from within a worktree.
+func (wm *WorktreeManager) detectDefaultBranchFromWorktree(worktreePath string) string {
+	// Try symbolic-ref for origin HEAD
+	cmd := exec.Command("git", "-C", worktreePath, "symbolic-ref", "refs/remotes/origin/HEAD")
+	out, err := cmd.Output()
+	if err == nil {
+		ref := strings.TrimSpace(string(out))
+		if idx := strings.LastIndex(ref, "/"); idx >= 0 {
+			return ref[idx+1:]
+		}
+	}
+
+	// Probe common branch names
+	for _, branch := range []string{"main", "master"} {
+		checkCmd := exec.Command("git", "-C", worktreePath, "rev-parse", "--verify", "refs/remotes/origin/"+branch)
+		if checkCmd.Run() == nil {
+			return branch
+		}
+	}
+
+	return "main"
 }
 
 // tokenURL converts a repo URL to token-based HTTPS if credentials are available.
@@ -131,23 +237,27 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 		slog.Warn("pre-branch fetch failed", "error", err, "output", string(output))
 	}
 
+	// Detect the default branch (main, master, etc.)
+	defaultBranch := wm.detectDefaultBranch(bareDir)
+	startPoint := "origin/" + defaultBranch
+
 	// Check if branch already exists (from a previous failed attempt / retry)
 	checkCmd := exec.Command("git", "-C", bareDir, "rev-parse", "--verify", "refs/heads/"+branchName)
 	var cmd *exec.Cmd
 	if checkCmd.Run() == nil {
-		// Branch exists — delete it and recreate from latest main for clean retry
+		// Branch exists — delete it and recreate from latest default branch for clean retry
 		slog.Info("deleting stale branch for clean retry", "branch", branchName)
 		delCmd := exec.Command("git", "-C", bareDir, "branch", "-D", branchName)
 		_ = delCmd.Run()
-		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "origin/main")
+		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, startPoint)
 	} else {
-		// Branch doesn't exist — create new branch from latest main
-		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "origin/main")
+		// Branch doesn't exist — create new branch from latest default branch
+		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, startPoint)
 	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("failed to create worktree: %w: %s", err, output)
 	}
-	slog.Debug("worktree directory created from latest origin/main", "path", worktreePath)
+	slog.Debug("worktree created from latest remote default branch", "path", worktreePath, "start_point", startPoint)
 
 	// Configure git user and token-based push URL in the worktree
 	if err := wm.configureWorktreeGit(worktreePath); err != nil {
@@ -314,17 +424,21 @@ func (wm *WorktreeManager) FindByBranch(projectName, branchName string) (string,
 	return "", fmt.Errorf("worktree not found for branch: %s", branchName)
 }
 
-// RebaseOnMain rebases the worktree's branch onto main to resolve conflicts
+// RebaseOnMain rebases the worktree's branch onto the default branch to resolve conflicts.
 func (wm *WorktreeManager) RebaseOnMain(worktreePath string) error {
-	// Fetch latest main
-	fetchCmd := exec.Command("git", "fetch", "origin", "main")
+	// Detect the default branch from the worktree's remote
+	defaultBranch := wm.detectDefaultBranchFromWorktree(worktreePath)
+	remoteRef := "origin/" + defaultBranch
+
+	// Fetch latest default branch
+	fetchCmd := exec.Command("git", "fetch", "origin", defaultBranch)
 	fetchCmd.Dir = worktreePath
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to fetch main: %w: %s", err, output)
+		return fmt.Errorf("failed to fetch %s: %w: %s", defaultBranch, err, output)
 	}
 
 	// Try rebase first (produces clean linear history)
-	rebaseCmd := exec.Command("git", "rebase", "origin/main")
+	rebaseCmd := exec.Command("git", "rebase", remoteRef)
 	rebaseCmd.Dir = worktreePath
 	output, err := rebaseCmd.CombinedOutput()
 	if err != nil {
@@ -336,7 +450,7 @@ func (wm *WorktreeManager) RebaseOnMain(worktreePath string) error {
 		slog.Warn("rebase failed, trying merge as fallback", "error", err, "output", string(output))
 
 		// Fallback: try merge instead (handles more conflict scenarios)
-		mergeCmd := exec.Command("git", "merge", "origin/main", "--no-edit")
+		mergeCmd := exec.Command("git", "merge", remoteRef, "--no-edit")
 		mergeCmd.Dir = worktreePath
 		mergeOutput, mergeErr := mergeCmd.CombinedOutput()
 		if mergeErr != nil {
@@ -346,7 +460,7 @@ func (wm *WorktreeManager) RebaseOnMain(worktreePath string) error {
 			_ = mergeAbortCmd.Run()
 			return fmt.Errorf("conflict: both rebase and merge failed.\nRebase: %s\nMerge: %s", string(output), string(mergeOutput))
 		}
-		slog.Info("merged origin/main successfully (rebase had conflicts)")
+		slog.Info("merged remote default branch successfully (rebase had conflicts)", "ref", remoteRef)
 	}
 
 	return nil

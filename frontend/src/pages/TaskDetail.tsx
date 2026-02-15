@@ -229,6 +229,9 @@ export default function TaskDetail() {
           <span className="font-mono text-xs">{task.branch_name || '—'}</span>
         </InfoRow>
         <InfoRow label="Retry Count">{task.retry_count ?? 0}</InfoRow>
+        <InfoRow label="Crash Recovery">
+          {task.crash_recovery ? 'Yes' : '—'}
+        </InfoRow>
         <InfoRow label="Tests Passed">
           {task.test_passed === null || task.test_passed === undefined
             ? '—'
@@ -287,6 +290,16 @@ export default function TaskDetail() {
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Triage Analysis</h2>
           <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
             {task.triage_analysis}
+          </pre>
+        </div>
+      )}
+
+      {/* Plan */}
+      {task.plan && (
+        <div className="card p-6">
+          <h2 className="text-lg font-semibold text-slate-200 mb-3">Plan</h2>
+          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
+            {task.plan}
           </pre>
         </div>
       )}
