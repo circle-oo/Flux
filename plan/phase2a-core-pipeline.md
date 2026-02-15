@@ -20,6 +20,41 @@ Complete execution pipeline: Task → Claude Code → Test → PR → Merge.
 
 ## Task Breakdown
 
+### Task 2A.0: Claude Code CLI Verification
+
+**Description**: Verify all required Claude Code CLI flags are available and document the CLI version for compatibility tracking.
+
+**Files to create**:
+```
+docs/claude-code-cli-verification.md
+```
+
+**Implementation details**:
+- Run `claude --help` and document all available flags
+- Verify required flags exist:
+  - `-p` (prompt)
+  - `--max-turns`
+  - `--output-format json`
+  - `--append-system-prompt`
+  - `--model`
+  - `--dangerously-skip-permissions`
+- Test each flag with a simple command to verify syntax
+- Document fallback strategies if any flag is missing:
+  - If `--append-system-prompt` unavailable: embed system prompt in user prompt
+  - If `--output-format json` unavailable: parse text output
+- Record Claude Code version: `claude --version`
+- Create compatibility matrix: version → available flags
+
+**Acceptance criteria**:
+- [ ] All required flags verified or fallback documented
+- [ ] Claude Code version recorded
+- [ ] Compatibility matrix created
+- [ ] Flag syntax verified with test commands
+
+**Complexity**: Low
+
+---
+
 ### Task 2A.1: Claude Code CLI Integration
 
 **Description**: Implement the Claude Code CLI wrapper that executes prompts in non-interactive mode with full stdout/stderr capture.
@@ -39,13 +74,20 @@ internal/executor/claude_code.go
 - Output size guardrail: reject if stdout > `max_output_size`
 - Exit code extraction from `exec.ExitError`
 
+**WARNING - CRITICAL TIMEOUT BUG**:
+- Create `timeoutCtx` BEFORE `exec.CommandContext`, and pass `timeoutCtx` (not `ctx`) to it
+- The spec code sample has a bug where `timeoutCtx` is created after the command
+- Use process group management: `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}` so child processes are killed when timeout fires
+- Use `io.LimitReader` or `limitedBuffer` for stdout/stderr to prevent memory exhaustion before the output size check
+
 **Acceptance criteria**:
 - [ ] Successfully executes `claude -p "hello" --output-format json`
 - [ ] Captures stdout and stderr separately
-- [ ] Timeout kills long-running executions
+- [ ] Timeout actually kills the process (verified with a test that sleeps)
 - [ ] Output size limit enforced
 - [ ] Exit code correctly extracted
 - [ ] All CLI flags correctly passed
+- [ ] Unit tests pass
 
 **Complexity**: Medium
 
@@ -72,6 +114,7 @@ internal/executor/claude_code.go
 - [ ] Parser extracts result text reliably
 - [ ] Unknown fields do not cause errors
 - [ ] Token/cost data extracted if available in response
+- [ ] Unit tests pass
 
 **Complexity**: Low-Medium (depends on actual API response)
 
@@ -103,6 +146,7 @@ docs/experiments/sandbox-evaluation.md (results document)
 - [ ] Results documented with clear recommendation
 - [ ] `ClaudeCodeRunner` updated based on decision
 - [ ] Post-execution verification scope adjusted (Task 2A.9) based on sandbox capabilities
+- [ ] Unit tests pass
 
 **Complexity**: Medium (experimental)
 
@@ -154,6 +198,7 @@ internal/executor/worktree.go
 - `CreateWorktree(project, task)`: create worktree with new branch `task/{taskID[:8]}` from main
   - Path: `{treesDir}/{projectName}--task-{taskID[:8]}`
   - Set up `.claude/settings.json` with tool permissions
+  - Create `CLAUDE.md` in worktree with project context, coding conventions, and task-specific instructions (significantly improves Claude Code output quality)
 - `FindByBranch(project, branchName)`: find existing worktree for CHANGES_REQUESTED fixes
 - `CleanupWorktree(project, worktreePath)`: remove worktree via `git worktree remove --force`
 - `RunCleanup(tasks)`: implement cleanup policy:
@@ -167,10 +212,12 @@ internal/executor/worktree.go
 - [ ] Bare repo cloned from GitHub URL
 - [ ] Worktree created with correct branch naming
 - [ ] `.claude/settings.json` created in worktree
+- [ ] `CLAUDE.md` created in worktree with project context
 - [ ] Multiple worktrees can coexist (parallel tasks)
 - [ ] Cleanup policy correctly applied per task status
 - [ ] FindByBranch locates existing worktree
 - [ ] `git fetch --all` updates bare repo before creating new worktree
+- [ ] Unit tests pass
 
 **Complexity**: Medium-High
 
@@ -187,18 +234,24 @@ internal/github/pr.go
 
 **Implementation details**:
 - `CreatePR(owner, repo, head, base, title, body) (string, error)` — returns PR URL
+  - Add retry with exponential backoff (3 attempts, starting at 1 second) for transient failures (502, 503)
+  - Check for existing PR on same branch before retry to avoid duplicates
 - `MergePR(owner, repo, prNumber) error` — merge via API
+  - Retry transient GitHub API failures with exponential backoff
 - `FetchPRComments(owner, repo, prNumber) ([]Comment, error)` — single fetch, no polling
 - `Comment` struct: Author, Body, CreatedAt
 - Use GitHub REST API v3 with token auth
 - Handle common errors: branch not found, merge conflicts, auth failure
+- Handle secondary rate limit responses (retry with backoff)
 
 **Acceptance criteria**:
 - [ ] PR created successfully on GitHub
+- [ ] Transient GitHub failures retried automatically
 - [ ] PR merged via API
 - [ ] Comments fetched in single request
 - [ ] Error handling for common failure cases
 - [ ] PR URL correctly returned
+- [ ] Unit tests pass
 
 **Complexity**: Medium
 
@@ -214,11 +267,14 @@ internal/github/pr.go
 ```
 internal/manager/manager.go
 internal/manager/priority.go
+internal/executor/manager_client.go
 ```
 
 **Implementation details**:
 - `Manager` struct: db, config
 - `PopNextTask(podType) *Task`: pop highest-priority READY task
+  - **CRITICAL**: Use database transaction (BEGIN...UPDATE...COMMIT) to prevent two Pods from getting the same task
+  - Pattern: `SELECT task WHERE status=READY ORDER BY priority LIMIT 1 FOR UPDATE`, then `UPDATE status=RUNNING` in the same transaction
   - Executor pods: any type except RESEARCH
   - Researcher pods: RESEARCH type only
 - `TransitionTask(taskID, newStatus)`: enforce valid transitions per state machine
@@ -235,13 +291,26 @@ internal/manager/priority.go
 - `POST /internal/subtasks`: validate depth/count, create tasks inheriting priority+goal_id
 - `GET /internal/model/:task_id`: delegate to Orchestrator (stub: return sonnet)
 
+**ManagerClient HTTP client** (`internal/executor/manager_client.go`):
+- Methods:
+  - `NextTask(podID, podType) (*Task, error)` — POST /internal/tasks/next
+  - `ReportTaskDone(taskID, status, result, errorLog) error` — POST /internal/tasks/:id/done
+  - `CreateSubtasks(parentID, subtasks) error` — POST /internal/subtasks
+  - `GetModel(taskID) (string, error)` — GET /internal/model/:task_id
+  - `GetProject(projectID) (*Project, error)` — GET /internal/projects/:id
+- All methods call internal HTTP API
+- Used by Executor pods to communicate with Manager
+
 **Acceptance criteria**:
 - [ ] Priority Queue returns highest-priority READY task
+- [ ] Concurrent PopNextTask calls never return the same task (verified with test)
 - [ ] State transitions enforced (invalid transitions rejected)
 - [ ] RETRY respects retry_count limit and cancellation check
 - [ ] Crash recovery RETRY doesn't consume retry_count
 - [ ] Subtask creation validates depth ≤ 1 and max 5 per parent
 - [ ] Internal API endpoints fully functional
+- [ ] ManagerClient HTTP client implemented with all methods
+- [ ] Unit tests pass
 
 **Complexity**: High
 
@@ -272,12 +341,17 @@ internal/executor/guardrails.go
   5. Build prompt
   6. Execute Claude Code with guardrails
   7. Check rate limit (exit code + stderr patterns)
+     - **Note**: Phase 2A detection only - log and fail task. Full response (stop all pods) deferred to Phase 2B.
   8. Post-execution verification
   9. Check subtask decomposition response
+     - **Note**: Phase 2A STUB - always returns nil. Full implementation in Phase 2B Task 2B.5.
   10. QA (run tests if required)
   11. Commit + diff check
   12. Create PR
+      - Add retry with exponential backoff (3 attempts) for GitHub API transient failures (502, 503)
+      - Check for existing PR on same branch before retry to avoid duplicates
   13. Auto-merge decision
+      - Handle merge conflict: if merge fails due to conflict, create a rebase task instead of marking FAILED
   14. Report completion
 
 **guardrails.go**:
@@ -291,14 +365,17 @@ internal/executor/guardrails.go
 
 **Acceptance criteria**:
 - [ ] Executor fetches tasks via internal API
+- [ ] ManagerClient used for all internal API calls
 - [ ] Claude Code executes with correct prompt and flags
 - [ ] Guardrails enforced (timeout, output, diff limits)
 - [ ] Rate limit detected via exit code and stderr patterns
 - [ ] Subtask decomposition JSON parsed correctly
 - [ ] Tests run for coding tasks
 - [ ] PR created on completion
+- [ ] GitHub PR creation retries on transient failure
 - [ ] Auto-merge decision applied
 - [ ] Stop signal honored for graceful shutdown
+- [ ] Unit tests pass
 
 **Complexity**: Very High
 
@@ -326,6 +403,7 @@ internal/executor/executor.go (add verification step)
 - [ ] External modification triggers task failure
 - [ ] Discord alert sent on integrity violation
 - [ ] Scope adjustable based on sandbox evaluation
+- [ ] Unit tests pass
 
 **Complexity**: Low-Medium
 
@@ -357,6 +435,7 @@ internal/executor/executor.go (add QA methods)
 - [ ] "Write tests" logic triggers when none exist
 - [ ] RESEARCH/DOCUMENT tasks skip testing
 - [ ] Test output captured for error reporting
+- [ ] Unit tests pass
 
 **Complexity**: Medium
 
@@ -404,6 +483,7 @@ POST /api/prs/:task_id/request-changes — Fetch comments → create fix task P:
 - [ ] Request Changes creates fix task with correct priority
 - [ ] Fix task reuses existing worktree and PR
 - [ ] Discord notification sent for PRs needing review
+- [ ] Unit tests pass
 
 **Complexity**: High
 
@@ -520,7 +600,12 @@ docs/experiments/agent-teams-evaluation.md (results document)
 
 | Category | New Files | Modified Files |
 |----------|-----------|----------------|
-| Go backend | ~6 files | ~4 files |
+| Go backend | ~8 files | ~4 files |
 | React frontend | ~2 files | ~1 file |
-| Docs/Experiments | ~3 files | — |
-| **Total** | **~11 files** | **~5 files** |
+| Docs/Experiments | ~4 files | — |
+| **Total** | **~14 files** | **~5 files** |
+
+**Notes**:
+- New Task 2A.0 adds 1 doc file
+- Task 2A.7 adds 1 new file (manager_client.go)
+- Task 2A.5 now creates CLAUDE.md in worktrees (implementation detail, not a new file in repo)

@@ -48,9 +48,9 @@ internal/orchestrator/rate_limit_handler.go
 
 ---
 
-### Task 2B.2: Rate Limit Basic Response
+### Task 2B.2: Rate Limit Non-Blocking Response
 
-**Description**: When rate limit is detected: stop all Pods, wait fixed 5 hours, resume.
+**Description**: When rate limit is detected, set state to prevent new task requests. Instead of blocking with time.Sleep, use a state field: `rateLimitUntil time.Time`. The Executor checks this before requesting tasks. The Orchestrator (when it exists in Phase 3) checks this in each tick. This allows the system to remain responsive during rate limit events.
 
 **Files to modify**:
 ```
@@ -59,21 +59,25 @@ internal/orchestrator/rate_limit_handler.go
 
 **Implementation details**:
 - `HandleRateLimit()`:
-  1. Stop all running Pods (signal stop channel)
-  2. Send Discord WARNING: "Rate limit detected. Stopping all pods. Waiting 5 hours."
-  3. Record event in `rate_limit_events` table
-  4. Sleep 5 hours (blocking, but cancellable via context)
-  5. Resume Pods
+  1. Set `rateLimitUntil = time.Now().Add(5*time.Hour)`
+  2. Set `isLimited = true`
+  3. Send Discord WARNING with expected resume time
+  4. Record event in DB
+  5. (Pods check `IsLimited()` before requesting tasks - no explicit stop needed)
+- `CheckAndRecover()`: called periodically, checks if `time.Now().After(rateLimitUntil)`, clears limited state
+- `IsLimited() bool`: returns true if `isLimited == true && time.Now().Before(rateLimitUntil)`
 - `RecentlyLimited() bool`: check if rate limit occurred in last 6 hours (for model selection)
-- `IsLimited() bool`: check if currently in rate limit wait state
+- No `stopAllPods()` or `resumePods()` - Pods self-regulate by checking `IsLimited()`
 
 **Acceptance criteria**:
-- [ ] All Pods stop on rate limit detection
-- [ ] Discord notification sent
+- [ ] Rate limit state prevents Pods from requesting tasks
+- [ ] Discord notification includes expected resume time
 - [ ] Event recorded in DB
-- [ ] 5-hour wait observed (cancellable)
-- [ ] Pods resume after wait
+- [ ] 5-hour wait observed without blocking
+- [ ] Pods resume automatically after wait expires
 - [ ] `RecentlyLimited()` returns correct state
+- [ ] System remains responsive during rate limit period
+- [ ] Unit tests cover state transitions
 
 **Complexity**: Medium
 
@@ -98,9 +102,10 @@ internal/server/internal_api.go (update model endpoint)
   - Otherwise → Sonnet
 - `NeedsOpus()` conditions:
   - Priority ≤ 5 (service incidents)
-  - Operator source + complex keywords
+  - Operator source + complex keywords (see `hasComplexKeywords()`)
   - Tag "initial-design"
   - Tag "goal-strategy"
+- `hasComplexKeywords()` checks if task Title or Description contains: 'architect', 'refactor', 'redesign', 'migration', 'security', 'overhaul' (case-insensitive). Already defined in Phase 1 Task 1.3.
 - Update `GET /internal/model/:task_id` to use this logic
 
 **Acceptance criteria**:
@@ -108,6 +113,7 @@ internal/server/internal_api.go (update model endpoint)
 - [ ] Opus selected only for qualifying tasks
 - [ ] Rate limit suppresses Opus selection
 - [ ] Internal API returns correct model per task
+- [ ] Unit tests cover all NeedsOpus conditions
 
 **Complexity**: Low
 
@@ -145,7 +151,7 @@ internal/executor/executor.go (buildSystemPrompt method)
 
 ### Task 2B.5: Subtask Decomposition
 
-**Description**: Enable Claude Code to autonomously decide when a task is too large and output a decomposition plan instead of code.
+**Description**: Enable Claude Code to autonomously decide when a task is too large and output a decomposition plan instead of code. This implements the subtask decomposition that was stubbed in Phase 2A Task 2A.8 step 9.
 
 **Files to create/modify**:
 ```
@@ -173,6 +179,7 @@ internal/executor/executor.go (add decomposition check)
 - [ ] Depth and count limits enforced
 - [ ] Priority and goal_id inherited
 - [ ] Parent task marked COMPLETED after decomposition
+- [ ] Unit tests for decomposition parsing and validation
 
 **Complexity**: Medium
 
@@ -191,18 +198,20 @@ internal/manager/priority.go
 ```
 
 **Implementation details**:
-- **Goal boost**: When popping tasks, Goal-related tasks (matching current goal_id) get priority boost within their tier
-  - E.g., a P:50 task related to the active Goal gets popped before a P:48 task unrelated to the Goal (within same tier)
-  - Boost only within tier, never cross-tier
+- **Goal boost**: Goal boost is a TIEBREAKER, not a reordering. Within the same priority value, Goal-related tasks are popped first. A P:50 Goal-related task does NOT jump ahead of a P:48 unrelated task. Only among multiple P:50 tasks does the Goal relation break the tie.
+  - When popping tasks at priority P, Goal-related tasks (matching current goal_id) are selected before unrelated tasks
+  - Boost only within same priority value, never cross-priority
 - **Dependency check**: Before assigning a task, verify all `depends_on` tasks are COMPLETED
   - If dependencies not met: skip task, try next in queue
   - Task stays in READY state until dependencies resolve
 
 **Acceptance criteria**:
-- [ ] Goal-related tasks prioritized within tier
+- [ ] Goal-related tasks prioritized as tiebreaker within same priority
+- [ ] Goal relation never overrides priority ordering
 - [ ] Tasks with unmet dependencies not assigned
 - [ ] Dependencies resolved when blocking tasks complete
 - [ ] No deadlocks with circular dependencies (reject at creation time)
+- [ ] Unit tests cover tiebreaker logic and dependency resolution
 
 **Complexity**: Medium
 
@@ -221,11 +230,19 @@ internal/vault/templates.go
 ```
 
 **Implementation details**:
-- `Writer` struct: basePath, requests channel (buffered 100)
+- `Writer` struct: basePath, requests channel (buffered 100), wg sync.WaitGroup
 - `NewWriter(basePath)`: start goroutine processing requests
 - `run()`: range over channel, process each WriteRequest sequentially
-- `Write(path, content, mode) error`: send request, wait for completion via Done channel
-- `Close()`: close channel, drain remaining requests
+- `Write(path, content, mode) error`: send request with timeout to prevent blocking forever:
+  ```go
+  select {
+  case w.requests <- req:  // sent
+  case <-time.After(5*time.Second): return fmt.Errorf("vault writer full")
+  }
+  ```
+- `Close()`: use `sync.WaitGroup` to drain safely:
+  1. close(w.requests)
+  2. wg.Wait() to ensure all requests processed
 - Write modes: Create (error if exists), Append, Replace
 - Atomic operations: ensure directory exists, write file
 - `templates.go`: markdown templates for task summaries, project docs, decision records
@@ -234,9 +251,10 @@ internal/vault/templates.go
 - [ ] Sequential writes (no file conflicts)
 - [ ] All write modes work (create, append, replace)
 - [ ] Directory auto-creation
-- [ ] Done channel signals completion
-- [ ] Close drains remaining requests
+- [ ] Write timeout prevents blocking on full channel
+- [ ] Close drains remaining requests safely using WaitGroup
 - [ ] Templates produce valid Obsidian markdown
+- [ ] Unit tests cover timeout and drain logic
 
 **Complexity**: Medium
 
@@ -269,13 +287,13 @@ internal/executor/executor.go (add Vault write after completion)
 
 ---
 
-### Task 2B.9: ccusage Project Name Mapping Verification
+### Task 2B.9: ccusage Project Name Mapping Verification (Experiment)
 
-**Description**: Verify that Flux's worktree path encoding matches ccusage's `--project` identifier.
+**Description**: This is a VERIFICATION task to confirm path encoding works. Production integration into the Executor pipeline is Task 3.6. Verify that Flux's worktree path encoding matches ccusage's `--project` identifier.
 
 **Files to create/modify**:
 ```
-internal/executor/executor.go (collectTaskUsage method)
+internal/executor/executor.go (collectTaskUsage method - experimental)
 ```
 
 **Implementation details**:
@@ -288,7 +306,7 @@ internal/executor/executor.go (collectTaskUsage method)
 **Acceptance criteria**:
 - [ ] Path encoding matches ccusage project identification
 - [ ] Token and cost data extracted correctly
-- [ ] Task updated with usage data after completion
+- [ ] Encoding verified with manual test cases
 - [ ] ccusage failure doesn't block task completion
 
 **Complexity**: Low-Medium
@@ -331,7 +349,37 @@ cmd/flux/main.go (add signal handling)
 
 ---
 
-### Task 2B.11: launchd Plist Registration
+### Task 2B.11: Basic Error Recovery
+
+**Description**: Recover from crashes by transitioning interrupted tasks back to RETRY state. CRITICAL: This MUST be implemented before launchd registration. If launchd restarts Flux after a crash and recovery isn't implemented yet, RUNNING tasks get permanently stuck.
+
+**Files to create/modify**:
+```
+internal/shutdown/recovery.go
+cmd/flux/main.go (add recovery step to bootstrap)
+```
+
+**Implementation details**:
+- `RecoverFromCrash(db, notifier)`:
+  - Find all tasks with status RUNNING
+  - Transition to RETRY with `crash_recovery=true` (doesn't consume retry_count)
+  - Discord WARNING: "Recovered from crash. N tasks moved to RETRY."
+- Add to bootstrap sequence: after DB open, before starting Pods
+
+**Acceptance criteria**:
+- [ ] RUNNING tasks recovered to RETRY on startup
+- [ ] crash_recovery=true set (retry_count not consumed)
+- [ ] Discord notification sent
+- [ ] Recovery runs before Pods start (tasks re-queued first)
+- [ ] Unit tests cover recovery logic
+
+**Complexity**: Low
+
+**Depends on**: Task 2B.10
+
+---
+
+### Task 2B.12: launchd Plist Registration
 
 **Description**: Create and register launchd plist for automatic startup and crash recovery on macOS.
 
@@ -355,32 +403,48 @@ deploy/install-launchd.sh
 
 **Complexity**: Low
 
+**Depends on**: Task 2B.11
+
 ---
 
-### Task 2B.12: Basic Error Recovery
+### Task 2B.13: Security Hardening
 
-**Description**: Recover from crashes by transitioning interrupted tasks back to RETRY state.
+**Description**: Add basic security controls: internal API authentication, session persistence, audit logging, and prompt validation.
 
 **Files to create/modify**:
 ```
-internal/shutdown/recovery.go
-cmd/flux/main.go (add recovery step to bootstrap)
+internal/server/auth.go (update with shared secret validation)
+internal/db/schema.go (add audit_log table)
+internal/server/session.go (add SQLite persistence)
+internal/server/validation.go (new - prompt validation)
 ```
 
 **Implementation details**:
-- `RecoverFromCrash(db, notifier)`:
-  - Find all tasks with status RUNNING
-  - Transition to RETRY with `crash_recovery=true` (doesn't consume retry_count)
-  - Discord WARNING: "Recovered from crash. N tasks moved to RETRY."
-- Add to bootstrap sequence: after DB open, before starting Pods
+- **Internal API shared secret**:
+  - Generate random 32-byte key at boot, store in memory
+  - Pods include in X-Flux-Internal-Secret header
+  - API middleware validates header before processing requests
+- **Session persistence**:
+  - Store sessions in SQLite `sessions` table (session_id, user_id, created_at, expires_at)
+  - Sessions survive restart
+  - Clean up expired sessions on boot
+- **Audit log**:
+  - New table: `audit_log` (id, event_type, actor, target, details, ip_address, timestamp)
+  - Log: auth attempts, task creation, status changes, API calls
+- **Prompt validation**:
+  - Length limit: 10KB max for task title/description
+  - Forbidden patterns: SQL injection attempts, shell metacharacters in unexpected places
+  - Validate before task creation
 
 **Acceptance criteria**:
-- [ ] RUNNING tasks recovered to RETRY on startup
-- [ ] crash_recovery=true set (retry_count not consumed)
-- [ ] Discord notification sent
-- [ ] Recovery runs before Pods start (tasks re-queued first)
+- [ ] Internal API rejects requests without valid secret
+- [ ] Sessions survive Flux restart
+- [ ] Audit log records auth events
+- [ ] Prompt validation blocks oversized or malicious inputs
+- [ ] Unit tests cover secret validation and prompt validation
+- [ ] Integration test: restart Flux, verify session persists
 
-**Complexity**: Low
+**Complexity**: Medium
 
 **Depends on**: Task 2B.10
 
@@ -388,21 +452,22 @@ cmd/flux/main.go (add recovery step to bootstrap)
 
 ## Phase 2B Completion Checklist
 
-- [ ] Rate limit detected → all Pods stop → 5h wait → resume
+- [ ] Rate limit detected → state-based response (non-blocking)
 - [ ] Model selection: Sonnet default, Opus for complex tasks
 - [ ] Goal injected into every Claude Code execution
 - [ ] Subtask decomposition works (Claude Code → JSON → Manager)
-- [ ] Manager: Goal boost + dependency checking
-- [ ] Vault Writer records task completions
-- [ ] ccusage tracks per-task usage
+- [ ] Manager: Goal boost (tiebreaker) + dependency checking
+- [ ] Vault Writer records task completions (safe drain with WaitGroup)
+- [ ] ccusage verification experiment complete
 - [ ] Graceful shutdown: SIGTERM → wait → cleanup
+- [ ] Crash recovery: RUNNING tasks → RETRY on startup (BEFORE launchd)
 - [ ] launchd: auto-start on boot, restart on crash
-- [ ] Crash recovery: RUNNING tasks → RETRY on startup
+- [ ] Security: internal API auth, session persistence, audit log, prompt validation
 
 ## File Count Summary
 
 | Category | New Files | Modified Files |
 |----------|-----------|----------------|
-| Go backend | ~7 files | ~5 files |
+| Go backend | ~9 files | ~6 files |
 | Deploy | ~2 files | — |
-| **Total** | **~9 files** | **~5 files** |
+| **Total** | **~11 files** | **~6 files** |

@@ -39,6 +39,8 @@ Makefile
 - Config struct must match the full `config.yaml` template from spec (all sections)
 - `Load(path)` function: read YAML → unmarshal → resolve `_env` fields from environment → expand `~` in vault path
 - `main.go`: parse `--config` flag, load config, log startup
+- Add `log/slog` structured logging setup: configure file handler from `LoggingConfig`, create `logs/` directory
+- Add `Validate()` method on Config struct: port range, positive durations, required fields non-empty
 
 **Acceptance criteria**:
 - [ ] `go build ./cmd/flux` compiles without errors
@@ -46,6 +48,8 @@ Makefile
 - [ ] Environment variables resolved for `password_env`, `token_env`, `webhook_url_env`
 - [ ] `~` expanded in `vault.path`
 - [ ] Missing config file returns clear error
+- [ ] Log output written to configured file with configured level
+- [ ] Invalid config returns descriptive error
 
 **Complexity**: Low
 
@@ -69,6 +73,7 @@ internal/db/queries.go
 - Convention: all optional TEXT fields default to `''`, JSON arrays default to `'[]'`
 - `queries.go`: shared helpers — `InsertRow`, `UpdateRow`, `GetByID`, `ListByStatus`
 - Bootstrap function: create DB if not exists → create schema → create Vault directory structure → register seed projects from config
+- Create `internal/testutil/` package with: test DB helper (in-memory SQLite), fixture helpers
 
 **Vault directory structure to create**:
 ```
@@ -89,6 +94,8 @@ internal/db/queries.go
 - [ ] Vault directories created at configured path
 - [ ] Seed projects inserted (flux project)
 - [ ] Re-running bootstrap is idempotent (IF NOT EXISTS)
+- [ ] Test helper creates in-memory DB with schema
+- [ ] Unit tests written for exported functions
 
 **Complexity**: Medium
 
@@ -119,7 +126,18 @@ internal/models/usage.go
   - Status constants: PENDING, READY, RUNNING, COMPLETED, FAILED, RETRY, ARCHIVED
   - Source constants: OPERATOR, RESEARCHER, SELF, SYSTEM
   - Priority ranges: P1-5 incidents, P6-20 operator, P21-40 maintenance, P41-60 improvements, P61-80 research, P81-100 new projects
-  - Methods: `NeedsOpus()`, `RequiresTest()`
+  - Methods: `NeedsOpus()`, `RequiresTest()`, `hasComplexKeywords()`
+  - `hasComplexKeywords()` definition:
+```go
+func (t *Task) hasComplexKeywords() bool {
+    keywords := []string{"architect", "refactor", "redesign", "migration", "security", "overhaul"}
+    lower := strings.ToLower(t.Title + " " + t.Description)
+    for _, kw := range keywords {
+        if strings.Contains(lower, kw) { return true }
+    }
+    return false
+}
+```
 - **Project**: ID, Name, Type, RepoURL, Description, VaultPath, Status, TechStack (JSON), Inspiration, GoalID
   - Status constants: PROPOSED, ACTIVE, ARCHIVED, REJECTED
 - JSON fields (Priorities, Metrics, DependsOn, Tags, TechStack): marshal/unmarshal between `[]string` and TEXT column
@@ -133,6 +151,8 @@ internal/models/usage.go
 - [ ] Goal activation enforces single-ACTIVE constraint
 - [ ] Task `NeedsOpus()` and `RequiresTest()` match spec logic
 - [ ] Empty string defaults (not NULL) for optional fields
+- [ ] Unit tests for NeedsOpus() and hasComplexKeywords()
+- [ ] Unit tests written for exported functions
 
 **Complexity**: Medium
 
@@ -156,15 +176,19 @@ internal/server/api_projects.go
 **Implementation details**:
 
 **server.go**:
-- HTTP server setup with `http.ServeMux`
+- HTTP server setup with Go 1.22+ enhanced `http.ServeMux` supporting `{id}` path patterns
+- **Note**: Go 1.22+ ServeMux supports `GET /api/goals/{id}` pattern syntax. Do NOT use `:id` (chi syntax) or pull in external router.
 - Route registration: `/api/...` (requires auth), `/internal/...` (localhost only), `/ws/...`, `/` (static)
 - Auth middleware: cookie-based session validation
 - Localhost-only middleware for `/internal/` routes
+- Content-Type header set to `application/json` on all API responses
 
 **auth.go**:
 - `POST /api/auth/login`: password → bcrypt compare → UUID session token → cookie (no expiry, HttpOnly, SameSite=Strict)
 - `POST /api/auth/logout`: invalidate session
-- In-memory session store (map[string]bool)
+- Thread-safe session store: `map[string]bool` protected by `sync.RWMutex`
+- Login rate limiting: 5 failed attempts per IP per hour
+- Config validation: reject startup if password env var is empty when auth enabled
 
 **api_goals.go**:
 ```
@@ -202,6 +226,9 @@ POST   /api/projects/:id/reject  — Reject (PROPOSED → REJECTED)
 - [ ] Task cancellation sets FAILED + error_log
 - [ ] Operator-created tasks go directly to READY status
 - [ ] List endpoints support pagination and filtering
+- [ ] Session store is goroutine-safe (RWMutex)
+- [ ] Login rate limiting blocks after 5 failures
+- [ ] Unit tests written for exported functions
 
 **Complexity**: Medium-High
 
@@ -224,6 +251,7 @@ POST /internal/tasks/next       — Returns next highest-priority READY task (st
 POST /internal/tasks/:id/done   — Reports task completion (stub: updates status)
 POST /internal/subtasks         — Creates subtasks (stub: validates depth/count, creates tasks)
 GET  /internal/model/:task_id   — Returns model decision (stub: always returns "sonnet")
+GET  /health                    — Returns {"status":"ok","version":"..."} (no auth required)
 ```
 
 - All internal endpoints: localhost-only middleware enforced
@@ -235,6 +263,7 @@ GET  /internal/model/:task_id   — Returns model decision (stub: always returns
 - [ ] Localhost-only middleware rejects non-localhost requests
 - [ ] Subtask validation enforces depth and count limits
 - [ ] Endpoints are functional stubs (real logic in Phase 2A)
+- [ ] Health endpoint returns 200 OK
 
 **Complexity**: Low
 
@@ -263,7 +292,7 @@ internal/notifier/discord.go
 - [ ] Messages sent to Discord webhook
 - [ ] Supports INFO, WARNING, CRITICAL levels
 - [ ] Graceful failure (logs error, doesn't crash)
-- [ ] Works with empty webhook URL (logs warning, returns nil)
+- [ ] Empty webhook URL logs warning and returns nil (no crash)
 
 **Complexity**: Low
 
@@ -315,6 +344,8 @@ internal/server/websocket.go
 - `Broadcast(event Event)` method for sending events to all clients
 - Event types: TASK_UPDATED, GOAL_CHANGED, PR_STATUS, POD_STATUS (enum)
 - Phase 1: connection management only, events sent by API handlers on state changes
+- Ping/pong keepalive every 30 seconds
+- Connection limit (max 10 concurrent clients)
 
 **Acceptance criteria**:
 - [ ] WebSocket connection established
@@ -328,9 +359,9 @@ internal/server/websocket.go
 
 ---
 
-### Task 1.9: Web UI
+### Task 1.9a: React Scaffolding
 
-**Description**: Build React frontend with Vite, Tailwind CSS, Zustand. Embed in Go binary. Implement auth, Dashboard, Goals, Tasks, Projects pages.
+**Description**: Set up Vite + React + TypeScript + Tailwind CSS with Go embed integration.
 
 **Files to create**:
 ```
@@ -341,54 +372,134 @@ web/tsconfig.json
 web/index.html
 web/src/main.tsx
 web/src/App.tsx
-web/src/pages/Dashboard.tsx
-web/src/pages/Goals.tsx
-web/src/pages/Tasks.tsx
-web/src/pages/Projects.tsx
-web/src/pages/Login.tsx
-web/src/components/Layout.tsx
-web/src/components/Sidebar.tsx
-web/src/stores/authStore.ts
-web/src/stores/goalStore.ts
-web/src/stores/taskStore.ts
-web/src/stores/projectStore.ts
-web/src/stores/wsStore.ts
-web/src/lib/api.ts
 ```
 
 **Implementation details**:
-
-**Tech**: React 18 + TypeScript + Tailwind CSS + Vite + Zustand
-
-**Pages**:
-- **Login**: Password input → POST /api/auth/login → redirect to Dashboard
-- **Dashboard**: Active Goal summary, recent tasks (by status), active projects count, system status placeholder
-- **Goals**: List all goals, create new, activate, view current goal details
-- **Tasks**: List with filters (status, project), create new task, view detail, cancel task
-- **Projects**: List, register new, approve/reject proposed projects
-
-**Go embedding**:
+- React 18 + TypeScript + Tailwind CSS + Vite
+- Go embedding setup:
 ```go
 //go:embed web/dist/*
 var webFS embed.FS
 ```
-
-**WebSocket**: Connect on login, reconnect on disconnect, update Zustand stores on events
+- Vite build outputs to `web/dist/`
 
 **Acceptance criteria**:
 - [ ] `npm run build` in `web/` produces `dist/`
 - [ ] `go build` embeds `web/dist/` into binary
+- [ ] Basic React app renders in browser
+
+**Complexity**: Low
+
+**Depends on**: Task 1.4
+
+---
+
+### Task 1.9b: API Client + Auth Store + Login Page
+
+**Description**: Implement API client library, Zustand auth store, and login page.
+
+**Files to create**:
+```
+web/src/lib/api.ts
+web/src/stores/authStore.ts
+web/src/pages/Login.tsx
+```
+
+**Implementation details**:
+- API client: fetch wrapper with cookie credentials
+- Auth store: login/logout state management
+- Login page: Password input → POST /api/auth/login → redirect to Dashboard
+
+**Acceptance criteria**:
 - [ ] Login flow works (password → cookie → redirect)
+- [ ] Auth state persists across page reloads
+- [ ] Unit tests written for exported functions
+
+**Complexity**: Medium
+
+**Depends on**: Task 1.9a
+
+---
+
+### Task 1.9c: Layout/Sidebar + Dashboard Page
+
+**Description**: Build shared layout component with sidebar navigation and Dashboard page.
+
+**Files to create**:
+```
+web/src/components/Layout.tsx
+web/src/components/Sidebar.tsx
+web/src/pages/Dashboard.tsx
+```
+
+**Implementation details**:
+- Layout: responsive with Tailwind, sidebar navigation
+- Dashboard: Active Goal summary, recent tasks (by status), active projects count, system status placeholder
+
+**Acceptance criteria**:
+- [ ] Responsive layout with Tailwind
 - [ ] Dashboard shows active goal and recent tasks
+- [ ] Unit tests written for exported functions
+
+**Complexity**: Medium
+
+**Depends on**: Task 1.9b
+
+---
+
+### Task 1.9d: Goals + Tasks + Projects Pages + Stores
+
+**Description**: Implement CRUD pages for Goals, Tasks, and Projects with Zustand stores.
+
+**Files to create**:
+```
+web/src/pages/Goals.tsx
+web/src/pages/Tasks.tsx
+web/src/pages/Projects.tsx
+web/src/stores/goalStore.ts
+web/src/stores/taskStore.ts
+web/src/stores/projectStore.ts
+```
+
+**Implementation details**:
+- **Goals**: List all goals, create new, activate, view current goal details
+- **Tasks**: List with filters (status, project), create new task, view detail, cancel task
+- **Projects**: List, register new, approve/reject proposed projects
+- Zustand stores for state management
+
+**Acceptance criteria**:
 - [ ] Goals CRUD works through UI
 - [ ] Tasks CRUD works with filtering
 - [ ] Projects CRUD works with approve/reject
-- [ ] WebSocket connection established, stores update on events
-- [ ] Responsive layout with Tailwind
+- [ ] Unit tests written for exported functions
 
 **Complexity**: High
 
-**Depends on**: Task 1.4, Task 1.8
+**Depends on**: Task 1.9c
+
+---
+
+### Task 1.9e: WebSocket Store Integration
+
+**Description**: Implement WebSocket connection with Zustand store for real-time updates.
+
+**Files to create**:
+```
+web/src/stores/wsStore.ts
+```
+
+**Implementation details**:
+- Connect on login, reconnect on disconnect
+- Update Zustand stores on events (TASK_UPDATED, GOAL_CHANGED, etc.)
+
+**Acceptance criteria**:
+- [ ] WebSocket connection established
+- [ ] Stores update on events
+- [ ] Reconnection works after disconnect
+
+**Complexity**: Low
+
+**Depends on**: Task 1.9d, Task 1.8
 
 ---
 
@@ -422,10 +533,36 @@ Bootstrap sequence:
 - [ ] Discord notification sent on startup
 - [ ] SIGTERM triggers graceful HTTP server shutdown
 - [ ] Re-running on existing DB is idempotent
+- [ ] Unit tests written for exported functions
 
 **Complexity**: Medium
 
 **Depends on**: All previous tasks
+
+---
+
+### Task 1.11: Services & Alerts API Stubs
+
+**Description**: Implement stub API endpoints for Services and Alerts (used by Web UI, real functionality in Phase 3).
+
+**Files to create**:
+```
+internal/server/api_services.go
+```
+
+**Implementation details**:
+- `GET /api/services` — Returns empty list `{"services":[]}`
+- `GET /api/alerts` — Returns empty list `{"alerts":[]}`
+- Phase 1: stubs only, real monitoring starts in Phase 3
+
+**Acceptance criteria**:
+- [ ] Both endpoints respond with correct JSON structure
+- [ ] Endpoints require authentication
+- [ ] Return empty arrays
+
+**Complexity**: Low
+
+**Depends on**: Task 1.4
 
 ---
 

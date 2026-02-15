@@ -35,6 +35,7 @@ internal/orchestrator/orchestrator.go
   3. `usageCollector.CollectIfDue()`
   4. `goalAdvisor.ProposeIfNeeded()`
   5. `dailySummary.SendIfDue()`
+- Each sub-component call in tick() must be wrapped in recover() to prevent one component panic from crashing the Orchestrator
 - Context cancellation stops the loop
 - Each sub-component is independently testable
 
@@ -43,6 +44,7 @@ internal/orchestrator/orchestrator.go
 - [ ] All sub-components called in correct order
 - [ ] Context cancellation stops cleanly
 - [ ] Panic in one sub-component doesn't crash Orchestrator (recover + log)
+- [ ] Unit tests verify panic recovery behavior
 
 **Complexity**: Medium
 
@@ -58,7 +60,8 @@ internal/orchestrator/scale_manager.go
 ```
 
 **Implementation details**:
-- `ScaleManager` struct: maxPods, cooldown (15 min), lastScaleAt, minResearch (0.2), pods list
+- `ScaleManager` struct: maxPods, cooldown (15 min), lastScaleAt, minResearch (0.2), pods list, podsMutex (sync.RWMutex)
+- ScaleManager.pods must be protected by sync.RWMutex for concurrent access from Orchestrator tick and HTTP status endpoints
 - `Rebalance(running bool)`:
   - If not running (rate limited): stop all Pods
   - If cooldown active (< 15 min since last scale): skip
@@ -143,9 +146,9 @@ internal/orchestrator/usage_collector.go
 
 ---
 
-### Task 3.5: Time-Series Snapshots
+### Task 3.5: Time-Series Snapshots + Query Methods
 
-**Description**: Store hourly usage snapshots for historical analysis and graphing.
+**Description**: Store hourly usage snapshots for historical analysis and graphing with query methods for time-series access.
 
 **Files to modify**:
 ```
@@ -172,9 +175,9 @@ internal/models/usage.go
 
 ---
 
-### Task 3.6: Per-Task Usage Tracking
+### Task 3.6: Per-Task Usage Integration (Production)
 
-**Description**: Track ccusage per-task using worktree path encoding.
+**Description**: Integrate per-task usage collection into the Executor pipeline proper with async collection to avoid blocking task completion. Phase 2B Task 2B.9 verified the path encoding works. This task integrates per-task collection into production.
 
 **Files to modify**:
 ```
@@ -182,16 +185,18 @@ internal/executor/executor.go
 ```
 
 **Implementation details**:
-- After task completion: `ccusage daily --project {encoded-worktree-path} --json`
-- Update task record: tokens_used, cost_usd
+- After task completion: fire-and-forget goroutine for `ccusage daily --project {encoded-worktree-path} --json`
+- Update task record: tokens_used, cost_usd (async, best-effort)
 - Path encoding: absolute path with `/` and `.` replaced by `-`
+- Install ccusage globally instead of using `npx` to eliminate npm registry checks per invocation
 - Graceful degradation: don't block task completion
 
 **Acceptance criteria**:
-- [ ] Per-task usage collected after completion
+- [ ] Per-task usage collected after completion (async)
 - [ ] Tokens and cost stored on task record
 - [ ] Path encoding matches ccusage project identification
 - [ ] ccusage failure logged but non-blocking
+- [ ] Task completion not blocked by usage collection
 
 **Complexity**: Low
 
@@ -231,7 +236,7 @@ internal/orchestrator/daily_summary.go
 
 ### Task 3.8: JSONL Cleanup
 
-**Description**: Delete old Claude Code JSONL files (>30 days) since usage data is preserved in DB snapshots.
+**Description**: Delete old Claude Code JSONL files since usage data is preserved in DB snapshots. Uses secure deletion for sensitive data.
 
 **Files to create**:
 ```
@@ -242,12 +247,14 @@ internal/cleanup/cleanup.go
 - `CleanOldJSONL(retentionDays int)`:
   - Scan `~/.claude/projects/` and `~/.config/claude/projects/` (both possible paths)
   - Find `.jsonl` files older than retention period
-  - Delete them
+  - Use os.Remove after zero-fill for sensitive JSONL data
+  - Set 7-day retention (not 30) for JSONL containing prompts/responses
 - Run daily (triggered by Orchestrator or daily summary)
 
 **Acceptance criteria**:
-- [ ] Old JSONL files deleted
+- [ ] Old JSONL files deleted with secure deletion (zero-fill + remove)
 - [ ] Both possible paths checked
+- [ ] 7-day retention enforced for sensitive data
 - [ ] Retention period configurable
 - [ ] No deletion of recent files
 
@@ -375,6 +382,7 @@ GET /api/usage/rate-limits     — Rate limit event history
 - [ ] Date range selection works
 - [ ] Rate limit history displayed
 - [ ] Monthly/daily aggregations correct
+- [ ] Unit tests for API endpoints
 
 **Complexity**: High
 
@@ -396,14 +404,114 @@ internal/orchestrator/goal_advisor.go
   - ACTIVE Goal near completion → propose follow-up
 - Create PROPOSED Goal (requires Operator approval to activate)
 - Discord notification for proposals
-- Phase 3 basic: simple heuristic-based proposals
+- Phase 3 basic: simple heuristic-based proposals (NOT Claude Code-powered)
+  - Heuristic 1: No active Goal and queue empty for >1 hour → propose "Plan next development cycle"
+  - Heuristic 2: Active Goal with >80% of goal-related tasks completed → propose follow-up
+  - Heuristic 3: No operator tasks in 48 hours → propose "Review and update goals"
 - Phase 4: Claude Code-powered intelligent proposals
 
 **Acceptance criteria**:
 - [ ] Goal proposed when no active Goal exists
+- [ ] Heuristics correctly detect proposal conditions
 - [ ] Proposed Goal requires Operator activation
 - [ ] Discord notification sent
 - [ ] No duplicate proposals
+
+**Complexity**: Medium
+
+---
+
+### Task 3.14: Orchestrator API Endpoints
+
+**Description**: HTTP API endpoints for Orchestrator status, Pod management, and service/alert monitoring.
+
+**Files to create**:
+```
+internal/server/api_orchestrator.go
+```
+
+**Implementation details**:
+- `GET /api/orchestrator/status` — Scaling status (active pods, ratio, rate limit state)
+- `GET /api/pods` — Pod status list (id, type, current task, uptime)
+- `POST /api/orchestrator/propose-goals` — Trigger GoalAdvisor manually
+- `GET /api/services` — Service status (upgrade from Phase 1 stubs)
+- `GET /api/alerts` — Alert list (upgrade from Phase 1 stubs)
+
+**Acceptance criteria**:
+- [ ] Orchestrator status endpoint returns scaling state
+- [ ] Pod list shows current task and uptime
+- [ ] Manual goal proposal triggers GoalAdvisor
+- [ ] Service and alert endpoints upgraded from stubs
+- [ ] Unit tests for all endpoints
+
+**Complexity**: Medium
+
+**Depends on**: Task 3.1
+
+---
+
+### Task 3.15: Disk Space Monitoring
+
+**Description**: Monitor disk space and prevent worktree creation when low on disk.
+
+**Files to modify**:
+```
+internal/orchestrator/orchestrator.go
+internal/worktree/manager.go
+```
+
+**Implementation details**:
+- Add disk space check to Orchestrator tick:
+  - WARNING at 10GB free → Discord notification
+  - Stop new worktree creation at 5GB free → block new tasks
+  - CRITICAL alert at 2GB free → Discord critical alert
+  - Force cleanup at 1GB free → delete oldest worktrees
+- Check disk space before creating new worktree in WorktreeManager
+
+**Acceptance criteria**:
+- [ ] Disk space checked every tick
+- [ ] WARNING/CRITICAL alerts sent to Discord
+- [ ] Worktree creation blocked at 5GB free
+- [ ] Force cleanup at 1GB free
+- [ ] No task failures due to disk exhaustion
+
+**Complexity**: Low
+
+---
+
+### Task 3.16: Settings UI + Metrics Endpoint
+
+**Description**: Web UI Settings page and metrics endpoint for system health monitoring.
+
+**Files to create**:
+```
+web/src/pages/Settings.tsx
+internal/server/api_metrics.go
+```
+
+**Implementation details**:
+
+**Settings.tsx**:
+- View current configuration
+- Pod status (active pods, types, current tasks)
+- System health (disk usage, memory, rate limit status)
+- Configuration display (read-only for Phase 3, editable in future)
+
+**Metrics endpoint**:
+- `GET /api/metrics`:
+  - Active pods (count by type)
+  - Queue depth (count by priority)
+  - Task completion rate (last 24h)
+  - Disk usage (free/total)
+  - Rate limit status
+  - Current Goal progress
+
+**Acceptance criteria**:
+- [ ] Settings page displays configuration
+- [ ] Pod status shows current tasks
+- [ ] Metrics endpoint returns all specified data
+- [ ] System health indicators visible
+- [ ] Disk usage displayed with warnings
 
 **Complexity**: Medium
 
@@ -423,11 +531,14 @@ internal/orchestrator/goal_advisor.go
 - [ ] Data cleanup (metrics, snapshots)
 - [ ] Usage UI with time-series graphs
 - [ ] Goal proposal system active
+- [ ] Orchestrator API endpoints functional
+- [ ] Disk space monitoring active
+- [ ] Settings UI and metrics endpoint working
 
 ## File Count Summary
 
 | Category | New Files | Modified Files |
 |----------|-----------|----------------|
-| Go backend | ~8 files | ~5 files |
-| React frontend | ~3 files | ~2 files |
-| **Total** | **~11 files** | **~7 files** |
+| Go backend | ~10 files | ~6 files |
+| React frontend | ~4 files | ~2 files |
+| **Total** | **~14 files** | **~8 files** |

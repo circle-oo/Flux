@@ -53,6 +53,7 @@ internal/researcher/workspace.go
   ```
 - `SetupWorkspace(podID)`: create directories, CLAUDE.md with research context, .claude/settings.json
 - Independent workspaces prevent parallel conflicts between Researcher Pods
+- Note: `--add-dir` (if supported by Claude Code version) allows adding reference directories to the Claude Code context. MCP (Model Context Protocol) servers can provide web search capability. Both are optional enhancements - verify availability in Phase 2A.0 flag check. Fallback: include reference content directly in the prompt.
 
 **Acceptance criteria**:
 - [ ] Researcher Pod runs independently
@@ -205,6 +206,7 @@ Makefile (add deploy target)
 - [ ] launchd restarts Flux
 - [ ] Web UI built and embedded
 - [ ] Deploy blocked if tasks running
+- [ ] Unit tests for deployment script
 
 **Complexity**: Low-Medium
 
@@ -226,13 +228,25 @@ internal/executor/self_improve.go
 2. Create safety tag: `flux-safe-{unix_timestamp}`
 3. Execute Claude Code for modification
 4. Run **full test suite**: `go test ./... -v`
-5. **Pass**: create PR → auto-merge (restart at idle)
-6. **Fail**: `git checkout {safe_tag}` → revert → report FAILED
+5. Run `gosec ./...` static security analysis
+6. Run `go mod verify` dependency integrity check
+7. Verify `go.mod` and `go.sum` unchanged (no dependency modifications)
+8. **Pass**: create PR → **NEVER auto-merge** (always require Operator review)
+9. **Fail**: `git checkout {safe_tag}` → revert → report FAILED
+10. Add immutable audit log entry for every self-modification attempt
 
 **Restrictions**:
 - DB schema changes EXCLUDED from self-improvement scope
 - Schema changes → create PROPOSED task for Operator approval
-- Self-improvement tasks: source=SELF, auto-merge eligible
+- Self-improvement PRs MUST NEVER auto-merge — always require Operator review
+- File allowlist: only allow modification of specific directories (not auth, config, security files)
+- Excluded files (immutable):
+  - `internal/server/auth.go`
+  - `internal/config/config.go`
+  - `internal/shutdown/shutdown.go`
+  - `internal/executor/self_improve.go`
+  - `internal/orchestrator/rate_limit_handler.go`
+- Self-improvement tasks: source=SELF, require Operator review
 
 **Restart logic**:
 - After successful self-improvement merge: check if Pods are idle
@@ -242,11 +256,18 @@ internal/executor/self_improve.go
 **Acceptance criteria**:
 - [ ] Self-improvement creates safety tag before changes
 - [ ] Full test suite runs after modification
+- [ ] Security analysis (gosec) passes
+- [ ] Dependency integrity verified (go mod verify)
+- [ ] go.mod and go.sum unchanged
 - [ ] Revert on test failure
 - [ ] PR created for passing changes
+- [ ] Self-improvement PRs NEVER auto-merged
+- [ ] Security-critical files excluded from modification scope
+- [ ] Audit trail for all self-modifications
 - [ ] DB schema changes detected and excluded
 - [ ] Restart only at idle
 - [ ] Safety tag preserved for rollback
+- [ ] Unit tests for safety protocol
 
 **Complexity**: High
 
@@ -289,6 +310,7 @@ GET /api/research/stats        — Research type distribution
 - [ ] Findings linked to Vault content
 - [ ] Pod status displayed
 - [ ] Statistics chart renders
+- [ ] Unit tests for API endpoints
 
 **Complexity**: Medium
 
