@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { Task } from '../lib/api'
+import ContentRenderer from '../components/ContentRenderer'
+import MarkdownRenderer from '../components/MarkdownRenderer'
 
 const statusColor: Record<string, string> = {
   PENDING: 'badge-secondary',
@@ -163,7 +165,11 @@ export default function TaskDetail() {
       {/* Description */}
       <div className="card p-6">
         <h2 className="text-lg font-semibold text-slate-200 mb-3">Description</h2>
-        <p className="text-slate-300 whitespace-pre-wrap">{task.description || '—'}</p>
+        {task.description ? (
+          <MarkdownRenderer content={task.description} />
+        ) : (
+          <p className="text-slate-500">—</p>
+        )}
       </div>
 
       {/* Overview */}
@@ -288,9 +294,7 @@ export default function TaskDetail() {
       {task.triage_analysis && (
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Triage Analysis</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.triage_analysis}
-          </pre>
+          <ContentRenderer content={task.triage_analysis} />
         </div>
       )}
 
@@ -298,9 +302,7 @@ export default function TaskDetail() {
       {task.plan && (
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Plan</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.plan}
-          </pre>
+          <ContentRenderer content={task.plan} />
         </div>
       )}
 
@@ -308,7 +310,7 @@ export default function TaskDetail() {
       {task.error_log && (
         <div className="card p-6 border border-red-600/50">
           <h2 className="text-lg font-semibold text-red-400 mb-3">Error</h2>
-          <pre className="text-sm text-red-200 bg-red-900/20 rounded p-4 overflow-auto whitespace-pre-wrap">
+          <pre className="text-sm text-red-200 bg-red-900/20 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
             {task.error_log}
           </pre>
         </div>
@@ -318,9 +320,7 @@ export default function TaskDetail() {
       {task.result && (
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Result</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.result}
-          </pre>
+          <ContentRenderer content={task.result} />
         </div>
       )}
 
@@ -328,9 +328,7 @@ export default function TaskDetail() {
       {task.prompt && (
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Prompt</h2>
-          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
-            {task.prompt}
-          </pre>
+          <ContentRenderer content={task.prompt} />
         </div>
       )}
     </div>

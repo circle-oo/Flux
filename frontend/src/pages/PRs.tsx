@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { usePRStore } from '../stores/prStore'
+import MarkdownRenderer from '../components/MarkdownRenderer'
 
 function timeAgo(iso: string): string {
   const now = Date.now()
@@ -176,14 +177,20 @@ export default function PRs() {
 
                     {/* Description (clamped, expandable) */}
                     {pr.description && (
-                      <p
-                        className={`text-sm text-slate-400 mb-2 cursor-pointer hover:text-slate-300 transition-colors ${
-                          expandedDescriptions.has(pr.id) ? '' : 'line-clamp-2'
-                        }`}
+                      <div
+                        className="mb-2 cursor-pointer"
                         onClick={() => toggleDescription(pr.id)}
                       >
-                        {pr.description}
-                      </p>
+                        {expandedDescriptions.has(pr.id) ? (
+                          <div className="bg-slate-900/50 rounded p-3 overflow-auto max-h-96">
+                            <MarkdownRenderer content={pr.description} />
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-400 hover:text-slate-300 transition-colors line-clamp-2">
+                            {pr.description}
+                          </p>
+                        )}
+                      </div>
                     )}
 
                     {/* Meta row: stats + branch + model + time */}
