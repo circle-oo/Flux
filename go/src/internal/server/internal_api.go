@@ -53,11 +53,19 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 	id := r.PathValue("id")
 
 	var req struct {
-		Status     string  `json:"status"`
-		Result     string  `json:"result"`
-		ErrorLog   string  `json:"error_log"`
-		TokensUsed int     `json:"tokens_used"`
-		CostUSD    float64 `json:"cost_usd"`
+		Status       string  `json:"status"`
+		Result       string  `json:"result"`
+		ErrorLog     string  `json:"error_log"`
+		TokensUsed   int     `json:"tokens_used"`
+		CostUSD      float64 `json:"cost_usd"`
+		ExecutorID   string  `json:"executor_id"`
+		Model        string  `json:"model"`
+		BranchName   string  `json:"branch_name"`
+		DiffLines    int     `json:"diff_lines"`
+		FilesChanged int     `json:"files_changed"`
+		TestPassed   *bool   `json:"test_passed"`
+		PRUrl        string  `json:"pr_url"`
+		PRStatus     string  `json:"pr_status"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -99,6 +107,32 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 	}
 	task.TokensUsed = req.TokensUsed
 	task.CostUSD = req.CostUSD
+
+	// Update execution detail fields
+	if req.ExecutorID != "" {
+		task.ExecutorID = req.ExecutorID
+	}
+	if req.Model != "" {
+		task.Model = req.Model
+	}
+	if req.BranchName != "" {
+		task.BranchName = req.BranchName
+	}
+	if req.DiffLines != 0 {
+		task.DiffLines = req.DiffLines
+	}
+	if req.FilesChanged != 0 {
+		task.FilesChanged = req.FilesChanged
+	}
+	if req.TestPassed != nil {
+		task.TestPassed = req.TestPassed
+	}
+	if req.PRUrl != "" {
+		task.PRUrl = req.PRUrl
+	}
+	if req.PRStatus != "" {
+		task.PRStatus = req.PRStatus
+	}
 
 	if err := s.tasks.Update(task); err != nil {
 		slog.Error("failed to update task", "id", id, "error", err)
