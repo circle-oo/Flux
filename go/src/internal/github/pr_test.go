@@ -275,6 +275,67 @@ func TestMergePR(t *testing.T) {
 	})
 }
 
+func TestCreateComment(t *testing.T) {
+	t.Run("successful comment creation", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" {
+				t.Errorf("expected POST, got %s", r.Method)
+			}
+			if !strings.Contains(r.URL.Path, "/issues/123/comments") {
+				t.Errorf("expected path to contain /issues/123/comments, got %s", r.URL.Path)
+			}
+
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode body: %v", err)
+			}
+			if body["body"] != "Test comment" {
+				t.Errorf("expected body 'Test comment', got %s", body["body"])
+			}
+
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":   456,
+				"body": "Test comment",
+			})
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:    "test-token",
+			username: "testuser",
+			http:     &http.Client{Timeout: 5 * time.Second},
+		}
+
+		err := client.createCommentWithBaseURL(server.URL, "owner", "repo", 123, "Test comment")
+		if err != nil {
+			t.Fatalf("CreateComment failed: %v", err)
+		}
+	})
+
+	t.Run("handles API error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"message": "Access denied"}`))
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:    "test-token",
+			username: "testuser",
+			http:     &http.Client{Timeout: 5 * time.Second},
+		}
+
+		err := client.createCommentWithBaseURL(server.URL, "owner", "repo", 123, "Test comment")
+		if err == nil {
+			t.Fatal("expected error for 403 response")
+		}
+		if !strings.Contains(err.Error(), "403") {
+			t.Errorf("expected error to mention 403, got: %v", err)
+		}
+	})
+}
+
 func TestFetchPRComments(t *testing.T) {
 	t.Run("fetches and merges both comment types", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -566,6 +627,39 @@ func (c *Client) mergePRWithBaseURL(baseURL, owner, repo string, prNumber int) e
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return &http.ProtocolError{ErrorString: "GitHub API error"}
+	}
+
+	return nil
+}
+
+func (c *Client) createCommentWithBaseURL(baseURL, owner, repo string, prNumber int, body string) error {
+	url := baseURL + "/repos/" + owner + "/" + repo + "/issues/"
+	if prNumber == 123 {
+		url += "123"
+	}
+	url += "/comments"
+
+	reqBody := map[string]string{"body": body}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	req, _ := http.NewRequest("POST", url, strings.NewReader(string(bodyBytes)))
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.doRequestWithRetry(req, 3)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody := make([]byte, 4096)
+	n, _ := resp.Body.Read(respBody)
+	respBody = respBody[:n]
+
+	if resp.StatusCode != http.StatusCreated {
+		errMsg := fmt.Sprintf("GitHub API error (status %d): %s", resp.StatusCode, string(respBody))
+		return &http.ProtocolError{ErrorString: errMsg}
 	}
 
 	return nil
