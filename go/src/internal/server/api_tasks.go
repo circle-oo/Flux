@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
 	"strconv"
 
+	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
 )
 
@@ -64,6 +66,11 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast task update via WebSocket
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
+
+	// Run triage asynchronously for operator-created tasks
+	if task.Source == models.TaskSourceOperator {
+		go s.triageTask(task)
+	}
 
 	writeJSON(w, http.StatusCreated, task)
 }
@@ -219,6 +226,39 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
 	writeJSON(w, http.StatusOK, task)
+}
+
+// triageTask runs async triage on a task using Claude to analyze requirements,
+// rewrite the description, and suggest priority.
+func (s *Server) triageTask(task *models.Task) {
+	slog.Info("starting async triage", "task_id", task.ID, "title", task.Title)
+
+	runner := executor.NewClaudeCodeRunner(&s.config.Executor)
+	ctx := context.Background()
+
+	result, err := executor.TriageTask(ctx, runner, task)
+	if err != nil {
+		slog.Warn("triage failed, task will use original description", "task_id", task.ID, "error", err)
+		return
+	}
+
+	// Update task with triage results
+	task.TriageAnalysis = result.Analysis
+	if result.Description != "" && result.Description != task.Description {
+		task.Description = result.Description
+	}
+	if result.Priority != task.Priority {
+		slog.Info("triage adjusted priority", "task_id", task.ID, "old", task.Priority, "new", result.Priority)
+		task.Priority = result.Priority
+	}
+
+	if err := s.tasks.Update(task); err != nil {
+		slog.Error("failed to update task after triage", "task_id", task.ID, "error", err)
+		return
+	}
+
+	slog.Info("triage complete, task updated", "task_id", task.ID)
+	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 }
 
 // handleRetryTask handles POST /api/tasks/{id}/retry

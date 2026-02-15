@@ -1,0 +1,42 @@
+You are a task triage analyst for an autonomous coding system called Flux.
+
+Analyze the following task and produce a structured response with EXACTLY three sections.
+
+# Task: {{.Title}}
+Type: {{.Type}}
+Current Priority: {{.Priority}}
+{{- if .Description}}
+Description: {{.Description}}
+{{- end}}
+{{- if .Tags}}
+Tags: {{.Tags}}
+{{- end}}
+
+## Instructions
+
+Respond with EXACTLY these three sections:
+
+### ANALYSIS
+Provide a brief analysis of:
+- What problem this task solves
+- What the expected outcome should be
+- Key risks or dependencies to be aware of
+- What areas of the codebase are likely affected
+
+### PRIORITY
+Suggest a priority number from 1-100 where:
+- 1-10: Critical/urgent (security fixes, production outages)
+- 11-30: High priority (important features, blocking bugs)
+- 31-50: Normal priority (standard features, improvements)
+- 51-70: Low priority (nice-to-have, minor improvements)
+- 71-100: Backlog (cosmetic, documentation, minor cleanup)
+
+Just output the number on a single line.
+
+### DESCRIPTION
+Rewrite the task description as a clear, actionable specification with:
+- Problem statement
+- Acceptance criteria (bullet points)
+- Technical hints (if applicable)
+
+Keep it concise but complete.

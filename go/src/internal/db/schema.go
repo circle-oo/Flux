@@ -69,6 +69,8 @@ var schemaStatements = []string{
 		diff_lines      INTEGER DEFAULT 0,
 		files_changed   INTEGER DEFAULT 0,
 		test_passed     BOOLEAN DEFAULT NULL,
+		triage_analysis TEXT DEFAULT '',
+		plan            TEXT DEFAULT '',
 		retry_count     INTEGER DEFAULT 0,
 		crash_recovery  BOOLEAN DEFAULT FALSE,
 		tokens_used     INTEGER DEFAULT 0,

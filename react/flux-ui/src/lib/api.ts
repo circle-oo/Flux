@@ -27,6 +27,8 @@ export interface Task {
   error_log?: string
   result?: string
   prompt?: string
+  triage_analysis?: string
+  plan?: string
   executor_id?: string
   model?: string
   branch_name?: string

@@ -66,6 +66,8 @@ type Task struct {
 	PRStatus      string   `json:"pr_status"`
 	DiffLines     int      `json:"diff_lines"`
 	FilesChanged  int      `json:"files_changed"`
+	TriageAnalysis string  `json:"triage_analysis"`
+	Plan           string  `json:"plan"`
 	TestPassed    *bool    `json:"test_passed"`
 	RetryCount    int      `json:"retry_count"`
 	CrashRecovery bool    `json:"crash_recovery"`
@@ -168,14 +170,15 @@ func (s *TaskStore) Create(t *Task) error {
 		`INSERT INTO tasks (id, title, description, type, status, priority, source,
 		 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 		 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-		 diff_lines, files_changed, test_passed, retry_count, crash_recovery,
-		 tokens_used, cost_usd, started_at, completed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
+		 crash_recovery, tokens_used, cost_usd, started_at, completed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Title, t.Description, t.Type, t.Status, t.Priority, t.Source,
 		t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
 		string(dependsOnJSON), string(tagsJSON), t.Prompt,
 		t.Result, t.ErrorLog, t.ExecutorID, t.Model, t.BranchName,
-		t.PRUrl, t.PRStatus, t.DiffLines, t.FilesChanged, t.TestPassed,
+		t.PRUrl, t.PRStatus, t.DiffLines, t.FilesChanged,
+		t.TriageAnalysis, t.Plan, t.TestPassed,
 		t.RetryCount, t.CrashRecovery, t.TokensUsed, t.CostUSD,
 		t.StartedAt, t.CompletedAt,
 	)
@@ -262,14 +265,16 @@ func (s *TaskStore) Update(t *Task) error {
 		 source = ?, project_id = ?, parent_id = ?, depth = ?, alert_id = ?, goal_id = ?,
 		 depends_on = ?, tags = ?, prompt = ?, result = ?, error_log = ?, executor_id = ?,
 		 model = ?, branch_name = ?, pr_url = ?, pr_status = ?, diff_lines = ?,
-		 files_changed = ?, test_passed = ?, retry_count = ?, crash_recovery = ?,
+		 files_changed = ?, triage_analysis = ?, plan = ?, test_passed = ?,
+		 retry_count = ?, crash_recovery = ?,
 		 tokens_used = ?, cost_usd = ?, updated_at = CURRENT_TIMESTAMP,
 		 started_at = ?, completed_at = ? WHERE id = ?`,
 		t.Title, t.Description, t.Type, t.Status, t.Priority,
 		t.Source, t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
 		string(dependsOnJSON), string(tagsJSON), t.Prompt, t.Result, t.ErrorLog,
 		t.ExecutorID, t.Model, t.BranchName, t.PRUrl, t.PRStatus, t.DiffLines,
-		t.FilesChanged, t.TestPassed, t.RetryCount, t.CrashRecovery,
+		t.FilesChanged, t.TriageAnalysis, t.Plan, t.TestPassed,
+		t.RetryCount, t.CrashRecovery,
 		t.TokensUsed, t.CostUSD, t.StartedAt, t.CompletedAt, t.ID,
 	)
 	if err != nil {
@@ -330,8 +335,9 @@ func (s *TaskStore) CountByParent(parentID string) (int, error) {
 const taskSelectSQL = `SELECT id, title, description, type, status, priority, source,
 	project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 	result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-	diff_lines, files_changed, test_passed, retry_count, crash_recovery,
-	tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
+	diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
+	crash_recovery, tokens_used, cost_usd, created_at, updated_at, started_at,
+	completed_at
 	FROM tasks`
 
 func scanTask(row *sql.Row) (*Task, error) {
@@ -342,7 +348,8 @@ func scanTask(row *sql.Row) (*Task, error) {
 		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
 		&dependsOnJSON, &tagsJSON, &t.Prompt,
 		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
-		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged, &t.TestPassed,
+		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged,
+		&t.TriageAnalysis, &t.Plan, &t.TestPassed,
 		&t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
 		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
 	)
@@ -372,7 +379,8 @@ func scanTaskRow(rows *sql.Rows) (*Task, error) {
 		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
 		&dependsOnJSON, &tagsJSON, &t.Prompt,
 		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
-		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged, &t.TestPassed,
+		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged,
+		&t.TriageAnalysis, &t.Plan, &t.TestPassed,
 		&t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
 		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
 	)

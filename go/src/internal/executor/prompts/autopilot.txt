@@ -1,0 +1,32 @@
+# Task: {{.Title}}
+
+## Description
+{{.Description}}
+{{- if .TriageAnalysis}}
+
+## Triage Analysis
+{{.TriageAnalysis}}
+{{- end}}
+{{- if .Prompt}}
+
+## Additional Instructions
+{{.Prompt}}
+{{- end}}
+
+## Execution Protocol
+
+Follow this protocol in order:
+
+1. **ANALYZE** — Read the relevant files and understand the current codebase structure. Identify the files that need to change.
+
+2. **PLAN** — Before writing any code, state your plan: which files to modify/create, what approach to take, and any risks.
+
+3. **IMPLEMENT** — Make the changes. Follow existing code conventions. Keep changes focused and minimal.
+
+4. **VERIFY** — Run tests and/or build commands to verify your changes work correctly.
+
+## Requirements
+- Follow existing code conventions
+- Write or update tests as needed
+- Keep changes focused and minimal
+- Do not modify files outside the scope of the task

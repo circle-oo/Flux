@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/circle-oo/flux/internal/config"
+	"github.com/circle-oo/flux/internal/executor/prompts"
 	"github.com/circle-oo/flux/internal/github"
 	"github.com/circle-oo/flux/internal/models"
 	"github.com/circle-oo/flux/internal/notifier"
@@ -159,8 +160,8 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		}
 	}
 
-	// 6. Build prompt
-	prompt := e.buildPrompt(task)
+	// 6. Build autopilot prompt (includes triage analysis for context)
+	prompt := BuildAutopilotPrompt(task)
 
 	// Snapshot sensitive files before execution
 	preSnapshot := e.snapshotSensitiveFiles()
@@ -204,7 +205,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		if !buildOK {
 			slog.Warn("build failed for task", "task_id", task.ID)
 			e.registerBuildFailureTask(task, buildOutput)
-			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, fmt.Sprintf("build failed: %s", buildOutput), result.TokensUsed, result.CostUSD)
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("build failed: %s", buildOutput), result.TokensUsed, result.CostUSD)
 			return
 		}
 	}
@@ -235,7 +236,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	// 12.5. Rebase onto main to resolve conflicts before creating PR
 	if err := e.worktree.RebaseOnMain(worktreePath); err != nil {
 		slog.Error("failed to rebase on main", "task_id", task.ID, "error", err)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, fmt.Sprintf("rebase conflict: %v", err), result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("rebase conflict: %v", err), result.TokensUsed, result.CostUSD)
 		return
 	}
 
@@ -244,7 +245,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	forcePushCmd.Dir = worktreePath
 	if output, err := forcePushCmd.CombinedOutput(); err != nil {
 		slog.Error("git force push failed after rebase", "output", string(output), "error", err)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, "force push failed after rebase", result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, "force push failed after rebase", result.TokensUsed, result.CostUSD)
 		return
 	}
 
@@ -300,19 +301,16 @@ func (e *Executor) executeOnce(ctx context.Context) {
 
 // buildSystemPrompt creates a system prompt with the current goal context.
 func (e *Executor) buildSystemPrompt(task *models.Task) string {
-	var sb strings.Builder
-	sb.WriteString("You are an autonomous coding agent working on a specific task.\n")
-	sb.WriteString("Focus exclusively on the task described in the prompt.\n")
-	sb.WriteString("Do not modify files outside the scope of the task.\n")
-	sb.WriteString("Write clean, tested, production-quality code.\n\n")
-
-	if task.GoalID != "" {
-		sb.WriteString(fmt.Sprintf("Current Goal ID: %s\n", task.GoalID))
+	result, err := prompts.Render("system.txt", prompts.SystemPromptData{
+		GoalID:   task.GoalID,
+		TaskType: task.Type,
+		Priority: task.Priority,
+	})
+	if err != nil {
+		slog.Warn("failed to render system prompt template", "error", err)
+		return "You are an autonomous coding agent. Focus on the task described in the prompt."
 	}
-	sb.WriteString(fmt.Sprintf("Task Type: %s\n", task.Type))
-	sb.WriteString(fmt.Sprintf("Task Priority: %d\n", task.Priority))
-
-	return sb.String()
+	return result
 }
 
 // buildPrompt creates the execution prompt for Claude Code.

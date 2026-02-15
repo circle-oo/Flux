@@ -281,6 +281,16 @@ export default function TaskDetail() {
         <InfoRow label="Duration">{formatDuration(task.started_at, task.completed_at)}</InfoRow>
       </div>
 
+      {/* Triage Analysis */}
+      {task.triage_analysis && (
+        <div className="card p-6">
+          <h2 className="text-lg font-semibold text-slate-200 mb-3">Triage Analysis</h2>
+          <pre className="text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap max-h-96">
+            {task.triage_analysis}
+          </pre>
+        </div>
+      )}
+
       {/* Error */}
       {task.error_log && (
         <div className="card p-6 border border-red-600/50">
