@@ -23,10 +23,11 @@ import (
 var version = "dev"
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "path to config file")
+	configPath := flag.String("config", "", "path to config file")
 	flag.Parse()
 
-	cfg, err := config.Load(*configPath)
+	resolved := resolveConfigPath(*configPath)
+	cfg, err := config.Load(resolved)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
 		os.Exit(1)
@@ -151,4 +152,32 @@ func setupLogger(lc config.LoggingConfig) (*slog.Logger, error) {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 	return logger, nil
+}
+
+// resolveConfigPath finds the config file in order:
+// 1. Explicit --config flag value
+// 2. config.yaml next to the binary
+// 3. config.yaml in the current working directory
+// 4. Falls back to "config.yaml" (will error on load if missing)
+func resolveConfigPath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+
+	// Next to the binary
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "..", "..", "config.yaml")
+		if abs, err := filepath.Abs(candidate); err == nil {
+			if _, err := os.Stat(abs); err == nil {
+				return abs
+			}
+		}
+	}
+
+	// Current working directory
+	if _, err := os.Stat("config.yaml"); err == nil {
+		return "config.yaml"
+	}
+
+	return "config.yaml"
 }
