@@ -21,6 +21,7 @@ export default function PRs() {
     approvePR,
     requestChanges,
     closePR,
+    resolveConflicts,
   } = usePRStore()
 
   useEffect(() => {
@@ -53,6 +54,16 @@ export default function PRs() {
         await closePR(taskId)
       } catch (error) {
         console.error('Failed to close PR:', error)
+      }
+    }
+  }
+
+  const handleResolveConflicts = async (taskId: string, title: string) => {
+    if (confirm(`Create a conflict resolution task for: ${title}?\nThis will create a new task to resolve merge conflicts on the PR branch.`)) {
+      try {
+        await resolveConflicts(taskId)
+      } catch (error) {
+        console.error('Failed to create conflict resolution task:', error)
       }
     }
   }
@@ -252,6 +263,13 @@ export default function PRs() {
                           disabled={loading}
                         >
                           Request Changes
+                        </button>
+                        <button
+                          onClick={() => handleResolveConflicts(pr.id, pr.title)}
+                          className="btn-secondary whitespace-nowrap"
+                          disabled={loading}
+                        >
+                          🔧 Resolve Conflicts
                         </button>
                       </>
                     )}

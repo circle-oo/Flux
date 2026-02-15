@@ -15,6 +15,7 @@ interface PRState {
   approvePR: (taskId: string) => Promise<void>
   requestChanges: (taskId: string) => Promise<void>
   closePR: (taskId: string) => Promise<void>
+  resolveConflicts: (taskId: string) => Promise<void>
 }
 
 export const usePRStore = create<PRState>((set, get) => ({
@@ -156,6 +157,33 @@ export const usePRStore = create<PRState>((set, get) => ({
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Failed to close PR',
+        loading: false,
+      })
+      throw error
+    }
+  },
+
+  resolveConflicts: async (taskId: string) => {
+    set({ loading: true, error: null })
+    try {
+      const response = await fetch(`/api/prs/${taskId}/resolve-conflicts`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        const error = await response.text()
+        throw new Error(error || `HTTP ${response.status}`)
+      }
+
+      await get().fetchPRs()
+      set({ loading: false })
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Failed to create conflict resolution task',
         loading: false,
       })
       throw error

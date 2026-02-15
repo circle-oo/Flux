@@ -21,6 +21,7 @@ func (s *Server) RegisterPRRoutes() {
 	s.mux.Handle("POST /api/prs/{task_id}/approve", s.authMiddleware(http.HandlerFunc(s.handleApprovePR)))
 	s.mux.Handle("POST /api/prs/{task_id}/request-changes", s.authMiddleware(http.HandlerFunc(s.handleRequestChanges)))
 	s.mux.Handle("POST /api/prs/{task_id}/close", s.authMiddleware(http.HandlerFunc(s.handleClosePR)))
+	s.mux.Handle("POST /api/prs/{task_id}/resolve-conflicts", s.authMiddleware(http.HandlerFunc(s.handleResolveConflicts)))
 }
 
 // handleListPendingPRs handles GET /api/prs/pending
@@ -354,6 +355,76 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 		"status":      "changes_requested",
 		"fix_task_id": fixTask.ID,
 		"fix_task":    fixTask,
+	})
+}
+
+// handleResolveConflicts handles POST /api/prs/{task_id}/resolve-conflicts
+// Creates a new task to resolve merge conflicts on the PR branch.
+func (s *Server) handleResolveConflicts(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("task_id")
+
+	task, err := s.tasks.GetByID(taskID)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		slog.Error("failed to get task", "id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if task.PRUrl == "" {
+		writeError(w, http.StatusBadRequest, "task has no PR")
+		return
+	}
+
+	if task.BranchName == "" {
+		writeError(w, http.StatusBadRequest, "task has no branch name")
+		return
+	}
+
+	prNumber, err := github.ExtractPRNumber(task.PRUrl)
+	if err != nil {
+		slog.Error("failed to extract PR number", "url", task.PRUrl, "error", err)
+		writeError(w, http.StatusBadRequest, "invalid PR URL")
+		return
+	}
+
+	// Create conflict resolution task
+	conflictTask := &models.Task{
+		Title:       fmt.Sprintf("Resolve conflicts: %s", task.Title),
+		Description: fmt.Sprintf("## Merge Conflict Resolution for PR #%d\n\nResolve merge conflicts on branch `%s` and update the pull request.\n\n**Original PR:** %s\n\n## Instructions\n1. Fetch the latest changes from main\n2. Merge main into the feature branch\n3. Resolve any conflicts\n4. Run tests to ensure functionality\n5. Push the resolved changes\n\n", prNumber, task.BranchName, task.PRUrl),
+		Type:        task.Type,
+		Priority:    7, // High priority for conflict resolution
+		Source:      models.TaskSourceOperator,
+		Status:      models.TaskReady,
+		ProjectID:   task.ProjectID,
+		GoalID:      task.GoalID,
+		BranchName:  task.BranchName, // Use same branch
+		PRUrl:       task.PRUrl,      // Link to same PR
+		ParentID:    task.ID,
+	}
+
+	if err := s.tasks.Create(conflictTask); err != nil {
+		slog.Error("failed to create conflict resolution task", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create task")
+		return
+	}
+
+	// Notify via Discord
+	if s.notifier != nil {
+		_ = s.notifier.Send(notifier.LevelInfo,
+			fmt.Sprintf("Conflict resolution task %s created for PR #%d", conflictTask.ID, prNumber))
+	}
+
+	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: conflictTask})
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":           "conflict_resolution_created",
+		"conflict_task_id": conflictTask.ID,
+		"conflict_task":    conflictTask,
+		"original_task_id": task.ID,
 	})
 }
 
