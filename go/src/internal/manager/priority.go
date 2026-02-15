@@ -7,6 +7,15 @@ import (
 	"github.com/circle-oo/flux/internal/models"
 )
 
+// GetCurrentGoalID returns the current goal ID or empty string if none.
+func GetCurrentGoalID(goalStore *models.GoalStore) string {
+	goal, err := goalStore.GetCurrent()
+	if err != nil || goal == nil {
+		return ""
+	}
+	return goal.ID
+}
+
 // CountByStatus returns the number of tasks with the given status.
 func (m *Manager) CountByStatus(status string) (int, error) {
 	var count int

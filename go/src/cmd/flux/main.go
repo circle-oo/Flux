@@ -15,6 +15,8 @@ import (
 
 	"github.com/circle-oo/flux/internal/config"
 	"github.com/circle-oo/flux/internal/db"
+	"github.com/circle-oo/flux/internal/executor"
+	"github.com/circle-oo/flux/internal/manager"
 	"github.com/circle-oo/flux/internal/notifier"
 	"github.com/circle-oo/flux/internal/server"
 	"github.com/circle-oo/flux/web"
@@ -74,7 +76,9 @@ func main() {
 	}
 	logger.Info("bootstrap complete")
 
-	// 5. Set server version
+	// 5. Initialize Manager and wire into server
+	mgr := manager.NewManager(database, cfg)
+	server.SetManager(mgr)
 	server.SetVersion(version)
 
 	// 6. Create and start HTTP server
@@ -99,18 +103,30 @@ func main() {
 		}
 	}()
 
+	// 9. Start Executor pod
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	exec := executor.NewExecutor("executor-01", cfg, discord)
+	go func() {
+		logger.Info("executor pod started", "id", "executor-01")
+		exec.Run(ctx)
+	}()
+
 	logger.Info("flux ready", "port", cfg.Server.Port)
 
-	// 9. Block on SIGTERM/SIGINT for graceful shutdown
+	// 10. Block on SIGTERM/SIGINT for graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-quit
 	logger.Info("shutting down", "signal", sig.String())
 
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Shutdown.PodGracePeriod)
-	defer cancel()
+	// Stop executor
+	ctxCancel()
+	exec.Stop()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Shutdown.PodGracePeriod)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("server shutdown error", "error", err)
 	}
 

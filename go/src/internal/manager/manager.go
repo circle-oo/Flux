@@ -71,13 +71,16 @@ func isSQLiteBusy(err error) bool {
 }
 
 func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
+	// Get current goal ID for goal boost (tiebreaker) - BEFORE starting transaction
+	currentGoalID := GetCurrentGoalID(m.goals)
+
 	tx, err := m.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Build query based on pod type
+	// Build query based on pod type with goal boost and extended limit for dependency checking
 	var query string
 	if podType == "RESEARCHER" {
 		query = `SELECT id, title, description, type, status, priority, source,
@@ -87,8 +90,10 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 			tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
 			FROM tasks
 			WHERE status = ? AND type = ?
-			ORDER BY priority ASC, created_at ASC
-			LIMIT 1`
+			ORDER BY priority ASC,
+				CASE WHEN goal_id = ? THEN 0 ELSE 1 END,
+				created_at ASC
+			LIMIT 10`
 	} else {
 		// Executor: any type except RESEARCH
 		query = `SELECT id, title, description, type, status, priority, source,
@@ -98,24 +103,45 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 			tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
 			FROM tasks
 			WHERE status = ? AND type != ?
-			ORDER BY priority ASC, created_at ASC
-			LIMIT 1`
+			ORDER BY priority ASC,
+				CASE WHEN goal_id = ? THEN 0 ELSE 1 END,
+				created_at ASC
+			LIMIT 10`
 	}
 
-	var task *models.Task
+	// Query multiple candidates for dependency checking
+	var rows *sql.Rows
 	if podType == "RESEARCHER" {
-		row := tx.QueryRow(query, models.TaskReady, models.TaskTypeResearch)
-		task, err = scanTaskFromRow(row)
+		rows, err = tx.Query(query, models.TaskReady, models.TaskTypeResearch, currentGoalID)
 	} else {
-		row := tx.QueryRow(query, models.TaskReady, models.TaskTypeResearch)
-		task, err = scanTaskFromRow(row)
-	}
-
-	if err == sql.ErrNoRows {
-		return nil, nil // No task available
+		rows, err = tx.Query(query, models.TaskReady, models.TaskTypeResearch, currentGoalID)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("query task: %w", err)
+		return nil, fmt.Errorf("query tasks: %w", err)
+	}
+	defer rows.Close()
+
+	// Find first task with met dependencies
+	var task *models.Task
+	for rows.Next() {
+		candidate, err := scanTaskFromRows(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan task: %w", err)
+		}
+
+		// Check if dependencies are met
+		met, err := m.areDependenciesMet(tx, candidate)
+		if err != nil {
+			return nil, fmt.Errorf("check dependencies: %w", err)
+		}
+		if met {
+			task = candidate
+			break
+		}
+	}
+
+	if task == nil {
+		return nil, nil // No task with met dependencies available
 	}
 
 	// Transition to RUNNING and set started_at
@@ -137,6 +163,30 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 	task.StartedAt = now
 
 	return task, nil
+}
+
+// areDependenciesMet checks if all dependencies of a task are COMPLETED or ARCHIVED.
+func (m *Manager) areDependenciesMet(tx *sql.Tx, task *models.Task) (bool, error) {
+	if len(task.DependsOn) == 0 {
+		return true, nil
+	}
+
+	for _, depID := range task.DependsOn {
+		var status string
+		err := tx.QueryRow(`SELECT status FROM tasks WHERE id = ?`, depID).Scan(&status)
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("dependency not found: %s", depID)
+		}
+		if err != nil {
+			return false, fmt.Errorf("query dependency %s: %w", depID, err)
+		}
+
+		if status != models.TaskCompleted && status != models.TaskArchived {
+			return false, nil
+		}
+	}
+
+	return true, nil
 }
 
 // TransitionTask enforces valid state transitions and retry logic.

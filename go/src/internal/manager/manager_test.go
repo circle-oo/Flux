@@ -3,6 +3,7 @@ package manager
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/circle-oo/flux/internal/config"
 	"github.com/circle-oo/flux/internal/models"
@@ -441,5 +442,302 @@ func TestListByPRStatus(t *testing.T) {
 	}
 	if len(pending) != 2 {
 		t.Errorf("expected 2 PENDING tasks, got %d", len(pending))
+	}
+}
+
+func TestPopNextTask_GoalBoost(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create goal as PROPOSED first
+	goal := &models.Goal{
+		Title:       "Test Goal",
+		Description: "Test goal for boost",
+	}
+	if err := mgr.goals.Create(goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+
+	// Activate the goal using proper Activate method
+	if err := mgr.goals.Activate(goal.ID); err != nil {
+		t.Fatalf("activate goal: %v", err)
+	}
+
+	// Verify goal is active
+	currentGoal, err := mgr.GetCurrentGoal()
+	if err != nil {
+		t.Fatalf("get current goal: %v", err)
+	}
+	if currentGoal == nil {
+		t.Fatal("expected active goal, got nil")
+	}
+	if currentGoal.ID != goal.ID {
+		t.Fatalf("expected goal ID %s, got %s", goal.ID, currentGoal.ID)
+	}
+
+	// Create non-goal task first (should have earlier created_at)
+	task1 := &models.Task{
+		Title:    "Non-Goal Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		GoalID:   "",
+	}
+	if err := mgr.CreateTask(task1); err != nil {
+		t.Fatalf("create task1: %v", err)
+	}
+
+	// Add slight delay to ensure different created_at timestamps
+	time.Sleep(10 * time.Millisecond)
+
+	// Create goal task second (later created_at, but should still win due to boost)
+	task2 := &models.Task{
+		Title:    "Goal Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		GoalID:   goal.ID,
+	}
+	if err := mgr.CreateTask(task2); err != nil {
+		t.Fatalf("create task2: %v", err)
+	}
+
+	// Pop task - should get goal-related task first despite being created later
+	next, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop next task: %v", err)
+	}
+
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+
+	if next.Title != "Goal Task" {
+		t.Errorf("expected Goal Task due to boost, got %s (goal_id=%s, expected=%s)", next.Title, next.GoalID, goal.ID)
+	}
+}
+
+func TestPopNextTask_GoalBoostNoCrossPriority(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create and activate a goal
+	goal := &models.Goal{
+		Title:       "Test Goal",
+		Description: "Test goal for boost",
+		Status:      models.GoalActive,
+	}
+	if err := mgr.goals.Create(goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+
+	// Create high-priority non-goal task and lower-priority goal task
+	task1 := &models.Task{
+		Title:    "High Priority Non-Goal",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 48,
+		GoalID:   "",
+	}
+	task2 := &models.Task{
+		Title:    "Lower Priority Goal Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		GoalID:   goal.ID,
+	}
+
+	if err := mgr.CreateTask(task1); err != nil {
+		t.Fatalf("create task1: %v", err)
+	}
+	if err := mgr.CreateTask(task2); err != nil {
+		t.Fatalf("create task2: %v", err)
+	}
+
+	// Pop task - should get high priority task (goal boost doesn't cross priority boundaries)
+	next, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop next task: %v", err)
+	}
+
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+
+	if next.Title != "High Priority Non-Goal" {
+		t.Errorf("expected high priority task to win despite goal boost, got %s", next.Title)
+	}
+}
+
+func TestPopNextTask_DependencyBlocking(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create dependency task (not completed)
+	depTask := &models.Task{
+		Title:    "Dependency Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskRunning,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(depTask); err != nil {
+		t.Fatalf("create dep task: %v", err)
+	}
+
+	// Create task that depends on the first
+	blockedTask := &models.Task{
+		Title:     "Blocked Task",
+		Type:      models.TaskTypeCoding,
+		Status:    models.TaskReady,
+		Priority:  40,
+		DependsOn: []string{depTask.ID},
+	}
+	if err := mgr.CreateTask(blockedTask); err != nil {
+		t.Fatalf("create blocked task: %v", err)
+	}
+
+	// Create independent task with lower priority
+	independentTask := &models.Task{
+		Title:    "Independent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 60,
+	}
+	if err := mgr.CreateTask(independentTask); err != nil {
+		t.Fatalf("create independent task: %v", err)
+	}
+
+	// Pop task - should skip blocked task and get independent one
+	next, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop next task: %v", err)
+	}
+
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+
+	if next.Title != "Independent Task" {
+		t.Errorf("expected Independent Task, got %s", next.Title)
+	}
+}
+
+func TestPopNextTask_DependencyResolved(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create dependency task and complete it
+	depTask := &models.Task{
+		Title:    "Dependency Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(depTask); err != nil {
+		t.Fatalf("create dep task: %v", err)
+	}
+
+	// Transition to completed
+	mgr.TransitionTask(depTask.ID, models.TaskRunning)
+	mgr.TransitionTask(depTask.ID, models.TaskCompleted)
+
+	// Create task that depends on the completed task
+	dependentTask := &models.Task{
+		Title:     "Dependent Task",
+		Type:      models.TaskTypeCoding,
+		Status:    models.TaskReady,
+		Priority:  40,
+		DependsOn: []string{depTask.ID},
+	}
+	if err := mgr.CreateTask(dependentTask); err != nil {
+		t.Fatalf("create dependent task: %v", err)
+	}
+
+	// Pop task - should get dependent task since dependency is resolved
+	next, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop next task: %v", err)
+	}
+
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+
+	if next.Title != "Dependent Task" {
+		t.Errorf("expected Dependent Task, got %s", next.Title)
+	}
+}
+
+func TestAreDependenciesMet(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create completed dependency
+	completedDep := &models.Task{
+		Title:    "Completed Dep",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskCompleted,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(completedDep); err != nil {
+		t.Fatalf("create completed dep: %v", err)
+	}
+
+	// Create running dependency
+	runningDep := &models.Task{
+		Title:    "Running Dep",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskRunning,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(runningDep); err != nil {
+		t.Fatalf("create running dep: %v", err)
+	}
+
+	// Test 1: No dependencies
+	taskNoDeps := &models.Task{
+		DependsOn: []string{},
+	}
+	tx, _ := db.Begin()
+	met, err := mgr.areDependenciesMet(tx, taskNoDeps)
+	tx.Rollback()
+	if err != nil {
+		t.Errorf("areDependenciesMet with no deps: %v", err)
+	}
+	if !met {
+		t.Error("expected dependencies met with no deps")
+	}
+
+	// Test 2: All dependencies completed
+	taskAllCompleted := &models.Task{
+		DependsOn: []string{completedDep.ID},
+	}
+	tx, _ = db.Begin()
+	met, err = mgr.areDependenciesMet(tx, taskAllCompleted)
+	tx.Rollback()
+	if err != nil {
+		t.Errorf("areDependenciesMet with completed deps: %v", err)
+	}
+	if !met {
+		t.Error("expected dependencies met with completed deps")
+	}
+
+	// Test 3: Some dependencies not completed
+	taskSomeRunning := &models.Task{
+		DependsOn: []string{completedDep.ID, runningDep.ID},
+	}
+	tx, _ = db.Begin()
+	met, err = mgr.areDependenciesMet(tx, taskSomeRunning)
+	tx.Rollback()
+	if err != nil {
+		t.Errorf("areDependenciesMet with mixed deps: %v", err)
+	}
+	if met {
+		t.Error("expected dependencies not met with running deps")
 	}
 }
