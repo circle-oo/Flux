@@ -31,14 +31,14 @@ test:
 	cd go/src && go test ./...
 
 frontend:
-	cd frontend && npm run build
+	cd frontend && npm ci --ignore-scripts && npm run build
 
 # frontend-safe builds the frontend but does not fail the overall build if npm/node is missing.
 # This is critical for auto-deploy via launchd where PATH may not include nvm-managed node.
 frontend-safe:
 	@if command -v npm >/dev/null 2>&1; then \
 		echo "Building frontend..."; \
-		cd frontend && npm run build; \
+		cd frontend && npm ci --ignore-scripts && npm run build; \
 	else \
 		echo "WARNING: npm not found in PATH, skipping frontend build"; \
 		echo "  The existing embedded frontend will be used."; \
