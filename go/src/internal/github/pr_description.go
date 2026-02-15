@@ -11,17 +11,22 @@ import (
 
 // PRDescriptionBuilder builds rich PR descriptions with structured sections.
 type PRDescriptionBuilder struct {
-	task        *models.Task
+	task         *models.Task
 	worktreePath string
-	executorID  string
+	executorID   string
+	baseBranch   string
 }
 
 // NewPRDescriptionBuilder creates a new PR description builder.
-func NewPRDescriptionBuilder(task *models.Task, worktreePath, executorID string) *PRDescriptionBuilder {
+func NewPRDescriptionBuilder(task *models.Task, worktreePath, executorID, baseBranch string) *PRDescriptionBuilder {
+	if baseBranch == "" {
+		baseBranch = "main"
+	}
 	return &PRDescriptionBuilder{
-		task:        task,
+		task:         task,
 		worktreePath: worktreePath,
-		executorID:  executorID,
+		executorID:   executorID,
+		baseBranch:   baseBranch,
 	}
 }
 
@@ -95,6 +100,14 @@ func (b *PRDescriptionBuilder) buildRequirementsSection() string {
 func (b *PRDescriptionBuilder) buildImplementationSection() string {
 	var sb strings.Builder
 	sb.WriteString("## 🔨 What Was Done in This PR\n\n")
+
+	// Implementation summary
+	summary := b.generateImplementationSummary()
+	if summary != "" {
+		sb.WriteString("### Summary\n\n")
+		sb.WriteString(summary)
+		sb.WriteString("\n\n")
+	}
 
 	// Get commit information
 	commits := b.getCommitSummary()
@@ -250,9 +263,99 @@ func (b *PRDescriptionBuilder) buildFooter() string {
 	return sb.String()
 }
 
+// generateImplementationSummary creates a concise summary of the implementation.
+func (b *PRDescriptionBuilder) generateImplementationSummary() string {
+	var summary strings.Builder
+
+	// Line 1-2: What was changed
+	if b.task.Title != "" {
+		summary.WriteString(fmt.Sprintf("This PR implements **%s**.\n\n", b.task.Title))
+	}
+
+	// Line 3-5: Why the change was made
+	if b.task.Description != "" {
+		// Extract first 1-2 sentences from description as the "why"
+		desc := strings.TrimSpace(b.task.Description)
+		// Find first period or newline to limit verbosity
+		sentences := strings.SplitN(desc, ". ", 2)
+		why := sentences[0]
+		if len(sentences) > 1 && len(why) < 150 {
+			why += ". " + strings.SplitN(sentences[1], ". ", 2)[0]
+		}
+		summary.WriteString(fmt.Sprintf("**Why:** %s\n\n", why))
+	}
+
+	// Line 6-8: Key implementation details (commits and file changes)
+	commits := b.getCommitSummary()
+	fileChanges := b.getFileChanges()
+
+	if len(commits) > 0 || len(fileChanges) > 0 {
+		summary.WriteString("**Key Changes:**\n")
+		if len(commits) > 0 {
+			summary.WriteString(fmt.Sprintf("- Implemented across %d commit(s)\n", len(commits)))
+		}
+		if len(fileChanges) > 0 {
+			summary.WriteString(fmt.Sprintf("- Modified %d file(s)", len(fileChanges)))
+
+			// Categorize changes
+			added, modified, deleted := 0, 0, 0
+			for _, change := range fileChanges {
+				if strings.HasPrefix(change, "**Added**") {
+					added++
+				} else if strings.HasPrefix(change, "**Modified**") {
+					modified++
+				} else if strings.HasPrefix(change, "**Deleted**") {
+					deleted++
+				}
+			}
+			details := []string{}
+			if added > 0 {
+				details = append(details, fmt.Sprintf("%d added", added))
+			}
+			if modified > 0 {
+				details = append(details, fmt.Sprintf("%d modified", modified))
+			}
+			if deleted > 0 {
+				details = append(details, fmt.Sprintf("%d deleted", deleted))
+			}
+			if len(details) > 0 {
+				summary.WriteString(fmt.Sprintf(" (%s)", strings.Join(details, ", ")))
+			}
+			summary.WriteString("\n")
+		}
+		summary.WriteString("\n")
+	}
+
+	// Line 9-10: Impact or benefits
+	if b.task.Type != "" {
+		impact := ""
+		switch b.task.Type {
+		case models.TaskTypeCoding:
+			impact = "Adds new functionality to the codebase."
+		case models.TaskTypeBugfix:
+			impact = "Fixes a bug and improves system reliability."
+		case models.TaskTypeDocument:
+			impact = "Improves documentation and developer experience."
+		case models.TaskTypeMaintenance:
+			impact = "Maintains code quality and updates dependencies."
+		case models.TaskTypeResearch:
+			impact = "Documents research findings for future reference."
+		case models.TaskTypeDeploy:
+			impact = "Prepares deployment and operational improvements."
+		case models.TaskTypePlanning:
+			impact = "Provides planning and design documentation."
+		default:
+			impact = "Contributes to the project's goals."
+		}
+		summary.WriteString(fmt.Sprintf("**Impact:** %s", impact))
+	}
+
+	return summary.String()
+}
+
 // getCommitSummary retrieves commit messages from the current branch.
 func (b *PRDescriptionBuilder) getCommitSummary() []string {
-	cmd := exec.Command("git", "log", "--format=%s", "main..HEAD")
+	cmd := exec.Command("git", "log", "--format=%s", fmt.Sprintf("%s..HEAD", b.baseBranch))
 	cmd.Dir = b.worktreePath
 	output, err := cmd.Output()
 	if err != nil {
@@ -273,7 +376,7 @@ func (b *PRDescriptionBuilder) getCommitSummary() []string {
 
 // getFileChanges retrieves the list of files changed with their change type.
 func (b *PRDescriptionBuilder) getFileChanges() []string {
-	cmd := exec.Command("git", "diff", "--name-status", "main..HEAD")
+	cmd := exec.Command("git", "diff", "--name-status", fmt.Sprintf("%s..HEAD", b.baseBranch))
 	cmd.Dir = b.worktreePath
 	output, err := cmd.Output()
 	if err != nil {
