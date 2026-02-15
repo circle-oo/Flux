@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import { useAuthStore } from './stores/authStore'
 import Login from './pages/Login'
 import Layout from './components/Layout'
@@ -12,9 +13,24 @@ import Settings from './pages/Settings'
 import TaskDetail from './pages/TaskDetail'
 
 function App() {
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const { isAuthenticated, authEnabled, checkAuthConfig } = useAuthStore()
 
-  if (!isAuthenticated) {
+  // Check auth config on mount
+  useEffect(() => {
+    checkAuthConfig()
+  }, [checkAuthConfig])
+
+  // Show loading while checking auth config
+  if (authEnabled === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <div className="text-slate-400">Loading...</div>
+      </div>
+    )
+  }
+
+  // Show login page only if auth is enabled and not authenticated
+  if (authEnabled && !isAuthenticated) {
     return <Login />
   }
 

@@ -344,6 +344,11 @@ class APIClient {
     const data = await this.fetch<{ pods: Pod[] }>('/api/pods')
     return data.pods || []
   }
+
+  // Config
+  async getHealth(): Promise<{ status: string; version: string; auth_enabled: boolean }> {
+    return this.fetch('/health')
+  }
 }
 
 export const api = new APIClient()

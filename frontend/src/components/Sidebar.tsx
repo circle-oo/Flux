@@ -10,7 +10,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarProps) {
-  const { logout } = useAuthStore()
+  const { logout, authEnabled } = useAuthStore()
   const wsConnected = useWSStore((s) => s.connected)
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
@@ -144,14 +144,16 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
           <span className="text-xl">{isRestarting ? '⏳' : '🔄'}</span>
           {!isCollapsed && <span>{isRestarting ? 'Restarting...' : 'Restart'}</span>}
         </button>
-        <button
-          onClick={logout}
-          className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-slate-300 hover:bg-slate-700 hover:text-white transition-colors touch-manipulation min-h-[44px]"
-          title={isCollapsed ? 'Logout' : undefined}
-        >
-          <span className="text-xl">🚪</span>
-          {!isCollapsed && <span>Logout</span>}
-        </button>
+        {authEnabled && (
+          <button
+            onClick={logout}
+            className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-slate-300 hover:bg-slate-700 hover:text-white transition-colors touch-manipulation min-h-[44px]"
+            title={isCollapsed ? 'Logout' : undefined}
+          >
+            <span className="text-xl">🚪</span>
+            {!isCollapsed && <span>Logout</span>}
+          </button>
+        )}
       </div>
     </aside>
     </>

@@ -4,8 +4,10 @@ import { initializeWebSocket, cleanupWebSocket } from './wsStore'
 
 interface AuthState {
   isAuthenticated: boolean
+  authEnabled: boolean | null // null = not yet checked, true/false = config value
   isLoading: boolean
   error: string | null
+  checkAuthConfig: () => Promise<void>
   login: (password: string) => Promise<void>
   logout: () => Promise<void>
   clearError: () => void
@@ -13,8 +15,26 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
+  authEnabled: null,
   isLoading: false,
   error: null,
+
+  checkAuthConfig: async () => {
+    try {
+      const health = await api.getHealth()
+      set({ authEnabled: health.auth_enabled })
+      // If auth is disabled, automatically mark as authenticated
+      if (!health.auth_enabled) {
+        set({ isAuthenticated: true })
+        // Connect WebSocket when auth is disabled
+        initializeWebSocket()
+      }
+    } catch (error) {
+      console.error('Failed to check auth config:', error)
+      // Default to auth enabled for security if config check fails
+      set({ authEnabled: true })
+    }
+  },
 
   login: async (password: string) => {
     set({ isLoading: true, error: null })

@@ -112,7 +112,7 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 
-	var resp map[string]string
+	var resp map[string]any
 	parseResponse(t, rr, &resp)
 
 	if resp["status"] != "ok" {
@@ -120,6 +120,10 @@ func TestHealth(t *testing.T) {
 	}
 	if resp["version"] == "" {
 		t.Error("expected version to be set")
+	}
+	// Check that auth_enabled field is present
+	if _, ok := resp["auth_enabled"]; !ok {
+		t.Error("expected auth_enabled to be present")
 	}
 }
 
