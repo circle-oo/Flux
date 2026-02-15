@@ -80,8 +80,27 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 		return "", "", fmt.Errorf("failed to create trees directory: %w", err)
 	}
 
-	// Create worktree
-	cmd := exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "main")
+	// Clean up stale worktree directory if it exists from a previous attempt
+	if _, statErr := os.Stat(worktreePath); statErr == nil {
+		slog.Info("removing stale worktree directory from previous attempt", "path", worktreePath)
+		pruneCmd := exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", worktreePath)
+		_ = pruneCmd.Run() // best-effort
+		// Also prune any dangling worktree references
+		pruneCmd2 := exec.Command("git", "-C", bareDir, "worktree", "prune")
+		_ = pruneCmd2.Run()
+	}
+
+	// Check if branch already exists (from a previous failed attempt / retry)
+	checkCmd := exec.Command("git", "-C", bareDir, "rev-parse", "--verify", "refs/heads/"+branchName)
+	var cmd *exec.Cmd
+	if checkCmd.Run() == nil {
+		// Branch exists — create worktree using existing branch
+		slog.Info("reusing existing branch for retry", "branch", branchName)
+		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", worktreePath, branchName)
+	} else {
+		// Branch doesn't exist — create new branch from main
+		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "main")
+	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("failed to create worktree: %w: %s", err, output)
 	}

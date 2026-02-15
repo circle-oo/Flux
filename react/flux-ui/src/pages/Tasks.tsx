@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { Task } from '../lib/api'
@@ -15,6 +16,7 @@ export default function Tasks() {
     retryTask,
   } = useTaskStore()
   const { projects, fetchProjects } = useProjectStore()
+  const navigate = useNavigate()
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({
     title: '',
@@ -255,7 +257,10 @@ export default function Tasks() {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
-                      <h3 className="text-lg font-medium text-slate-100">
+                      <h3
+                        className="text-lg font-medium text-slate-100 hover:text-blue-400 cursor-pointer transition-colors"
+                        onClick={() => navigate(`/tasks/${task.id}`)}
+                      >
                         {task.title}
                       </h3>
                       <span

@@ -25,10 +25,22 @@ export interface Task {
   pr_url?: string
   pr_status?: string
   error_log?: string
+  result?: string
+  prompt?: string
+  executor_id?: string
+  model?: string
+  branch_name?: string
+  test_passed?: boolean | null
+  retry_count?: number
+  crash_recovery?: boolean
+  tokens_used?: number
+  cost_usd?: number
   created_at: string
+  updated_at?: string
   started_at?: string
   completed_at?: string
   parent_id?: string
+  depth?: number
   depends_on: string[]
   tags: string[]
   requires_test: boolean

@@ -212,9 +212,14 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 
 	// 12. Commit and get diff
-	diffLines, filesChanged := e.commitAndGetDiff(worktreePath, task)
+	diffLines, filesChanged, pushErr := e.commitAndGetDiff(worktreePath, task)
 	task.DiffLines = diffLines
 	task.FilesChanged = filesChanged
+	if pushErr != nil {
+		slog.Error("commit/push failed", "task_id", task.ID, "error", pushErr)
+		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, fmt.Sprintf("git failed: %v", pushErr), result.TokensUsed, result.CostUSD)
+		return
+	}
 	slog.Info("changes committed and pushed", "task_id", task.ID, "diff_lines", diffLines, "files_changed", filesChanged)
 
 	// Check guardrails
@@ -403,14 +408,15 @@ func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
 }
 
 // commitAndGetDiff stages, commits, pushes, and returns diff stats.
-func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (diffLines, filesChanged int) {
+// Returns an error if git push fails (caller should not create PR).
+func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (diffLines, filesChanged int, pushErr error) {
 	// git add -A
 	slog.Debug("staging changes", "worktree", worktreePath)
 	addCmd := exec.Command("git", "add", "-A")
 	addCmd.Dir = worktreePath
 	if output, err := addCmd.CombinedOutput(); err != nil {
 		slog.Error("git add failed", "output", string(output), "error", err)
-		return 0, 0
+		return 0, 0, fmt.Errorf("git add failed: %w", err)
 	}
 
 	// Check if there are changes to commit
@@ -419,7 +425,7 @@ func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (dif
 	statusOut, err := statusCmd.Output()
 	if err != nil || len(strings.TrimSpace(string(statusOut))) == 0 {
 		slog.Info("no changes to commit", "worktree", worktreePath)
-		return 0, 0
+		return 0, 0, fmt.Errorf("no changes to commit")
 	}
 
 	// git commit
@@ -429,7 +435,7 @@ func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (dif
 	commitCmd.Dir = worktreePath
 	if output, err := commitCmd.CombinedOutput(); err != nil {
 		slog.Error("git commit failed", "output", string(output), "error", err)
-		return 0, 0
+		return 0, 0, fmt.Errorf("git commit failed: %w", err)
 	}
 	slog.Info("committed changes", "task_id", task.ID, "message_prefix", "[flux] "+task.Title)
 
@@ -449,11 +455,11 @@ func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (dif
 	pushCmd.Dir = worktreePath
 	if output, err := pushCmd.CombinedOutput(); err != nil {
 		slog.Error("git push failed", "output", string(output), "error", err)
-	} else {
-		slog.Info("pushed to remote", "branch", task.BranchName)
+		return diffLines, filesChanged, fmt.Errorf("git push failed: %w", err)
 	}
+	slog.Info("pushed to remote", "branch", task.BranchName)
 
-	return diffLines, filesChanged
+	return diffLines, filesChanged, nil
 }
 
 // parseDiffStat parses the summary line of `git diff --stat` output.

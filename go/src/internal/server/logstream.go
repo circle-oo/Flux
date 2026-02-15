@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"log/slog"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -43,6 +45,10 @@ func (h *LogBroadcastHandler) Enabled(ctx context.Context, level slog.Level) boo
 }
 
 func (h *LogBroadcastHandler) Handle(ctx context.Context, r slog.Record) error {
+	// Infer component from call site and inject into the record for inner handler.
+	component := inferComponent(r.PC)
+	r.AddAttrs(slog.String("component", component))
+
 	// Always forward to the inner handler first.
 	if err := h.inner.Handle(ctx, r); err != nil {
 		return err
@@ -124,6 +130,47 @@ func (h *LogBroadcastHandler) WithGroup(name string) slog.Handler {
 		mu:    h.mu,
 		attrs: h.attrs,
 		group: g,
+	}
+}
+
+// inferComponent extracts a component name from the program counter of the log call site.
+// e.g. "github.com/circle-oo/flux/internal/executor.(*Executor).Run" → "executor"
+func inferComponent(pc uintptr) string {
+	if pc == 0 {
+		return "unknown"
+	}
+	fs := runtime.CallersFrames([]uintptr{pc})
+	f, _ := fs.Next()
+	if f.Function == "" {
+		return "unknown"
+	}
+
+	// Map known package paths to short component names.
+	switch {
+	case strings.Contains(f.Function, "/executor"):
+		return "executor"
+	case strings.Contains(f.Function, "/manager"):
+		return "manager"
+	case strings.Contains(f.Function, "/orchestrator"):
+		return "orchestrator"
+	case strings.Contains(f.Function, "/server"):
+		return "server"
+	case strings.Contains(f.Function, "/shutdown"):
+		return "shutdown"
+	case strings.Contains(f.Function, "/github"):
+		return "github"
+	case strings.Contains(f.Function, "/notifier"):
+		return "notifier"
+	case strings.Contains(f.Function, "cmd/flux"):
+		return "main"
+	default:
+		// Extract last package segment as fallback.
+		parts := strings.Split(f.Function, "/")
+		last := parts[len(parts)-1]
+		if idx := strings.Index(last, "."); idx > 0 {
+			return last[:idx]
+		}
+		return last
 	}
 }
 

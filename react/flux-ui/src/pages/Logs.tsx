@@ -8,6 +8,16 @@ const levelColors: Record<string, string> = {
   ERROR: 'bg-red-600 text-red-100',
 }
 
+const componentColors: Record<string, string> = {
+  executor: 'text-purple-400',
+  manager: 'text-green-400',
+  orchestrator: 'text-cyan-400',
+  server: 'text-yellow-400',
+  main: 'text-slate-400',
+  shutdown: 'text-orange-400',
+  github: 'text-pink-400',
+}
+
 function levelBadge(level: string) {
   const cls = levelColors[level] || 'bg-slate-600 text-slate-200'
   return (
@@ -184,6 +194,7 @@ export default function Logs() {
             <tr className="text-left text-slate-400 border-b border-slate-700">
               <th className="px-4 py-2 w-28 font-medium">Time</th>
               <th className="px-4 py-2 w-20 font-medium">Level</th>
+              <th className="px-4 py-2 w-24 font-medium">Component</th>
               <th className="px-4 py-2 font-medium">Message</th>
               <th className="px-4 py-2 font-medium">Attributes</th>
             </tr>
@@ -191,7 +202,7 @@ export default function Logs() {
           <tbody className="font-mono text-xs">
             {filteredLogs.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
                   {logs.length === 0
                     ? 'No log entries yet. Logs will appear here in real-time.'
                     : 'No entries match the current filters.'}
@@ -213,6 +224,9 @@ export default function Logs() {
                     {formatTime(entry.time)}
                   </td>
                   <td className="px-4 py-1.5">{levelBadge(entry.level)}</td>
+                  <td className={`px-4 py-1.5 font-mono text-xs font-semibold ${componentColors[entry.attrs.component as string] || 'text-slate-500'}`}>
+                    {(entry.attrs.component as string) || '—'}
+                  </td>
                   <td className="px-4 py-1.5 text-slate-200">{entry.msg}</td>
                   <td className="px-4 py-1.5">
                     <AttrCell attrs={entry.attrs} />
