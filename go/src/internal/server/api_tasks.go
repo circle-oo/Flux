@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
@@ -212,7 +214,11 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.tasks.Cancel(id); err != nil {
 		slog.Error("failed to cancel task", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal server error")
+		if strings.Contains(err.Error(), "not in a cancellable state") {
+			writeError(w, http.StatusConflict, err.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
 		return
 	}
 
@@ -223,6 +229,10 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("task cancelled by operator", "task_id", id, "title", task.Title)
+	if s.notifier != nil {
+		s.notifier.Send("info", fmt.Sprintf("Task cancelled: %s", task.Title))
+	}
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
 	writeJSON(w, http.StatusOK, task)
@@ -278,6 +288,33 @@ func (s *Server) handleRetryTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
+
+	writeJSON(w, http.StatusOK, task)
+}
+
+// handleArchiveTask handles POST /api/tasks/{id}/archive
+func (s *Server) handleArchiveTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	if err := s.tasks.Archive(id); err != nil {
+		slog.Error("failed to archive task", "id", id, "error", err)
+		if strings.Contains(err.Error(), "not in an archivable state") {
+			writeError(w, http.StatusConflict, err.Error())
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		}
+		return
+	}
+
+	task, err := s.tasks.GetByID(id)
+	if err != nil {
+		slog.Error("failed to get task after archive", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	slog.Info("task archived", "task_id", id, "title", task.Title)
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
 	writeJSON(w, http.StatusOK, task)

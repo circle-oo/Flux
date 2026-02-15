@@ -28,6 +28,7 @@ const (
 	TaskRunning   = "RUNNING"
 	TaskCompleted = "COMPLETED"
 	TaskFailed    = "FAILED"
+	TaskCancelled = "CANCELLED"
 	TaskRetry     = "RETRY"
 	TaskArchived  = "ARCHIVED"
 )
@@ -292,15 +293,38 @@ func (s *TaskStore) Delete(id string) error {
 	return nil
 }
 
-// Cancel sets a task to FAILED with "cancelled by operator" error log.
+// Cancel sets a task to CANCELLED with "cancelled by operator" error log.
+// Only cancels tasks that are in a cancellable state (PENDING, READY, RUNNING).
 func (s *TaskStore) Cancel(id string) error {
-	_, err := s.DB.Exec(
+	result, err := s.DB.Exec(
 		`UPDATE tasks SET status = ?, error_log = 'cancelled by operator',
-		 updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		TaskFailed, id,
+		 updated_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP
+		 WHERE id = ? AND status IN (?, ?, ?)`,
+		TaskCancelled, id, TaskPending, TaskReady, TaskRunning,
 	)
 	if err != nil {
 		return fmt.Errorf("cancel task: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task %s is not in a cancellable state", id)
+	}
+	return nil
+}
+
+// Archive sets a task to ARCHIVED. Only completed, failed, or cancelled tasks can be archived.
+func (s *TaskStore) Archive(id string) error {
+	result, err := s.DB.Exec(
+		`UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE id = ? AND status IN (?, ?, ?)`,
+		TaskArchived, id, TaskCompleted, TaskFailed, TaskCancelled,
+	)
+	if err != nil {
+		return fmt.Errorf("archive task: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task %s is not in an archivable state", id)
 	}
 	return nil
 }

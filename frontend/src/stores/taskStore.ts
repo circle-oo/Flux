@@ -26,6 +26,7 @@ interface TaskState {
   deleteTask: (id: string) => Promise<void>
   cancelTask: (id: string) => Promise<void>
   retryTask: (id: string) => Promise<void>
+  archiveTask: (id: string) => Promise<void>
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
@@ -136,6 +137,21 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Failed to retry task',
+        isLoading: false,
+      })
+      throw error
+    }
+  },
+
+  archiveTask: async (id) => {
+    set({ isLoading: true, error: null })
+    try {
+      await api.archiveTask(id)
+      await get().fetchTasks()
+      set({ isLoading: false })
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Failed to archive task',
         isLoading: false,
       })
       throw error

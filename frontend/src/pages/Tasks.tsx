@@ -58,6 +58,7 @@ const mainStatusFilters = [
 
 const moreStatusFilters = [
   { value: 'PENDING', label: 'Pending' },
+  { value: 'CANCELLED', label: 'Cancelled' },
   { value: 'RETRY', label: 'Retry' },
   { value: 'ARCHIVED', label: 'Archived' },
 ]
@@ -77,8 +78,9 @@ const statusOrder: Record<string, number> = {
   RETRY: 2,
   PENDING: 3,
   FAILED: 4,
-  COMPLETED: 5,
-  ARCHIVED: 6,
+  CANCELLED: 5,
+  COMPLETED: 6,
+  ARCHIVED: 7,
 }
 
 export default function Tasks() {
@@ -91,6 +93,7 @@ export default function Tasks() {
     createTask,
     cancelTask,
     retryTask,
+    archiveTask,
   } = useTaskStore()
   const { projects, fetchProjects } = useProjectStore()
   const { currentGoal, fetchCurrentGoal } = useGoalStore()
@@ -116,8 +119,15 @@ export default function Tasks() {
     fetchCurrentGoal()
   }, [fetchTasks, fetchProjects, fetchCurrentGoal])
 
+  // Filter out archived tasks by default (unless explicitly filtering for them)
+  const visibleTasks = useMemo(() => {
+    if (filters.status === 'ARCHIVED') return tasks
+    if (!filters.status) return tasks.filter((t) => t.status !== 'ARCHIVED')
+    return tasks
+  }, [tasks, filters.status])
+
   const sortedTasks = useMemo(() => {
-    const sorted = [...tasks]
+    const sorted = [...visibleTasks]
     switch (sortBy) {
       case 'priority':
         sorted.sort((a, b) => a.priority - b.priority || new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -137,7 +147,7 @@ export default function Tasks() {
         break
     }
     return sorted
-  }, [tasks, sortBy])
+  }, [visibleTasks, sortBy])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -187,6 +197,16 @@ export default function Tasks() {
         await retryTask(id)
       } catch (error) {
         console.error('Failed to retry task:', error)
+      }
+    }
+  }
+
+  const handleArchive = async (id: string, title: string) => {
+    if (confirm(`Archive task: ${title}?`)) {
+      try {
+        await archiveTask(id)
+      } catch (error) {
+        console.error('Failed to archive task:', error)
       }
     }
   }
@@ -552,6 +572,8 @@ export default function Tasks() {
                               ? 'badge-info'
                               : task.status === 'RETRY'
                               ? 'badge-warning'
+                              : task.status === 'CANCELLED'
+                              ? 'bg-slate-500 text-white px-2 py-1 rounded text-xs font-semibold'
                               : 'badge-secondary'
                           }`}
                         >
@@ -642,6 +664,14 @@ export default function Tasks() {
                           className="btn-danger"
                         >
                           Cancel
+                        </button>
+                      )}
+                      {(task.status === 'COMPLETED' || task.status === 'FAILED' || task.status === 'CANCELLED') && (
+                        <button
+                          onClick={() => handleArchive(task.id, task.title)}
+                          className="px-3 py-1.5 rounded text-sm font-medium bg-slate-600 text-slate-300 hover:bg-slate-500 transition-colors"
+                        >
+                          Archive
                         </button>
                       )}
                     </div>

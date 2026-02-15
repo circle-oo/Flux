@@ -572,8 +572,8 @@ func TestTasks_Cancel(t *testing.T) {
 
 	var cancelled map[string]interface{}
 	parseResponse(t, rr, &cancelled)
-	if cancelled["status"] != "FAILED" {
-		t.Errorf("expected FAILED, got %v", cancelled["status"])
+	if cancelled["status"] != "CANCELLED" {
+		t.Errorf("expected CANCELLED, got %v", cancelled["status"])
 	}
 }
 

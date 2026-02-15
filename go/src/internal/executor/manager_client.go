@@ -155,6 +155,30 @@ func (c *ManagerClient) CreateTask(task *models.Task) error {
 	return nil
 }
 
+// GetTaskStatus fetches the current status of a task.
+// Used by executor to check if a task was cancelled mid-execution.
+// GET /internal/tasks/{id} (reuses the existing route via /api path)
+func (c *ManagerClient) GetTaskStatus(taskID string) (string, error) {
+	url := fmt.Sprintf("%s/internal/tasks/%s/status", c.baseURL, taskID)
+	resp, err := c.http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("get request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+	return result.Status, nil
+}
+
 // SubtaskRequest represents a subtask creation request.
 type SubtaskRequest struct {
 	Title       string `json:"title"`

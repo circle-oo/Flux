@@ -194,8 +194,8 @@ func TestTaskStore_Cancel(t *testing.T) {
 	}
 
 	got, _ := store.GetByID(task.ID)
-	if got.Status != TaskFailed {
-		t.Errorf("expected FAILED, got %s", got.Status)
+	if got.Status != TaskCancelled {
+		t.Errorf("expected CANCELLED, got %s", got.Status)
 	}
 	if got.ErrorLog != "cancelled by operator" {
 		t.Errorf("expected 'cancelled by operator', got %s", got.ErrorLog)

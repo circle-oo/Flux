@@ -17,7 +17,7 @@ export interface Task {
   title: string
   description: string
   type: 'CODING' | 'RESEARCH' | 'DOCUMENT' | 'MAINTENANCE' | 'DEPLOY' | 'BUGFIX' | 'PLANNING'
-  status: 'PENDING' | 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'RETRY' | 'ARCHIVED'
+  status: 'PENDING' | 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'RETRY' | 'ARCHIVED'
   priority: number
   project_id: string
   goal_id?: string
@@ -215,6 +215,10 @@ class APIClient {
 
   async cancelTask(id: string): Promise<void> {
     await this.fetch(`/api/tasks/${id}/cancel`, { method: 'POST' })
+  }
+
+  async archiveTask(id: string): Promise<Task> {
+    return this.fetch(`/api/tasks/${id}/archive`, { method: 'POST' })
   }
 
   async retryTask(id: string): Promise<Task> {

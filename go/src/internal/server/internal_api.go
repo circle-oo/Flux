@@ -289,6 +289,18 @@ func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, task)
 }
 
+// handleInternalTaskStatus handles GET /internal/tasks/{id}/status
+// Executor checks if a task was cancelled mid-execution.
+func (s *Server) handleInternalTaskStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	task, err := s.tasks.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": task.Status})
+}
+
 // handleInternalGetModel handles GET /internal/model/{task_id}
 // Pod queries which model to use for a task.
 func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) {
