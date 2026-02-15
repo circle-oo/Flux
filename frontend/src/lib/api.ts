@@ -238,6 +238,34 @@ class APIClient {
     })
   }
 
+  // PRs
+  async listPRs(statusFilter?: string): Promise<Task[]> {
+    const params = new URLSearchParams()
+    if (statusFilter) params.set('status', statusFilter)
+
+    const query = params.toString() ? `?${params.toString()}` : ''
+    const data = await this.fetch<{ tasks: Task[] }>(`/api/prs/pending${query}`)
+    return data.tasks || []
+  }
+
+  async approvePR(taskId: string): Promise<{ status: string; task: Task }> {
+    return this.fetch(`/api/prs/${taskId}/approve`, {
+      method: 'POST',
+    })
+  }
+
+  async requestPRChanges(taskId: string): Promise<{ status: string; fix_task_id: string; fix_task: Task }> {
+    return this.fetch(`/api/prs/${taskId}/request-changes`, {
+      method: 'POST',
+    })
+  }
+
+  async closePR(taskId: string): Promise<{ status: string; task: Task }> {
+    return this.fetch(`/api/prs/${taskId}/close`, {
+      method: 'POST',
+    })
+  }
+
   // System
   async restart(): Promise<{ status: string; message: string }> {
     return this.fetch('/api/system/restart', {

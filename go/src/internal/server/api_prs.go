@@ -19,20 +19,31 @@ func (s *Server) RegisterPRRoutes() {
 	s.mux.Handle("GET /api/prs/pending", s.authMiddleware(http.HandlerFunc(s.handleListPendingPRs)))
 	s.mux.Handle("POST /api/prs/{task_id}/approve", s.authMiddleware(http.HandlerFunc(s.handleApprovePR)))
 	s.mux.Handle("POST /api/prs/{task_id}/request-changes", s.authMiddleware(http.HandlerFunc(s.handleRequestChanges)))
+	s.mux.Handle("POST /api/prs/{task_id}/close", s.authMiddleware(http.HandlerFunc(s.handleClosePR)))
 }
 
 // handleListPendingPRs handles GET /api/prs/pending
-// Returns tasks with pr_status = 'OPEN'.
+// Returns tasks with pr_url set, optionally filtered by pr_status query parameter.
+// If no status filter is provided, returns all PRs regardless of status.
 func (s *Server) handleListPendingPRs(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(
-		`SELECT id, title, description, type, status, priority, source,
+	statusFilter := r.URL.Query().Get("status")
+
+	query := `SELECT id, title, description, type, status, priority, source,
 		 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 		 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
 		 diff_lines, files_changed, test_passed, retry_count, crash_recovery,
 		 tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
-		 FROM tasks WHERE pr_status = ? ORDER BY priority ASC, created_at DESC`,
-		"OPEN",
-	)
+		 FROM tasks WHERE pr_url != ''`
+
+	var args []interface{}
+	if statusFilter != "" {
+		query += " AND pr_status = ?"
+		args = append(args, statusFilter)
+	}
+
+	query += " ORDER BY priority ASC, created_at DESC"
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		slog.Error("failed to query pending PRs", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
@@ -122,6 +133,75 @@ func (s *Server) handleApprovePR(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status": "merged",
+		"task":   task,
+	})
+}
+
+// handleClosePR handles POST /api/prs/{task_id}/close
+// Closes the PR on GitHub and updates the task.
+func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("task_id")
+
+	task, err := s.tasks.GetByID(taskID)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		slog.Error("failed to get task", "id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if task.PRUrl == "" {
+		writeError(w, http.StatusBadRequest, "task has no PR")
+		return
+	}
+
+	if task.PRStatus == "MERGED" || task.PRStatus == "CLOSED" {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("PR is already %s", task.PRStatus))
+		return
+	}
+
+	prNumber, err := github.ExtractPRNumber(task.PRUrl)
+	if err != nil {
+		slog.Error("failed to extract PR number", "url", task.PRUrl, "error", err)
+		writeError(w, http.StatusBadRequest, "invalid PR URL")
+		return
+	}
+
+	// Get project to extract owner/repo
+	project, err := s.projects.GetByID(task.ProjectID)
+	if err != nil {
+		slog.Error("failed to get project", "id", task.ProjectID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	owner, repo := extractOwnerRepoFromURL(project.RepoURL)
+	if owner == "" || repo == "" {
+		writeError(w, http.StatusBadRequest, "invalid repo URL in project")
+		return
+	}
+
+	client := github.NewClient(s.config.GitHub.Token, s.config.GitHub.Username)
+	if err := client.ClosePR(owner, repo, prNumber); err != nil {
+		slog.Error("failed to close PR", "pr", prNumber, "error", err)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("close failed: %v", err))
+		return
+	}
+
+	task.PRStatus = "CLOSED"
+	if err := s.tasks.Update(task); err != nil {
+		slog.Error("failed to update task PR status", "id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	s.ws.Broadcast(Event{Type: EventPRStatus, Data: task})
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "closed",
 		"task":   task,
 	})
 }
