@@ -227,6 +227,43 @@ func (c *Client) fetchComments(url string) ([]Comment, error) {
 	return comments, nil
 }
 
+// ClosePR closes a pull request without merging.
+func (c *Client) ClosePR(owner, repo string, prNumber int) error {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d", owner, repo, prNumber)
+	reqBody := map[string]string{
+		"state": "closed",
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshaling request body: %w", err)
+	}
+
+	req, err := http.NewRequest("PATCH", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.doRequestWithRetry(req, 3)
+	if err != nil {
+		return fmt.Errorf("executing request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
 // ExtractPRNumber parses a PR number from a GitHub PR URL.
 func ExtractPRNumber(prURL string) (int, error) {
 	// Match URLs like https://github.com/owner/repo/pull/123

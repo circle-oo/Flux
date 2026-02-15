@@ -335,6 +335,86 @@ func TestFetchPRComments(t *testing.T) {
 	})
 }
 
+func TestClosePR(t *testing.T) {
+	t.Run("successful close", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "PATCH" {
+				t.Errorf("expected PATCH, got %s", r.Method)
+			}
+			if !strings.Contains(r.URL.Path, "/pulls/42") {
+				t.Errorf("expected path to contain /pulls/42, got %s", r.URL.Path)
+			}
+
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode body: %v", err)
+			}
+			if body["state"] != "closed" {
+				t.Errorf("expected state 'closed', got %s", body["state"])
+			}
+
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"state": "closed",
+			})
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:    "test-token",
+			username: "testuser",
+			http:     &http.Client{Timeout: 5 * time.Second},
+		}
+
+		if err := client.closePRWithBaseURL(server.URL, "owner", "repo", 42); err != nil {
+			t.Fatalf("ClosePR failed: %v", err)
+		}
+	})
+
+	t.Run("handles 404 not found", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"message": "Not Found"}`))
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:    "test-token",
+			username: "testuser",
+			http:     &http.Client{Timeout: 5 * time.Second},
+		}
+
+		err := client.closePRWithBaseURL(server.URL, "owner", "repo", 999)
+		if err == nil {
+			t.Fatal("expected error for 404 response")
+		}
+		if !strings.Contains(err.Error(), "404") {
+			t.Errorf("expected error to mention 404, got: %v", err)
+		}
+	})
+
+	t.Run("handles already closed PR", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// GitHub returns 200 even when closing an already-closed PR
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"state": "closed",
+			})
+		}))
+		defer server.Close()
+
+		client := &Client{
+			token:    "test-token",
+			username: "testuser",
+			http:     &http.Client{Timeout: 5 * time.Second},
+		}
+
+		if err := client.closePRWithBaseURL(server.URL, "owner", "repo", 42); err != nil {
+			t.Fatalf("ClosePR should succeed for already-closed PR: %v", err)
+		}
+	})
+}
+
 func TestRetryLogic(t *testing.T) {
 	t.Run("retries on 502", func(t *testing.T) {
 		attempts := 0
@@ -566,6 +646,31 @@ func (c *Client) mergePRWithBaseURL(baseURL, owner, repo string, prNumber int) e
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return &http.ProtocolError{ErrorString: "GitHub API error"}
+	}
+
+	return nil
+}
+
+func (c *Client) closePRWithBaseURL(baseURL, owner, repo string, prNumber int) error {
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d", baseURL, owner, repo, prNumber)
+	reqBody := map[string]string{"state": "closed"}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	req, _ := http.NewRequest("PATCH", url, strings.NewReader(string(bodyBytes)))
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.doRequestWithRetry(req, 3)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody := make([]byte, 4096)
+		n, _ := resp.Body.Read(respBody)
+		return fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(respBody[:n]))
 	}
 
 	return nil

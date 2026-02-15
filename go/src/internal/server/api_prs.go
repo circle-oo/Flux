@@ -17,8 +17,10 @@ import (
 // NOTE: These routes must be added to setupRoutes() in server.go during integration.
 func (s *Server) RegisterPRRoutes() {
 	s.mux.Handle("GET /api/prs/pending", s.authMiddleware(http.HandlerFunc(s.handleListPendingPRs)))
+	s.mux.Handle("GET /api/prs", s.authMiddleware(http.HandlerFunc(s.handleListPRs)))
 	s.mux.Handle("POST /api/prs/{task_id}/approve", s.authMiddleware(http.HandlerFunc(s.handleApprovePR)))
 	s.mux.Handle("POST /api/prs/{task_id}/request-changes", s.authMiddleware(http.HandlerFunc(s.handleRequestChanges)))
+	s.mux.Handle("POST /api/prs/{task_id}/close", s.authMiddleware(http.HandlerFunc(s.handleClosePR)))
 }
 
 // handleListPendingPRs handles GET /api/prs/pending
@@ -60,6 +62,128 @@ func (s *Server) handleListPendingPRs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": tasks})
+}
+
+// handleListPRs handles GET /api/prs
+// Returns tasks that have a PR, optionally filtered by pr_status query param.
+// Supports: ?status=OPEN, ?status=MERGED, ?status=CHANGES_REQUESTED, ?status=CLOSED
+// Without a status param, returns all tasks with a non-empty pr_status.
+func (s *Server) handleListPRs(w http.ResponseWriter, r *http.Request) {
+	statusFilter := r.URL.Query().Get("status")
+
+	var rows *sql.Rows
+	var err error
+
+	if statusFilter != "" {
+		rows, err = s.db.Query(
+			`SELECT id, title, description, type, status, priority, source,
+			 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
+			 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
+			 diff_lines, files_changed, test_passed, retry_count, crash_recovery,
+			 tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
+			 FROM tasks WHERE pr_status = ? ORDER BY updated_at DESC, created_at DESC`,
+			statusFilter,
+		)
+	} else {
+		rows, err = s.db.Query(
+			`SELECT id, title, description, type, status, priority, source,
+			 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
+			 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
+			 diff_lines, files_changed, test_passed, retry_count, crash_recovery,
+			 tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
+			 FROM tasks WHERE pr_status != '' ORDER BY updated_at DESC, created_at DESC`,
+		)
+	}
+	if err != nil {
+		slog.Error("failed to query PRs", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	defer rows.Close()
+
+	var tasks []*models.Task
+	for rows.Next() {
+		t, err := scanPRTask(rows)
+		if err != nil {
+			slog.Error("failed to scan task row", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		tasks = append(tasks, t)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Error("row iteration error", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if tasks == nil {
+		tasks = []*models.Task{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": tasks})
+}
+
+// handleClosePR handles POST /api/prs/{task_id}/close
+// Closes the PR on GitHub without merging and updates the task.
+func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("task_id")
+
+	task, err := s.tasks.GetByID(taskID)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		slog.Error("failed to get task", "id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	if task.PRUrl == "" {
+		writeError(w, http.StatusBadRequest, "task has no PR")
+		return
+	}
+
+	prNumber, err := github.ExtractPRNumber(task.PRUrl)
+	if err != nil {
+		slog.Error("failed to extract PR number", "url", task.PRUrl, "error", err)
+		writeError(w, http.StatusBadRequest, "invalid PR URL")
+		return
+	}
+
+	project, err := s.projects.GetByID(task.ProjectID)
+	if err != nil {
+		slog.Error("failed to get project", "id", task.ProjectID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	owner, repo := extractOwnerRepoFromURL(project.RepoURL)
+	if owner == "" || repo == "" {
+		writeError(w, http.StatusBadRequest, "invalid repo URL in project")
+		return
+	}
+
+	client := github.NewClient(s.config.GitHub.Token, s.config.GitHub.Username)
+	if err := client.ClosePR(owner, repo, prNumber); err != nil {
+		slog.Error("failed to close PR", "pr", prNumber, "error", err)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("close failed: %v", err))
+		return
+	}
+
+	task.PRStatus = "CLOSED"
+	if err := s.tasks.Update(task); err != nil {
+		slog.Error("failed to update task PR status", "id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	s.ws.Broadcast(Event{Type: EventPRStatus, Data: task})
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "closed",
+		"task":   task,
+	})
 }
 
 // handleApprovePR handles POST /api/prs/{task_id}/approve

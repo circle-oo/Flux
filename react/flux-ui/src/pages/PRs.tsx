@@ -1,13 +1,31 @@
 import { useEffect } from 'react'
 import { usePRStore } from '../stores/prStore'
 
+const STATUS_TABS = [
+  { value: 'ALL' as const, label: 'All' },
+  { value: 'OPEN' as const, label: 'Open' },
+  { value: 'APPROVED' as const, label: 'Approved' },
+  { value: 'CHANGES_REQUESTED' as const, label: 'Changes Requested' },
+  { value: 'MERGED' as const, label: 'Merged' },
+  { value: 'CLOSED' as const, label: 'Closed' },
+]
+
 export default function PRs() {
-  const { pendingPRs, loading, error, fetchPendingPRs, approvePR, requestChanges } =
-    usePRStore()
+  const {
+    prs,
+    loading,
+    error,
+    statusFilter,
+    setStatusFilter,
+    fetchPRs,
+    approvePR,
+    requestChanges,
+    closePR,
+  } = usePRStore()
 
   useEffect(() => {
-    fetchPendingPRs()
-  }, [fetchPendingPRs])
+    fetchPRs()
+  }, [fetchPRs])
 
   const handleApprove = async (taskId: string, title: string) => {
     if (confirm(`Approve and merge PR: ${title}?`)) {
@@ -20,11 +38,21 @@ export default function PRs() {
   }
 
   const handleRequestChanges = async (taskId: string, title: string) => {
-    if (confirm(`Request changes for PR: ${title}?`)) {
+    if (confirm(`Request changes for PR: ${title}?\nThis will create a fix task from PR comments.`)) {
       try {
         await requestChanges(taskId)
       } catch (error) {
         console.error('Failed to request changes:', error)
+      }
+    }
+  }
+
+  const handleClose = async (taskId: string, title: string) => {
+    if (confirm(`Close PR without merging: ${title}?\nThis action can be undone by reopening the PR on GitHub.`)) {
+      try {
+        await closePR(taskId)
+      } catch (error) {
+        console.error('Failed to close PR:', error)
       }
     }
   }
@@ -36,7 +64,8 @@ export default function PRs() {
       OPEN: { label: 'Open', className: 'badge-info' },
       APPROVED: { label: 'Approved', className: 'badge-success' },
       CHANGES_REQUESTED: { label: 'Changes Requested', className: 'badge-warning' },
-      MERGED: { label: 'Merged', className: 'badge-secondary' },
+      MERGED: { label: 'Merged', className: 'badge-success' },
+      CLOSED: { label: 'Closed', className: 'badge-secondary' },
     }
 
     const config = statusMap[status] || { label: status, className: 'badge-secondary' }
@@ -53,6 +82,10 @@ export default function PRs() {
     })
   }
 
+  const isActionable = (status?: string) => status === 'OPEN'
+  const isCloseable = (status?: string) => status === 'OPEN' || status === 'CHANGES_REQUESTED'
+  const isTerminal = (status?: string) => status === 'MERGED' || status === 'CLOSED'
+
   return (
     <div className="p-8 space-y-8">
       {/* Header */}
@@ -60,21 +93,38 @@ export default function PRs() {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-3xl font-bold text-slate-100">Pull Requests</h1>
-            {pendingPRs.length > 0 && (
+            {prs.length > 0 && (
               <span className="badge badge-info text-lg px-3 py-1">
-                {pendingPRs.length}
+                {prs.length}
               </span>
             )}
           </div>
-          <p className="text-slate-400">Review and merge pending pull requests</p>
+          <p className="text-slate-400">Review, merge, and manage pull requests</p>
         </div>
         <button
-          onClick={() => fetchPendingPRs()}
+          onClick={() => fetchPRs()}
           className="btn-secondary"
           disabled={loading}
         >
           {loading ? 'Refreshing...' : 'Refresh'}
         </button>
+      </div>
+
+      {/* Status Filter Tabs */}
+      <div className="flex gap-1 p-1 bg-slate-800 rounded-lg border border-slate-700 overflow-x-auto">
+        {STATUS_TABS.map((tab) => (
+          <button
+            key={tab.value}
+            onClick={() => setStatusFilter(tab.value)}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
+              statusFilter === tab.value
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Error Message */}
@@ -86,22 +136,33 @@ export default function PRs() {
 
       {/* PRs List */}
       <div className="space-y-4">
-        {loading && pendingPRs.length === 0 ? (
+        {loading && prs.length === 0 ? (
           <div className="flex items-center justify-center py-12">
             <div className="text-slate-400">Loading pull requests...</div>
           </div>
-        ) : pendingPRs.length === 0 ? (
+        ) : prs.length === 0 ? (
           <div className="card p-12 text-center">
-            <div className="text-6xl mb-4">✓</div>
+            <div className="text-6xl mb-4">
+              {statusFilter === 'ALL' ? '✓' : '📭'}
+            </div>
             <h2 className="text-xl font-semibold text-slate-300 mb-2">
-              All caught up!
+              {statusFilter === 'ALL'
+                ? 'No pull requests'
+                : `No ${statusFilter.toLowerCase().replace('_', ' ')} PRs`}
             </h2>
-            <p className="text-slate-400">No PRs pending review</p>
+            <p className="text-slate-400">
+              {statusFilter === 'ALL'
+                ? 'No PRs have been created yet'
+                : 'Try a different filter to see more PRs'}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
-            {pendingPRs.map((pr) => (
-              <div key={pr.id} className="card p-6">
+            {prs.map((pr) => (
+              <div
+                key={pr.id}
+                className={`card p-6 ${isTerminal(pr.pr_status) ? 'opacity-75' : ''}`}
+              >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
@@ -176,25 +237,38 @@ export default function PRs() {
 
                   {/* Action Buttons */}
                   <div className="flex flex-col gap-2 ml-4">
-                    <button
-                      onClick={() => handleApprove(pr.id, pr.title)}
-                      className="btn-success whitespace-nowrap"
-                      disabled={loading}
-                    >
-                      ✓ Approve & Merge
-                    </button>
-                    <button
-                      onClick={() => handleRequestChanges(pr.id, pr.title)}
-                      className="btn-warning whitespace-nowrap"
-                      disabled={loading}
-                    >
-                      Request Changes
-                    </button>
+                    {isActionable(pr.pr_status) && (
+                      <>
+                        <button
+                          onClick={() => handleApprove(pr.id, pr.title)}
+                          className="btn-success whitespace-nowrap"
+                          disabled={loading}
+                        >
+                          ✓ Approve & Merge
+                        </button>
+                        <button
+                          onClick={() => handleRequestChanges(pr.id, pr.title)}
+                          className="btn-warning whitespace-nowrap"
+                          disabled={loading}
+                        >
+                          Request Changes
+                        </button>
+                      </>
+                    )}
+                    {isCloseable(pr.pr_status) && (
+                      <button
+                        onClick={() => handleClose(pr.id, pr.title)}
+                        className="btn-danger whitespace-nowrap"
+                        disabled={loading}
+                      >
+                        Close PR
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 {/* Auto-merge Indicator */}
-                {pr.requires_test === false && (
+                {pr.requires_test === false && pr.pr_status === 'OPEN' && (
                   <div className="mt-3 p-2 bg-blue-900/30 border border-blue-600 rounded text-sm text-blue-200 flex items-center gap-2">
                     <svg
                       className="w-4 h-4"
