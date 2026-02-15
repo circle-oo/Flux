@@ -62,14 +62,30 @@ github:
   username: "your-username"     # Edit this
   token_env: "GITHUB_TOKEN"
 
+vault:
+  path: "~/ObsidianVault/Flux"  # Obsidian vault for execution logs
+
 executor:
   max_execution_time: 30m       # Per-task timeout
   max_turns: 30                 # Claude Code turn limit
   max_diff_lines: 2000          # Guardrail: max diff size
   max_files_changed: 20         # Guardrail: max files per PR
 
+triager:
+  enabled: true                 # Enable automatic task triage
+  max_execution_time: 2m        # Triage timeout per task
+
+subtask:
+  max_depth: 1                  # Maximum subtask nesting level
+  max_per_task: 5               # Maximum subtasks per parent task
+
 orchestrator:
   max_total_pods: 5             # Concurrent executor pods
+
+auto_update:
+  enabled: true                 # Auto-update from git remote
+  check_interval: 5m            # How often to check for updates
+  branch: "main"                # Branch to track
 ```
 
 See [`config.yaml.template`](./config.yaml.template) for all options.
@@ -106,12 +122,16 @@ flux/
 │       ├── db/                 # SQLite (WAL mode, no CGO)
 │       ├── models/             # Goal, Task, Project, Alert, Usage
 │       ├── manager/            # Task queue, priority, state machine
+│       ├── orchestrator/       # Model selection, rate limiting
 │       ├── executor/           # Claude Code runner, worktrees, guardrails
+│       ├── triager/            # Task analysis and priority assignment
+│       ├── updater/            # Auto-update from git remote
+│       ├── vault/              # Obsidian vault writer for execution logs
 │       ├── github/             # GitHub API client (repos, PRs)
 │       ├── notifier/           # Discord webhook notifications
 │       ├── server/             # HTTP API + WebSocket + auth
 │       └── shutdown/           # Graceful shutdown + crash recovery
-├── react/flux-ui/              # React frontend (embedded into binary)
+├── frontend/                   # React frontend (embedded into binary)
 ├── data/                       # SQLite database (created at runtime)
 ├── workspaces/                 # Git worktrees for parallel execution
 ├── logs/                       # Application logs
@@ -173,6 +193,40 @@ Default model is Sonnet. Opus is used for complex tasks (priority ≤5, initial 
 ### Auto-Merge vs Review
 
 Simple PRs (system tasks, maintenance, ≤3 files, <100 additions) auto-merge. Complex PRs and guardrail violations require operator review via the Web UI.
+
+### Triager
+
+The Triager is a standalone component that automatically analyzes PENDING tasks before execution. It runs Claude Code with a specialized triage prompt to:
+
+- Assign priority (1-100 scale) based on task complexity and urgency
+- Recommend model (Opus vs Sonnet) for execution
+- Generate detailed analysis and rewrite task descriptions for clarity
+- Promote tasks from PENDING → READY state
+
+Enable triaging in `config.yaml` with `triager.enabled: true`. Triage runs with a 2-minute timeout and max 1 turn.
+
+### Subtasks
+
+Tasks can spawn subtasks during execution for decomposition of complex work. Configuration limits:
+
+- `subtask.max_depth: 1` — subtasks cannot spawn their own subtasks
+- `subtask.max_per_task: 5` — maximum 5 subtasks per parent task
+
+Subtasks inherit the parent's project but can have their own priority and description.
+
+### Vault Integration
+
+Flux writes execution logs and task details to an Obsidian vault for long-term knowledge retention. Configure the vault path with `vault.path` in `config.yaml` (supports `~` expansion). The vault writer operates asynchronously to avoid blocking executor pods.
+
+### Auto-Updater
+
+When enabled, Flux polls the git remote every 5 minutes (configurable). On detecting new commits:
+
+1. Pulls latest changes from the tracked branch
+2. Runs `make build` to rebuild the binary
+3. Sends SIGTERM to itself (launchd restarts it automatically)
+
+The updater tracks update count, last check time, and local/remote commit hashes. View status in the Web UI Settings page.
 
 ## Running 24/7
 
