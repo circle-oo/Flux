@@ -86,3 +86,26 @@ The following adjustments were identified during code review and should be incor
 4. **Phase 3**: Missing API endpoints added (orchestrator status, pods, services, alerts)
 5. **Phase 1**: `hasComplexKeywords()` function defined in Task 1.3 (task complexity detection)
 6. **Phase 2A**: `ManagerClient` HTTP client defined in Task 2A.8 (Manager API interaction)
+
+## Phase 3/4 Refinement (Post-Phase 2B Audit)
+
+Both Phase 3 and Phase 4 plans were comprehensively revised after auditing the completed Phase 2B codebase. Key architectural decisions:
+
+### Phase 3 Changes
+- **New Task 3.0**: Orchestrator integration in `main.go` added as prerequisite — the current `main.go` spawns executors directly, so the Orchestrator must take over lifecycle management before any orchestration logic can work
+- **ScaleManager (3.2)**: Scoped to Executor-only for Phase 3. Researcher pod ratio deferred to Phase 4 to reduce Phase 3 complexity
+- **GoalAdvisor (3.13→3.17)**: Downgraded to optional. Simple heuristics don't justify being on the critical path
+- **File paths corrected**: Frontend is `frontend/src/` not `web/src/`; worktree manager is in `executor/worktree.go` not `internal/worktree/`
+- **JSONL retention**: Changed from 30 days to 7 days per spec for sensitive data
+- **Existing infrastructure identified**: `UsageStore`, `PodRegistry`, `RateLimitHandler.CheckAndRecover()`, Settings page — all already exist and should be extended, not rebuilt
+- **Explicit dependency graph** and **recommended implementation order** with critical path analysis added
+
+### Phase 4 Changes
+- **New Task 4.0**: ScaleManager Executor:Researcher ratio upgrade — bridges Phase 3's Executor-only ScaleManager to the full spec
+- **Researcher Pod (4.1)**: Restructured to mirror Executor patterns (`executor/executor.go`) and reuse `claudecli`, `apiclient`, PodRegistry infrastructure
+- **Autonomous Research (4.2)**: Simplified from complex weighted-priority to simple ordered-priority. Claude Code handles intelligent decision-making; Go code just provides category and context
+- **Vault Writer (4.3)**: Reduced scope — only adds research/proposal templates, defers decision records
+- **Deployment (4.5)**: Narrowed — auto-updater already handles most deployment; this task adds `make deploy` convenience wrapper
+- **Self-Improvement (4.6)**: File paths updated to `go/src/internal/` (actual structure), `main.go` added to immutable list
+- **Research UI (4.7)**: Simplified — reuses task filtering (`type=RESEARCH`) instead of building separate API
+- **Explicit dependency graph** and **parallel track identification** added
