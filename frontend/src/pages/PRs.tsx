@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { usePRStore } from '../stores/prStore'
 
 export default function PRs() {
-  const { pendingPRs, loading, error, fetchPendingPRs, approvePR, requestChanges } =
+  const { pendingPRs, loading, error, statusFilter, setStatusFilter, fetchPendingPRs, approvePR, requestChanges, closePR } =
     usePRStore()
 
   useEffect(() => {
@@ -29,6 +29,16 @@ export default function PRs() {
     }
   }
 
+  const handleClose = async (taskId: string, title: string) => {
+    if (confirm(`Close PR: ${title}?\n\nThis will close the PR on GitHub without merging.`)) {
+      try {
+        await closePR(taskId)
+      } catch (error) {
+        console.error('Failed to close PR:', error)
+      }
+    }
+  }
+
   const getPRStatusBadge = (status?: string) => {
     if (!status) return null
 
@@ -37,11 +47,21 @@ export default function PRs() {
       APPROVED: { label: 'Approved', className: 'badge-success' },
       CHANGES_REQUESTED: { label: 'Changes Requested', className: 'badge-warning' },
       MERGED: { label: 'Merged', className: 'badge-secondary' },
+      CLOSED: { label: 'Closed', className: 'bg-slate-600 text-slate-200 px-2 py-1 rounded text-xs font-medium' },
     }
 
     const config = statusMap[status] || { label: status, className: 'badge-secondary' }
     return <span className={`badge ${config.className}`}>{config.label}</span>
   }
+
+  const statusOptions = [
+    { value: '', label: 'All' },
+    { value: 'OPEN', label: 'Open' },
+    { value: 'APPROVED', label: 'Approved' },
+    { value: 'MERGED', label: 'Merged' },
+    { value: 'CHANGES_REQUESTED', label: 'Changes Requested' },
+    { value: 'CLOSED', label: 'Closed' },
+  ]
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
@@ -66,15 +86,29 @@ export default function PRs() {
               </span>
             )}
           </div>
-          <p className="text-slate-400">Review and merge pending pull requests</p>
+          <p className="text-slate-400">Review and manage pull requests</p>
         </div>
-        <button
-          onClick={() => fetchPendingPRs()}
-          className="btn-secondary"
-          disabled={loading}
-        >
-          {loading ? 'Refreshing...' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-3">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="input px-3 py-2"
+            disabled={loading}
+          >
+            {statusOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => fetchPendingPRs()}
+            className="btn-secondary"
+            disabled={loading}
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* Error Message */}
@@ -176,20 +210,33 @@ export default function PRs() {
 
                   {/* Action Buttons */}
                   <div className="flex flex-col gap-2 ml-4">
-                    <button
-                      onClick={() => handleApprove(pr.id, pr.title)}
-                      className="btn-success whitespace-nowrap"
-                      disabled={loading}
-                    >
-                      ✓ Approve & Merge
-                    </button>
-                    <button
-                      onClick={() => handleRequestChanges(pr.id, pr.title)}
-                      className="btn-warning whitespace-nowrap"
-                      disabled={loading}
-                    >
-                      Request Changes
-                    </button>
+                    {pr.pr_status === 'OPEN' && (
+                      <>
+                        <button
+                          onClick={() => handleApprove(pr.id, pr.title)}
+                          className="btn-success whitespace-nowrap"
+                          disabled={loading}
+                        >
+                          ✓ Approve & Merge
+                        </button>
+                        <button
+                          onClick={() => handleRequestChanges(pr.id, pr.title)}
+                          className="btn-warning whitespace-nowrap"
+                          disabled={loading}
+                        >
+                          Request Changes
+                        </button>
+                      </>
+                    )}
+                    {pr.pr_status !== 'MERGED' && pr.pr_status !== 'CLOSED' && (
+                      <button
+                        onClick={() => handleClose(pr.id, pr.title)}
+                        className="btn-secondary whitespace-nowrap"
+                        disabled={loading}
+                      >
+                        Close PR
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
