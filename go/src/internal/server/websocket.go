@@ -17,6 +17,7 @@ const (
 	EventGoalChanged = "GOAL_CHANGED"
 	EventPRStatus    = "PR_STATUS"
 	EventPodStatus   = "POD_STATUS"
+	EventLogEntry    = "LOG_ENTRY"
 )
 
 // Event represents a WebSocket event.

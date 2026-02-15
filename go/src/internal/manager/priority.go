@@ -3,6 +3,7 @@ package manager
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/circle-oo/flux/internal/models"
 )
@@ -11,8 +12,10 @@ import (
 func GetCurrentGoalID(goalStore *models.GoalStore) string {
 	goal, err := goalStore.GetCurrent()
 	if err != nil || goal == nil {
+		slog.Debug("get current goal id", "goal_id", "")
 		return ""
 	}
+	slog.Debug("get current goal id", "goal_id", goal.ID)
 	return goal.ID
 }
 
@@ -23,6 +26,7 @@ func (m *Manager) CountByStatus(status string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("count by status: %w", err)
 	}
+	slog.Debug("count by status", "status", status, "count", count)
 	return count, nil
 }
 
@@ -33,6 +37,7 @@ func (m *Manager) CountBySource(source string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("count by source: %w", err)
 	}
+	slog.Debug("count by source", "source", source, "count", count)
 	return count, nil
 }
 
@@ -46,6 +51,7 @@ func (m *Manager) CountByPriority(minP, maxP int) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("count by priority: %w", err)
 	}
+	slog.Debug("count by priority", "min_priority", minP, "max_priority", maxP, "count", count)
 	return count, nil
 }
 
@@ -74,6 +80,7 @@ func (m *Manager) ListByPRStatus(prStatus string) ([]*models.Task, error) {
 		}
 		tasks = append(tasks, t)
 	}
+	slog.Debug("list by pr status", "pr_status", prStatus, "count", len(tasks))
 	return tasks, rows.Err()
 }
 

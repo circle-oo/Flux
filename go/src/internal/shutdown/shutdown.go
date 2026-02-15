@@ -62,13 +62,15 @@ func GracefulShutdown(ctx context.Context, cfg *config.ShutdownConfig, pods []Po
 				return nil
 			}
 
-			slog.Debug("waiting for pods to stop", "running", runningCount, "total", len(pods))
+			slog.Info("shutdown: checking pod state", "running", runningCount, "total", len(pods))
 		}
 	}
 }
 
 // forceKillPods moves all running pods' current tasks to RETRY status with crash_recovery=true.
 func forceKillPods(pods []Pod, db *sql.DB, discord *notifier.Discord) error {
+	slog.Warn("force killing running pods", "count", len(pods))
+
 	var recoveredTasks []string
 
 	for i, pod := range pods {
