@@ -22,7 +22,7 @@ You (Operator)                        Flux (Autonomous)
 ## Prerequisites
 
 - **Go 1.22+** — `brew install go`
-- **Node.js 20+** — `brew install node`
+- **Node.js 20+** — `brew install node` (includes npm for ccusage tracking)
 - **Claude Code** subscription (Max 5x plan recommended)
 - **GitHub** personal access token
 - **macOS** (launchd support for 24/7 operation)
@@ -58,12 +58,27 @@ server:
   auth:
     password_env: "FLUX_UI_PASSWORD"
 
-github:
-  username: "your-username"     # Edit this
-  token_env: "GITHUB_TOKEN"
+database:
+  path: "./data/flux.db"        # SQLite database location
+  backup_dir: "./data/backups"  # Database backup directory
+  backup_cron: "0 4 * * *"      # Daily backup at 4 AM
+  backup_retention_days: 7      # Keep backups for 7 days
 
 vault:
   path: "~/ObsidianVault/Flux"  # Obsidian vault for execution logs
+
+github:
+  username: "your-username"     # Edit this
+  token_env: "GITHUB_TOKEN"
+  auto_create_repo: true        # Auto-create GitHub repos for new projects
+  default_visibility: "public"  # Default repo visibility
+
+claude_code:
+  plan: "max_5x"                # Claude Code subscription plan
+
+ccusage:
+  command: "npx ccusage@latest" # Command to collect usage stats
+  collection_interval: 1h       # How often to collect usage
 
 executor:
   max_execution_time: 30m       # Per-task timeout
@@ -81,11 +96,27 @@ subtask:
 
 orchestrator:
   max_total_pods: 5             # Concurrent executor pods
+  check_interval: 5m            # How often to check for work
+  scale_cooldown: 15m           # Cooldown before scaling pods
+
+shutdown:
+  pod_grace_period: 10m         # Grace period for pod shutdown
+  force_kill_after: 12m         # Force kill if not stopped
+
+cleanup:
+  service_metrics_raw_days: 7   # Keep raw service metrics for 7 days
+  jsonl_retention_days: 30      # Keep JSONL logs for 30 days
+  usage_snapshots_days: 90      # Keep usage snapshots for 90 days
+  failed_worktree_hours: 24     # Clean up failed worktrees after 24h
 
 auto_update:
   enabled: true                 # Auto-update from git remote
   check_interval: 5m            # How often to check for updates
   branch: "main"                # Branch to track
+
+logging:
+  level: "info"                 # Log level (debug, info, warn, error)
+  file: "./logs/flux.log"       # Log file location
 ```
 
 See [`config.yaml.template`](./config.yaml.template) for all options.
@@ -102,11 +133,12 @@ See [`config.yaml.template`](./config.yaml.template) for all options.
 
 The dashboard at `http://localhost:8080` provides:
 
-- **Dashboard** — system status overview
+- **Dashboard** — system status overview with usage metrics
 - **Goals** — create and activate goals that drive all work
-- **Tasks** — create, monitor, retry, and cancel tasks
+- **Tasks** — create, monitor, retry, and cancel tasks; view triage analysis
 - **PRs** — review pending PRs, approve or request changes
 - **Projects** — manage registered repositories
+- **Settings** — view auto-updater status, system configuration
 - **Logs** — real-time log viewer
 
 Access is password-protected. For network-level security, run behind [Tailscale](https://tailscale.com) — session tokens have no expiry when Tailscale handles auth.
@@ -234,6 +266,25 @@ When enabled, Flux polls the git remote every 5 minutes (configurable). On detec
 
 The updater tracks update count, last check time, and local/remote commit hashes. View status in the Web UI Settings page.
 
+### Database Backups
+
+Flux automatically backs up the SQLite database on a configurable schedule (default: daily at 4 AM). Backups are stored in `data/backups/` with automatic rotation based on `backup_retention_days` (default: 7 days). The backup process uses SQLite's VACUUM INTO for consistent snapshots without downtime.
+
+### Usage Tracking
+
+Flux tracks Claude Code usage via the `ccusage` command (runs `npx ccusage@latest` by default). Collection happens at configurable intervals (default: 1 hour). Usage data includes token consumption, API calls, and model usage, displayed in the Web UI dashboard.
+
+### Cleanup & Retention
+
+Automatic cleanup policies keep disk usage under control:
+
+- **Service metrics:** Raw data retained for 7 days (hourly aggregates kept longer)
+- **JSONL logs:** Execution logs kept for 30 days
+- **Usage snapshots:** Detailed usage data kept for 90 days
+- **Failed worktrees:** Cleaned up after 24 hours to prevent disk bloat
+
+All retention periods are configurable in `config.yaml`.
+
 ## Running 24/7
 
 Install as a macOS launchd service for unattended operation:
@@ -250,20 +301,29 @@ External endpoints (`/api/...`) for the Web UI:
 
 | Resource | Endpoints |
 |----------|-----------|
-| Goals | `POST/GET/PATCH /api/goals`, `POST /api/goals/:id/activate` |
-| Tasks | `POST/GET/PATCH/DELETE /api/tasks`, `POST /api/tasks/:id/cancel`, `POST /api/tasks/:id/retry` |
-| Projects | `POST/GET/PATCH /api/projects`, `POST /api/projects/:id/approve` |
+| Auth | `POST /api/auth/login`, `POST /api/auth/logout` |
+| Goals | `POST/GET/PATCH /api/goals`, `GET /api/goals/current`, `POST /api/goals/:id/activate` |
+| Tasks | `POST/GET/PATCH/DELETE /api/tasks`, `GET /api/tasks/:id`, `POST /api/tasks/:id/cancel`, `POST /api/tasks/:id/retry`, `POST /api/tasks/:id/archive`, `GET /api/tasks/:id/subtasks` |
+| Projects | `POST/GET/PATCH /api/projects`, `GET /api/projects/:id`, `POST /api/projects/:id/approve`, `POST /api/projects/:id/reject` |
 | PRs | `GET /api/prs/pending`, `POST /api/prs/:id/approve`, `POST /api/prs/:id/request-changes` |
+| Services | `GET /api/services`, `GET /api/alerts` |
+| System | `POST /api/system/restart`, `GET /api/system/deploy/status`, `POST /api/system/deploy`, `POST /api/system/deploy/check-remote` |
 | Logs | `GET /api/logs/recent` |
 
 Internal endpoints (`/internal/...`) for executor pods (localhost only):
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /internal/tasks/next` | Pod requests next task |
+| `POST /internal/tasks/next` | Executor pod requests next READY task |
+| `POST /internal/tasks/next-pending` | Triager requests next PENDING task |
+| `POST /internal/tasks/:id/started` | Pod marks task as started |
 | `POST /internal/tasks/:id/done` | Pod reports completion |
-| `POST /internal/subtasks` | Create subtasks |
-| `GET /internal/model/:task_id` | Query model assignment |
+| `POST /internal/tasks/:id/triaged` | Triager reports triage completion |
+| `POST /internal/tasks` | Create new task (internal) |
+| `POST /internal/subtasks` | Create subtasks during execution |
+| `GET /internal/model/:task_id` | Query model assignment for task |
+| `GET /internal/tasks/:id/status` | Query task status |
+| `GET /internal/projects/:id` | Get project details |
 
 WebSocket: `GET /ws/events` for real-time event streaming.
 
