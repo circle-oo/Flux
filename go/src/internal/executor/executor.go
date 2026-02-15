@@ -18,6 +18,7 @@ import (
 	"github.com/circle-oo/flux/internal/github"
 	"github.com/circle-oo/flux/internal/models"
 	"github.com/circle-oo/flux/internal/notifier"
+	"github.com/circle-oo/flux/internal/vault"
 )
 
 // Executor is an autonomous execution pod that picks up tasks, runs Claude Code,
@@ -30,6 +31,7 @@ type Executor struct {
 	manager            *ManagerClient
 	github             *github.Client
 	notifier           *notifier.Discord
+	vaultWriter        *vault.Writer
 	stopCh             chan struct{}
 	executionStartTime time.Time
 }
@@ -42,16 +44,17 @@ type sensitiveFile struct {
 }
 
 // NewExecutor creates a new Executor pod.
-func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord) *Executor {
+func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord, vw *vault.Writer) *Executor {
 	return &Executor{
-		id:       id,
-		config:   cfg,
-		claude:   NewClaudeCodeRunner(&cfg.Executor),
-		worktree: NewWorktreeManager(cfg.Orchestrator.WorkspaceBase, cfg.GitHub.Token, cfg.GitHub.Username),
-		manager:  NewManagerClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
-		github:   github.NewClient(cfg.GitHub.Token, cfg.GitHub.Username),
-		notifier: discord,
-		stopCh:   make(chan struct{}),
+		id:          id,
+		config:      cfg,
+		claude:      NewClaudeCodeRunner(&cfg.Executor),
+		worktree:    NewWorktreeManager(cfg.Orchestrator.WorkspaceBase, cfg.GitHub.Token, cfg.GitHub.Username),
+		manager:     NewManagerClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
+		github:      github.NewClient(cfg.GitHub.Token, cfg.GitHub.Username),
+		notifier:    discord,
+		vaultWriter: vw,
+		stopCh:      make(chan struct{}),
 	}
 }
 
@@ -294,7 +297,17 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			fmt.Sprintf("PR ready for review: %s — %s", prURL, task.Title))
 	}
 
-	// 15. Report completion
+	// 15. Collect usage via ccusage
+	if e.config.CCUsage.Command != "" {
+		_ = CollectTaskUsage(e.config.CCUsage.Command, worktreePath, task)
+	}
+
+	// 16. Record task completion to vault
+	if e.vaultWriter != nil {
+		_ = RecordTaskCompletion(e.vaultWriter, task, result)
+	}
+
+	// 17. Report completion
 	_ = e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD)
 	slog.Info("task completed", "task_id", task.ID, "pr_url", prURL, "pr_status", task.PRStatus)
 }

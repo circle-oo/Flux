@@ -19,7 +19,9 @@ import (
 	"github.com/circle-oo/flux/internal/manager"
 	"github.com/circle-oo/flux/internal/notifier"
 	"github.com/circle-oo/flux/internal/server"
+	"github.com/circle-oo/flux/internal/shutdown"
 	"github.com/circle-oo/flux/internal/updater"
+	"github.com/circle-oo/flux/internal/vault"
 	"github.com/circle-oo/flux/web"
 )
 
@@ -77,6 +79,15 @@ func main() {
 	}
 	logger.Info("bootstrap complete")
 
+	// 4b. Recover from crash: move any RUNNING tasks to RETRY
+	if err := shutdown.RecoverFromCrash(database, discord); err != nil {
+		logger.Error("crash recovery failed", "error", err)
+	}
+
+	// 4c. Initialize Vault Writer
+	vaultWriter := vault.NewWriter(cfg.Vault.Path)
+	defer vaultWriter.Close()
+
 	// 5. Initialize Manager and wire into server
 	mgr := manager.NewManager(database, cfg)
 	server.SetManager(mgr)
@@ -113,7 +124,7 @@ func main() {
 
 	// 9. Start Executor pod
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	exec := executor.NewExecutor("executor-01", cfg, discord)
+	exec := executor.NewExecutor("executor-01", cfg, discord, vaultWriter)
 	go func() {
 		logger.Info("executor pod started", "id", "executor-01")
 		exec.Run(ctx)
