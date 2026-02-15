@@ -100,6 +100,9 @@ func (e *Executor) executeOnce(ctx context.Context) {
 
 	slog.Info("picked up task", "task_id", task.ID, "title", task.Title, "type", task.Type)
 
+	// Set executor ID on the task
+	task.ExecutorID = e.id
+
 	// 2. Get model assignment
 	model, err := e.manager.GetModel(task.ID)
 	if err != nil {
