@@ -1326,6 +1326,202 @@ func TestInternal_Triaged(t *testing.T) {
 	}
 }
 
+func TestInternal_Triaged_WithModel(t *testing.T) {
+	srv, database := setupTestServer(t)
+
+	// Create a PENDING task
+	_, err := database.Exec(
+		`INSERT INTO tasks (id, title, type, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"test-triage-model-001", "Triage with model", "CODING", "PENDING", 50, "OPERATOR",
+	)
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	// Report triage with model recommendation
+	body, _ := json.Marshal(map[string]interface{}{
+		"analysis":    "Complex architectural change requiring opus",
+		"description": "Rewritten description",
+		"priority":    5,
+		"model":       "opus",
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks/test-triage-model-001/triaged", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify model was set
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/test-triage-model-001", nil)
+	var task map[string]interface{}
+	parseResponse(t, rr, &task)
+
+	if task["status"] != "READY" {
+		t.Errorf("expected READY, got %v", task["status"])
+	}
+	if task["model"] != "opus" {
+		t.Errorf("expected model opus, got %v", task["model"])
+	}
+	if int(task["priority"].(float64)) != 5 {
+		t.Errorf("expected priority 5, got %v", task["priority"])
+	}
+	if task["triage_analysis"] != "Complex architectural change requiring opus" {
+		t.Errorf("expected triage analysis, got %v", task["triage_analysis"])
+	}
+	// executor_id should be cleared after triage
+	if task["executor_id"] != "" {
+		t.Errorf("expected empty executor_id after triage, got %v", task["executor_id"])
+	}
+}
+
+func TestInternal_Triaged_EmptyFields(t *testing.T) {
+	srv, database := setupTestServer(t)
+
+	// Create a PENDING task with existing description
+	_, err := database.Exec(
+		`INSERT INTO tasks (id, title, description, type, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"test-triage-empty-001", "Triage empty", "Original description", "CODING", "PENDING", 50, "OPERATOR",
+	)
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	// Report triage with empty fields (simulates triage failure promotion)
+	body, _ := json.Marshal(map[string]interface{}{
+		"analysis":    "",
+		"description": "",
+		"priority":    0,
+		"model":       "",
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks/test-triage-empty-001/triaged", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify task was still promoted to READY, original fields preserved
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/test-triage-empty-001", nil)
+	var task map[string]interface{}
+	parseResponse(t, rr, &task)
+
+	if task["status"] != "READY" {
+		t.Errorf("expected READY even with empty triage, got %v", task["status"])
+	}
+	// Original description should be preserved when empty triage description
+	if task["description"] != "Original description" {
+		t.Errorf("expected original description preserved, got %v", task["description"])
+	}
+	// Priority should stay at original when triage sends 0
+	if int(task["priority"].(float64)) != 50 {
+		t.Errorf("expected original priority 50, got %v", task["priority"])
+	}
+}
+
+func TestInternal_Triaged_NotFound(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"analysis":    "test",
+		"description": "test",
+		"priority":    30,
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks/nonexistent-task/triaged", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for nonexistent task, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestInternal_Triaged_SameDescription(t *testing.T) {
+	srv, database := setupTestServer(t)
+
+	// Create a PENDING task
+	_, err := database.Exec(
+		`INSERT INTO tasks (id, title, description, type, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"test-triage-same-desc", "Triage same desc", "Keep this description", "CODING", "PENDING", 50, "OPERATOR",
+	)
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	// Report triage with same description as original — should not update
+	body, _ := json.Marshal(map[string]interface{}{
+		"analysis":    "Good as-is",
+		"description": "Keep this description",
+		"priority":    50,
+		"model":       "sonnet",
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks/test-triage-same-desc/triaged", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/test-triage-same-desc", nil)
+	var task map[string]interface{}
+	parseResponse(t, rr, &task)
+
+	if task["status"] != "READY" {
+		t.Errorf("expected READY, got %v", task["status"])
+	}
+	if task["description"] != "Keep this description" {
+		t.Errorf("expected description unchanged, got %v", task["description"])
+	}
+}
+
+func TestInternal_GetModel_TriagedTask(t *testing.T) {
+	srv, database := setupTestServer(t)
+
+	// Wire up manager
+	cfg := &config.Config{}
+	m := manager.NewManager(database, cfg)
+	srv.mgr = m
+
+	// Create a task with triage analysis and model set
+	_, err := database.Exec(
+		`INSERT INTO tasks (id, title, type, status, priority, source, model, triage_analysis, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"test-model-triaged", "Triaged task", "CODING", "READY", 30, "OPERATOR", "opus", "Detailed analysis",
+	)
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/internal/model/test-model-triaged", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]string
+	parseResponse(t, rr, &resp)
+	if resp["model"] != "opus" {
+		t.Errorf("expected triager-recommended opus, got %s", resp["model"])
+	}
+}
+
 // TestTriageAnalysis_FullLifecycle tests that triage_analysis is correctly
 // persisted and preserved through the full task lifecycle:
 // PENDING -> triaged -> READY -> popped by executor -> RUNNING -> done -> COMPLETED
