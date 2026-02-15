@@ -4,6 +4,7 @@ config.yaml
 
 # Go
 go/bin/
+go/src/flux
 go/src/web/dist/
 !go/src/web/dist/.gitkeep
 
