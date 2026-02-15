@@ -2,7 +2,6 @@ package server
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -28,12 +27,7 @@ func (s *Server) RegisterPRRoutes() {
 func (s *Server) handleListPendingPRs(w http.ResponseWriter, r *http.Request) {
 	statusFilter := r.URL.Query().Get("status")
 
-	query := `SELECT id, title, description, type, status, priority, source,
-		 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
-		 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-		 diff_lines, files_changed, test_passed, retry_count, crash_recovery,
-		 tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
-		 FROM tasks WHERE pr_url != ''`
+	query := models.TaskSelectSQL + " WHERE pr_url != ''"
 
 	var args []interface{}
 	if statusFilter != "" {
@@ -53,7 +47,7 @@ func (s *Server) handleListPendingPRs(w http.ResponseWriter, r *http.Request) {
 
 	var tasks []*models.Task
 	for rows.Next() {
-		t, err := scanPRTask(rows)
+		t, err := models.ScanTask(rows)
 		if err != nil {
 			slog.Error("failed to scan task row", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal server error")
@@ -115,8 +109,12 @@ func (s *Server) handleApprovePR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := github.NewClient(s.config.GitHub.Token, s.config.GitHub.Username)
-	if err := client.MergePR(owner, repo, prNumber); err != nil {
+	if s.ghClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "GitHub not configured")
+		return
+	}
+
+	if err := s.ghClient.MergePR(owner, repo, prNumber); err != nil {
 		slog.Error("failed to merge PR", "pr", prNumber, "error", err)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("merge failed: %v", err))
 		return
@@ -184,8 +182,12 @@ func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := github.NewClient(s.config.GitHub.Token, s.config.GitHub.Username)
-	if err := client.ClosePR(owner, repo, prNumber); err != nil {
+	if s.ghClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "GitHub not configured")
+		return
+	}
+
+	if err := s.ghClient.ClosePR(owner, repo, prNumber); err != nil {
 		slog.Error("failed to close PR", "pr", prNumber, "error", err)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("close failed: %v", err))
 		return
@@ -248,9 +250,13 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.ghClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "GitHub not configured")
+		return
+	}
+
 	// Fetch PR comments
-	client := github.NewClient(s.config.GitHub.Token, s.config.GitHub.Username)
-	comments, err := client.FetchPRComments(owner, repo, prNumber)
+	comments, err := s.ghClient.FetchPRComments(owner, repo, prNumber)
 	if err != nil {
 		slog.Error("failed to fetch PR comments", "pr", prNumber, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to fetch comments")
@@ -314,6 +320,7 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 }
 
 // extractOwnerRepoFromURL parses owner and repo from a GitHub URL.
+// TODO(integration): Replace with github.ExtractOwnerRepo after integration phase
 func extractOwnerRepoFromURL(repoURL string) (owner, repo string) {
 	// HTTPS: https://github.com/owner/repo.git or https://github.com/owner/repo
 	repoURL = strings.TrimSuffix(repoURL, ".git")
@@ -342,37 +349,3 @@ func extractOwnerRepoFromURL(repoURL string) (owner, repo string) {
 	return "", ""
 }
 
-// scanPRTask scans a task row from the database. Duplicated here to avoid
-// exporting internal scan functions from the models package.
-func scanPRTask(rows *sql.Rows) (*models.Task, error) {
-	var t models.Task
-	var dependsOnJSON, tagsJSON string
-	err := rows.Scan(
-		&t.ID, &t.Title, &t.Description, &t.Type, &t.Status, &t.Priority, &t.Source,
-		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
-		&dependsOnJSON, &tagsJSON, &t.Prompt,
-		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
-		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged, &t.TestPassed,
-		&t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
-		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse JSON arrays; ignore errors to be resilient to bad data
-	if dependsOnJSON != "" {
-		_ = json.Unmarshal([]byte(dependsOnJSON), &t.DependsOn)
-	}
-	if tagsJSON != "" {
-		_ = json.Unmarshal([]byte(tagsJSON), &t.Tags)
-	}
-	if t.DependsOn == nil {
-		t.DependsOn = []string{}
-	}
-	if t.Tags == nil {
-		t.Tags = []string{}
-	}
-
-	return &t, nil
-}

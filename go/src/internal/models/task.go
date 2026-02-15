@@ -416,6 +416,66 @@ func (s *TaskStore) CancelChildren(parentID string) (int64, error) {
 	return result.RowsAffected()
 }
 
+// CountByStatus returns the number of tasks with the given status.
+func (s *TaskStore) CountByStatus(status string) (int, error) {
+	var count int
+	err := s.DB.QueryRow(`SELECT COUNT(*) FROM tasks WHERE status = ?`, status).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count by status: %w", err)
+	}
+	slog.Debug("count by status", "status", status, "count", count)
+	return count, nil
+}
+
+// CountBySource returns the number of tasks with the given source.
+func (s *TaskStore) CountBySource(source string) (int, error) {
+	var count int
+	err := s.DB.QueryRow(`SELECT COUNT(*) FROM tasks WHERE source = ?`, source).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count by source: %w", err)
+	}
+	slog.Debug("count by source", "source", source, "count", count)
+	return count, nil
+}
+
+// CountByPriority returns the number of tasks with priority in the range [minP, maxP].
+func (s *TaskStore) CountByPriority(minP, maxP int) (int, error) {
+	var count int
+	err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM tasks WHERE priority >= ? AND priority <= ?`,
+		minP, maxP,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count by priority: %w", err)
+	}
+	slog.Debug("count by priority", "min_priority", minP, "max_priority", maxP, "count", count)
+	return count, nil
+}
+
+// ListByPRStatus returns all tasks with the given PR status.
+func (s *TaskStore) ListByPRStatus(prStatus string) ([]*Task, error) {
+	query := TaskSelectSQL + `
+		WHERE pr_status = ?
+		ORDER BY priority ASC, created_at ASC`
+
+	rows, err := s.DB.Query(query, prStatus)
+	if err != nil {
+		return nil, fmt.Errorf("query by pr_status: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		t, err := ScanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	slog.Debug("list by pr status", "pr_status", prStatus, "count", len(tasks))
+	return tasks, rows.Err()
+}
+
 // TaskSelectSQL is the canonical SELECT column list for tasks.
 // All queries that read full task rows should use this constant to avoid
 // column-list drift (the root cause of PR #23 where triage_analysis was

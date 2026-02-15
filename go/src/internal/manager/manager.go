@@ -119,12 +119,9 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 	}
 
 	// Query multiple candidates for dependency checking
+	// Note: query was already branched at lines 114-119 based on pod type
 	var rows *sql.Rows
-	if podType == "RESEARCHER" {
-		rows, err = tx.Query(query, models.TaskReady, models.TaskTypeResearch, currentGoalID)
-	} else {
-		rows, err = tx.Query(query, models.TaskReady, models.TaskTypeResearch, currentGoalID)
-	}
+	rows, err = tx.Query(query, models.TaskReady, models.TaskTypeResearch, currentGoalID)
 	if err != nil {
 		return nil, fmt.Errorf("query tasks: %w", err)
 	}

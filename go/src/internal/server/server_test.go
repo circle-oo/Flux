@@ -40,7 +40,7 @@ func setupTestServer(t *testing.T) (*Server, *sql.DB) {
 	}
 
 	var subFS fs.FS = webFS
-	srv := NewServer(cfg, database, nil, subFS)
+	srv := NewServer(cfg, database, nil, nil, subFS)
 
 	return srv, database
 }
@@ -1203,8 +1203,7 @@ func TestInternal_NextPending(t *testing.T) {
 	// Wire up manager so PopNextPending works
 	cfg := &config.Config{}
 	m := manager.NewManager(database, cfg)
-	SetManager(m)
-	defer SetManager(nil)
+	srv.mgr = m
 
 	// Create a PENDING operator task directly in DB
 	_, err := database.Exec(
@@ -1333,11 +1332,10 @@ func TestInternal_Triaged(t *testing.T) {
 func TestTriageAnalysis_FullLifecycle(t *testing.T) {
 	srv, database := setupTestServer(t)
 
-	// Wire up manager
+	// Wire up manager — set directly on server struct
 	cfg := &config.Config{}
 	m := manager.NewManager(database, cfg)
-	SetManager(m)
-	defer SetManager(nil)
+	srv.mgr = m
 
 	// Step 1: Create a PENDING operator task directly in DB
 	_, err := database.Exec(

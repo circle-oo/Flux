@@ -102,7 +102,7 @@ func main() {
 		logger.Error("failed to get embedded web filesystem", "error", err)
 		os.Exit(1)
 	}
-	srv := server.NewServer(cfg, database, discord, webFS)
+	srv := server.NewServer(cfg, database, mgr, discord, webFS)
 
 	// 6b. Wrap logger with broadcast handler so logs stream to the Web UI
 	logBroadcast := server.NewLogBroadcastHandler(slog.Default().Handler(), srv.Hub())
@@ -125,10 +125,11 @@ func main() {
 		}
 	}()
 
-	// 9. Start Executor pods (3 instances)
+	// 9. Start Executor pods
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	executors := make([]*executor.Executor, 3)
-	for i := 0; i < 3; i++ {
+	executorCount := cfg.Orchestrator.MaxTotalPods
+	executors := make([]*executor.Executor, executorCount)
+	for i := 0; i < executorCount; i++ {
 		execID := fmt.Sprintf("executor-%02d", i+1)
 		executors[i] = executor.NewExecutor(execID, cfg, discord, vaultWriter)
 		go func(e *executor.Executor, id string) {
@@ -171,7 +172,7 @@ func main() {
 
 	logger.Info("flux ready", "port", cfg.Server.Port)
 
-	// 10. Block on SIGTERM/SIGINT for graceful shutdown
+	// 11. Block on SIGTERM/SIGINT for graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-quit

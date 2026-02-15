@@ -6,6 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+)
+
+var (
+	// Precompiled regexes for GitHub URL parsing
+	httpsRepoPattern = regexp.MustCompile(`github\.com/([^/]+)/([^/.]+)`)
+	sshRepoPattern   = regexp.MustCompile(`git@github\.com:([^/]+)/([^/.]+)`)
 )
 
 // CreateRepo creates a new GitHub repository using the REST API v3.
@@ -50,4 +57,16 @@ func (c *Client) CreateRepo(name string, private bool) (string, error) {
 	}
 
 	return result.HTMLURL, nil
+}
+
+// ExtractOwnerRepo parses owner and repo name from a GitHub URL.
+// Supports both HTTPS (https://github.com/owner/repo) and SSH (git@github.com:owner/repo) formats.
+func ExtractOwnerRepo(repoURL string) (owner, repo string) {
+	if m := httpsRepoPattern.FindStringSubmatch(repoURL); len(m) == 3 {
+		return m[1], m[2]
+	}
+	if m := sshRepoPattern.FindStringSubmatch(repoURL); len(m) == 3 {
+		return m[1], m[2]
+	}
+	return "", ""
 }

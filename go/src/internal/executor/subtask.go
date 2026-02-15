@@ -6,14 +6,6 @@ import (
 	"strings"
 )
 
-// DecompositionInstruction is appended to every executor prompt to enable task decomposition.
-const DecompositionInstruction = `
-If this task is too large to complete in a single session,
-DO NOT write code. Instead, output only a decomposition plan as JSON:
-{"decompose": true, "subtasks": [{"title": "...", "description": "..."}, ...]}
-Maximum 5 subtasks. Each should be independently completable.
-`
-
 // Decomposition represents a task that should be broken into subtasks.
 type Decomposition struct {
 	Decompose bool              `json:"decompose"`

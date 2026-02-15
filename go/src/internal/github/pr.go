@@ -317,17 +317,17 @@ func (c *Client) doRequestWithRetry(req *http.Request, maxRetries int) (*http.Re
 	var resp *http.Response
 	var err error
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Clone the request body for retries
-		var bodyBytes []byte
-		if req.Body != nil {
-			bodyBytes, err = io.ReadAll(req.Body)
-			if err != nil {
-				return nil, fmt.Errorf("reading request body: %w", err)
-			}
-			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	// Read request body once before the loop
+	var bodyBytes []byte
+	if req.Body != nil {
+		bodyBytes, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("reading request body: %w", err)
 		}
+		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	}
 
+	for attempt := 0; attempt < maxRetries; attempt++ {
 		resp, err = c.http.Do(req)
 		if err != nil {
 			// Network error - retry

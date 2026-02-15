@@ -12,20 +12,7 @@ const (
 )
 
 var (
-	// SQL injection patterns
-	sqlInjectionPatterns = []string{
-		"'; DROP",
-		"1=1",
-		"UNION SELECT",
-		"' OR '1'='1",
-		"-- ",
-		"/*",
-		"*/",
-		"xp_",
-		"sp_",
-	}
-
-	// Shell injection patterns (in unexpected contexts)
+	// Shell injection patterns (check only in Prompt field where shell execution may occur)
 	shellInjectionPatterns = []string{
 		"$((",
 		"; rm ",
@@ -51,31 +38,10 @@ func ValidateTaskInput(title, description string) error {
 		return errors.New("description exceeds maximum length of 10KB")
 	}
 
-	// Check for SQL injection patterns
-	titleLower := strings.ToLower(title)
-	descLower := strings.ToLower(description)
-	for _, pattern := range sqlInjectionPatterns {
-		if strings.Contains(titleLower, strings.ToLower(pattern)) {
-			return errors.New("potentially malicious SQL pattern detected in title")
-		}
-		if strings.Contains(descLower, strings.ToLower(pattern)) {
-			return errors.New("potentially malicious SQL pattern detected in description")
-		}
-	}
-
-	// Check for shell injection patterns (avoid false positives for legitimate code snippets)
-	// Only flag if pattern appears outside of code blocks
-	if containsSuspiciousShellPattern(title) {
-		return errors.New("potentially malicious shell pattern detected in title")
-	}
-	if containsSuspiciousShellPattern(description) {
-		return errors.New("potentially malicious shell pattern detected in description")
-	}
-
 	return nil
 }
 
-// ValidatePrompt validates LLM prompt input
+// ValidatePrompt validates LLM prompt input and checks for shell injection
 func ValidatePrompt(prompt string) error {
 	if strings.TrimSpace(prompt) == "" {
 		return errors.New("prompt is required")
@@ -83,6 +49,12 @@ func ValidatePrompt(prompt string) error {
 	if len(prompt) > maxPromptLength {
 		return errors.New("prompt exceeds maximum length of 10KB")
 	}
+
+	// Check for shell injection patterns in prompts (where execution may occur)
+	if containsSuspiciousShellPattern(prompt) {
+		return errors.New("potentially malicious shell pattern detected in prompt")
+	}
+
 	return nil
 }
 

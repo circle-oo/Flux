@@ -31,6 +31,7 @@ func NewOrchestrator(cfg *config.Config, rlh *RateLimitHandler) *Orchestrator {
 // - If recently rate limited → always return Sonnet (cost-saving mode)
 // - If task.NeedsOpus() → return Opus
 // - Otherwise → return Sonnet
+// TODO: This method is currently only used in tests. Consider removing if not needed in production code.
 func (o *Orchestrator) SelectModel(task *models.Task) string {
 	slog.Debug("selecting model for task", "task_id", task.ID, "task_type", task.Type, "task_priority", task.Priority)
 
@@ -63,6 +64,7 @@ func (o *Orchestrator) SelectModel(task *models.Task) string {
 //   Metrics: {m1, m2, ...}
 //
 //   All your work should align with this Goal.
+// TODO: This method is currently only used in tests. Consider removing if not needed in production code.
 func (o *Orchestrator) BuildGoalSystemPrompt(goal *models.Goal) string {
 	slog.Debug("building goal system prompt", "has_goal", goal != nil)
 

@@ -22,6 +22,15 @@ import (
 	"github.com/circle-oo/flux/internal/vault"
 )
 
+// Package-level compiled regexes for performance
+var (
+	filesChangedRe = regexp.MustCompile(`(\d+)\s+files?\s+changed`)
+	insertionsRe   = regexp.MustCompile(`(\d+)\s+insertions?\(\+\)`)
+	deletionsRe    = regexp.MustCompile(`(\d+)\s+deletions?\(-\)`)
+	httpsRepoRe    = regexp.MustCompile(`github\.com/([^/]+)/([^/.]+)`)
+	sshRepoRe      = regexp.MustCompile(`github\.com:([^/]+)/([^/.]+)`)
+)
+
 // Executor is an autonomous execution pod that picks up tasks, runs Claude Code,
 // and produces PRs.
 type Executor struct {
@@ -104,19 +113,9 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 
 	slog.Info("picked up task", "task_id", task.ID, "title", task.Title, "type", task.Type)
-
-	// Set executor ID on the task
 	task.ExecutorID = e.id
 
-	// 2. Get model assignment
-	model, err := e.manager.GetModel(task.ID)
-	if err != nil {
-		slog.Error("failed to get model", "task_id", task.ID, "error", err)
-		model = "sonnet" // fallback
-	}
-	task.Model = model
-
-	// 3. Get project info (needed for system prompt and worktree)
+	// 2. Prepare execution (model + prompt)
 	project, err := e.manager.GetProject(task.ProjectID)
 	if err != nil {
 		slog.Error("failed to get project", "task_id", task.ID, "project_id", task.ProjectID, "error", err)
@@ -124,59 +123,100 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		return
 	}
 
-	// 4. Build system prompt (with project context)
-	techStack := strings.Join(project.TechStack, ", ")
-	systemPrompt := e.buildSystemPrompt(task, project.Name, project.Description, techStack, "", "")
-
-	// 5. Create or reuse worktree
-	var worktreePath string
-	if task.BranchName != "" {
-		// CHANGES_REQUESTED fix: reuse existing worktree
-		// Fetch latest refs first so we can reset to the newest branch commit
-		if err := e.worktree.EnsureBareRepo(project.RepoURL, project.Name); err != nil {
-			slog.Error("failed to ensure bare repo", "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("bare repo failed: %v", err), 0, 0)
-			return
-		}
-		worktreePath, err = e.worktree.FindByBranch(project.Name, task.BranchName)
-		if err != nil {
-			slog.Error("failed to find worktree by branch", "branch", task.BranchName, "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("worktree not found: %v", err), 0, 0)
-			return
-		}
-		// Update worktree to latest branch commit
-		if err := e.worktree.UpdateWorktree(project.Name, worktreePath, task.BranchName); err != nil {
-			slog.Error("failed to update worktree", "branch", task.BranchName, "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("worktree update failed: %v", err), 0, 0)
-			return
-		}
-		slog.Info("reusing existing worktree", "task_id", task.ID, "branch", task.BranchName, "path", worktreePath)
-	} else {
-		if err := e.worktree.EnsureBareRepo(project.RepoURL, project.Name); err != nil {
-			slog.Error("failed to ensure bare repo", "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("bare repo failed: %v", err), 0, 0)
-			return
-		}
-		worktreePath, task.BranchName, err = e.worktree.CreateWorktree(project.Name, task.ID)
-		if err != nil {
-			slog.Error("failed to create worktree", "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("worktree create failed: %v", err), 0, 0)
-			return
-		}
+	model, systemPrompt, err := e.prepareExecution(task, project)
+	if err != nil {
+		slog.Error("failed to prepare execution", "task_id", task.ID, "error", err)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("preparation failed: %v", err), 0, 0)
+		return
 	}
 
-	// 5b. Report execution start details now that worktree/branch is ready
+	// 3. Setup worktree
+	worktreePath, err := e.setupWorktree(task, project)
+	if err != nil {
+		slog.Error("failed to setup worktree", "task_id", task.ID, "error", err)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("worktree setup failed: %v", err), 0, 0)
+		return
+	}
+
+	// Report execution start
 	if err := e.manager.ReportTaskStarted(task.ID, e.id, model, task.BranchName); err != nil {
 		slog.Warn("failed to report task started", "task_id", task.ID, "error", err)
 	}
 
-	// 6. Build autopilot prompt (includes triage analysis and project context)
+	// 4. Run execution
+	result, err := e.runExecution(ctx, task, project, worktreePath, model, systemPrompt)
+	if err != nil {
+		slog.Error("execution failed", "task_id", task.ID, "error", err)
+		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("execution error: %v", err), 0, 0)
+		return
+	}
+	if result == nil {
+		// Early exit (rate limit, decomposition, etc.)
+		return
+	}
+
+	// 5. Process results (build, test, commit, PR, usage)
+	if err := e.processResults(task, result, worktreePath, project); err != nil {
+		slog.Error("failed to process results", "task_id", task.ID, "error", err)
+		return
+	}
+}
+
+// prepareExecution assigns model and builds system prompt.
+func (e *Executor) prepareExecution(task *models.Task, project *models.Project) (model, systemPrompt string, err error) {
+	model, err = e.manager.GetModel(task.ID)
+	if err != nil {
+		slog.Error("failed to get model", "task_id", task.ID, "error", err)
+		model = "sonnet" // fallback
+	}
+	task.Model = model
+
+	techStack := strings.Join(project.TechStack, ", ")
+	systemPrompt = e.buildSystemPrompt(task, project.Name, project.Description, techStack, "", "")
+
+	return model, systemPrompt, nil
+}
+
+// setupWorktree creates or reuses a worktree for the task.
+func (e *Executor) setupWorktree(task *models.Task, project *models.Project) (string, error) {
+	if err := e.worktree.EnsureBareRepo(project.RepoURL, project.Name); err != nil {
+		return "", fmt.Errorf("bare repo failed: %w", err)
+	}
+
+	var worktreePath string
+	var err error
+
+	if task.BranchName != "" {
+		// Reuse existing worktree
+		worktreePath, err = e.worktree.FindByBranch(project.Name, task.BranchName)
+		if err != nil {
+			return "", fmt.Errorf("worktree not found: %w", err)
+		}
+		if err := e.worktree.UpdateWorktree(project.Name, worktreePath, task.BranchName); err != nil {
+			return "", fmt.Errorf("worktree update failed: %w", err)
+		}
+		slog.Info("reusing existing worktree", "task_id", task.ID, "branch", task.BranchName, "path", worktreePath)
+	} else {
+		// Create new worktree
+		worktreePath, task.BranchName, err = e.worktree.CreateWorktree(project.Name, task.ID)
+		if err != nil {
+			return "", fmt.Errorf("worktree create failed: %w", err)
+		}
+	}
+
+	return worktreePath, nil
+}
+
+// runExecution executes Claude Code and handles early exits (rate limit, decomposition).
+// Returns nil result if execution completed with early exit (caller should return).
+func (e *Executor) runExecution(ctx context.Context, task *models.Task, project *models.Project, worktreePath, model, systemPrompt string) (*ClaudeCodeResult, error) {
+	techStack := strings.Join(project.TechStack, ", ")
 	prompt := BuildAutopilotPrompt(task, project.Name, project.Description, techStack)
 
 	// Snapshot sensitive files before execution
 	preSnapshot := e.snapshotSensitiveFiles()
 
-	// 7. Execute Claude Code
+	// Execute Claude Code
 	e.executionStartTime = time.Now()
 	result, err := e.claude.Run(ctx, ClaudeCodeOpts{
 		Prompt:       prompt,
@@ -185,28 +225,25 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		SystemPrompt: systemPrompt,
 	})
 	if err != nil {
-		slog.Error("claude code execution failed", "task_id", task.ID, "error", err)
-		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("execution error: %v", err), 0, 0)
-		return
+		return nil, fmt.Errorf("claude code failed: %w", err)
 	}
 
-	// 8. Check rate limit
+	// Check rate limit
 	if IsRateLimited(result.ExitCode, result.Stderr) {
 		slog.Warn("rate limited, retrying task", "task_id", task.ID)
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskRetry, "", "rate limited", result.TokensUsed, result.CostUSD)
-		return
+		return nil, nil
 	}
 
-	// 9. Post-execution verification
+	// Post-execution verification
 	if err := e.verifyWorktreeIntegrity(preSnapshot); err != nil {
-		slog.Error("worktree integrity violation", "task_id", task.ID, "error", err)
 		_ = e.notifier.Send(notifier.LevelCritical,
 			fmt.Sprintf("INTEGRITY VIOLATION task %s: %v", task.ID, err))
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("integrity violation: %v", err), result.TokensUsed, result.CostUSD)
-		return
+		return nil, fmt.Errorf("integrity violation: %w", err)
 	}
 
-	// 10. Check subtask decomposition
+	// Check subtask decomposition
 	parsed, parseErr := ParseResponse(result.Stdout)
 	if parseErr == nil {
 		if decomp := ParseDecomposition(parsed.ResultText); decomp != nil {
@@ -215,36 +252,41 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			if err := e.manager.CreateSubtasks(task.ID, subtasks); err != nil {
 				slog.Error("failed to create subtasks", "task_id", task.ID, "error", err)
 				_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("subtask creation failed: %v", err), result.TokensUsed, result.CostUSD)
-				return
+				return nil, fmt.Errorf("subtask creation failed: %w", err)
 			}
 			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskDecomposed, result.Stdout, "", result.TokensUsed, result.CostUSD)
-			return
+			return nil, nil
 		}
 	}
 
-	// 10.5. Build verification: run build if applicable
+	return result, nil
+}
+
+// processResults handles build, test, commit, PR creation, and usage collection.
+func (e *Executor) processResults(task *models.Task, result *ClaudeCodeResult, worktreePath string, project *models.Project) error {
+	// Build verification
 	if task.RequiresTest() {
 		buildOK, buildOutput := e.runBuild(worktreePath, task)
 		if !buildOK {
 			slog.Warn("build failed for task", "task_id", task.ID)
 			e.registerBuildFailureTask(task, buildOutput)
 			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("build failed: %s", buildOutput), result.TokensUsed, result.CostUSD)
-			return
+			return fmt.Errorf("build failed")
 		}
 	}
 
-	// 11. QA: run tests if required
+	// QA: run tests
 	if task.RequiresTest() {
 		passed := e.runTests(worktreePath, task)
 		task.TestPassed = &passed
 		if !passed {
 			slog.Warn("tests failed for task", "task_id", task.ID)
 			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, "tests failed", result.TokensUsed, result.CostUSD)
-			return
+			return fmt.Errorf("tests failed")
 		}
 	}
 
-	// 12. Commit and get diff
+	// Commit and get diff
 	diffLines, filesChanged, commitErr := e.commitAndGetDiff(worktreePath, task)
 	task.DiffLines = diffLines
 	task.FilesChanged = filesChanged
@@ -253,11 +295,10 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		if errors.Is(commitErr, ErrNoChanges) {
 			slog.Info("no changes produced by Claude Code, completing without PR", "task_id", task.ID)
 			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD)
-			return
+			return nil
 		}
-		slog.Error("commit failed", "task_id", task.ID, "error", commitErr)
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("git failed: %v", commitErr), result.TokensUsed, result.CostUSD)
-		return
+		return fmt.Errorf("commit failed: %w", commitErr)
 	}
 
 	// Check guardrails
@@ -267,52 +308,43 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			fmt.Sprintf("Task %s diff exceeds guardrails: %d lines, %d files", task.ID, diffLines, filesChanged))
 	}
 
-	// 12.5. Rebase onto main to resolve conflicts before creating PR
+	// Rebase onto main
 	if err := e.worktree.RebaseOnMain(worktreePath); err != nil {
-		slog.Error("failed to rebase on main", "task_id", task.ID, "error", err)
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("rebase conflict: %v", err), result.TokensUsed, result.CostUSD)
-		return
+		return fmt.Errorf("rebase failed: %w", err)
 	}
 
 	// Force push after rebase
 	forcePushCmd := exec.Command("git", "push", "-f", "origin", task.BranchName)
 	forcePushCmd.Dir = worktreePath
 	if output, err := forcePushCmd.CombinedOutput(); err != nil {
-		slog.Error("git force push failed after rebase", "output", string(output), "error", err)
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, "force push failed after rebase", result.TokensUsed, result.CostUSD)
-		return
+		return fmt.Errorf("force push failed: %s", string(output))
 	}
 
-	// 13. Create PR with rich description
+	// Create PR
+	// TODO: move extractOwnerRepo to github.ExtractOwnerRepo
 	owner, repo := extractOwnerRepo(project.RepoURL)
 	if owner == "" || repo == "" {
-		slog.Error("failed to extract owner/repo from URL", "url", project.RepoURL)
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, "invalid repo URL", result.TokensUsed, result.CostUSD)
-		return
+		return fmt.Errorf("invalid repo URL: %s", project.RepoURL)
 	}
 
-	// Build rich PR description
 	prBuilder := github.NewPRDescriptionBuilder(task, worktreePath, e.id)
 	prTitle, prBody := prBuilder.Build()
-
-	// Detect the default branch for PR base (main, master, etc.)
 	defaultBranch := e.worktree.detectDefaultBranchFromWorktree(worktreePath)
 	prURL, prNumber, prErr := e.github.CreatePR(owner, repo, task.BranchName, defaultBranch, prTitle, prBody)
 	if prErr != nil {
-		slog.Error("failed to create PR", "task_id", task.ID, "error", prErr)
 		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("PR creation failed: %v", prErr), result.TokensUsed, result.CostUSD)
-		return
+		return fmt.Errorf("PR creation failed: %w", prErr)
 	}
 	task.PRUrl = prURL
 	task.PRStatus = "OPEN"
 
-	// 14. Auto-merge decision
+	// Auto-merge decision
 	shouldMerge, reason := ShouldAutoMerge(task, diffLines, filesChanged)
-
-	// Post comment explaining the decision
 	if commentErr := e.github.CreateComment(owner, repo, prNumber, reason); commentErr != nil {
 		slog.Warn("failed to post auto-merge comment", "task_id", task.ID, "pr", prNumber, "error", commentErr)
-		// Don't fail the task if comment posting fails - it's not critical
 	}
 
 	if shouldMerge {
@@ -330,19 +362,21 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			fmt.Sprintf("PR ready for review: %s — %s", prURL, task.Title))
 	}
 
-	// 15. Collect usage via ccusage
+	// Collect usage
 	if e.config.CCUsage.Command != "" {
 		_ = CollectTaskUsage(e.config.CCUsage.Command, worktreePath, task)
 	}
 
-	// 16. Record task completion to vault
+	// Record to vault
 	if e.vaultWriter != nil {
 		_ = RecordTaskCompletion(e.vaultWriter, task, result)
 	}
 
-	// 17. Report completion
+	// Report completion
 	_ = e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD)
 	slog.Info("task completed", "task_id", task.ID, "pr_url", prURL, "pr_status", task.PRStatus)
+
+	return nil
 }
 
 // buildSystemPrompt creates a system prompt with the current goal context.
@@ -409,6 +443,37 @@ func (e *Executor) verifyWorktreeIntegrity(preSnapshot []sensitiveFile) error {
 	return nil
 }
 
+// projectCommand represents a command to run when a detection file is found.
+type projectCommand struct {
+	detectFile string
+	command    string
+	args       []string
+}
+
+// runProjectCommand runs the first matching command from a list of project commands.
+// Returns (found, passed, output).
+func runProjectCommand(worktreePath string, commands []projectCommand, commandType string) (bool, string) {
+	for _, cmd := range commands {
+		detectPath := filepath.Join(worktreePath, cmd.detectFile)
+		if _, err := os.Stat(detectPath); err == nil {
+			slog.Info(fmt.Sprintf("running %s", commandType), "command", cmd.command, "worktree", worktreePath)
+			execCmd := exec.Command(cmd.command, cmd.args...)
+			execCmd.Dir = worktreePath
+			output, err := execCmd.CombinedOutput()
+			if err != nil {
+				slog.Warn(fmt.Sprintf("%s failed", commandType), "command", cmd.command, "output", string(output), "error", err)
+				return false, string(output)
+			}
+			slog.Info(fmt.Sprintf("%s passed", commandType), "command", cmd.command)
+			return true, ""
+		}
+	}
+
+	// No command detected
+	slog.Info(fmt.Sprintf("no %s system detected, skipping", commandType), "worktree", worktreePath)
+	return true, ""
+}
+
 // runTests detects the test framework and runs tests in the worktree.
 func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
 	// Skip tests for RESEARCH and DOCUMENT types
@@ -416,14 +481,7 @@ func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
 		return true
 	}
 
-	// Detect test framework
-	type testCmd struct {
-		detectFile string
-		command    string
-		args       []string
-	}
-
-	testCmds := []testCmd{
+	testCmds := []projectCommand{
 		{"go.mod", "go", []string{"test", "./..."}},
 		{"package.json", "npm", []string{"test", "--", "--passWithNoTests"}},
 		{"requirements.txt", "pytest", []string{"-x", "--tb=short"}},
@@ -431,62 +489,21 @@ func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
 		{"Cargo.toml", "cargo", []string{"test"}},
 	}
 
-	for _, tc := range testCmds {
-		detectPath := filepath.Join(worktreePath, tc.detectFile)
-		if _, err := os.Stat(detectPath); err == nil {
-			slog.Info("running tests", "framework", tc.command, "worktree", worktreePath)
-			cmd := exec.Command(tc.command, tc.args...)
-			cmd.Dir = worktreePath
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				slog.Warn("tests failed", "command", tc.command, "output", string(output), "error", err)
-				return false
-			}
-			slog.Info("tests passed", "command", tc.command)
-			return true
-		}
-	}
-
-	// No test framework detected, pass by default
-	slog.Info("no test framework detected, skipping tests", "worktree", worktreePath)
-	return true
+	passed, _ := runProjectCommand(worktreePath, testCmds, "tests")
+	return passed
 }
 
 // runBuild detects the build system and runs a build in the worktree.
 // Returns (passed, output) where output contains error details on failure.
 func (e *Executor) runBuild(worktreePath string, task *models.Task) (bool, string) {
-	type buildCmd struct {
-		detectFile string
-		command    string
-		args       []string
-	}
-
-	buildCmds := []buildCmd{
+	buildCmds := []projectCommand{
 		{"go.mod", "go", []string{"build", "./..."}},
 		{"package.json", "npm", []string{"run", "build", "--if-present"}},
 		{"Cargo.toml", "cargo", []string{"build"}},
 		{"Makefile", "make", []string{"build"}},
 	}
 
-	for _, bc := range buildCmds {
-		detectPath := filepath.Join(worktreePath, bc.detectFile)
-		if _, err := os.Stat(detectPath); err == nil {
-			slog.Info("running build", "command", bc.command, "worktree", worktreePath)
-			cmd := exec.Command(bc.command, bc.args...)
-			cmd.Dir = worktreePath
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				slog.Warn("build failed", "command", bc.command, "output", string(output), "error", err)
-				return false, string(output)
-			}
-			slog.Info("build passed", "command", bc.command)
-			return true, ""
-		}
-	}
-
-	// No build system detected, pass by default
-	slog.Info("no build system detected, skipping build", "worktree", worktreePath)
-	return true, ""
+	return runProjectCommand(worktreePath, buildCmds, "build")
 }
 
 // buildFailureTask constructs a BUGFIX task for a build failure.
@@ -583,20 +600,16 @@ func parseDiffStat(output string) (diffLines, filesChanged int) {
 	summary := lines[len(lines)-1]
 
 	// Parse files changed
-	filesRe := regexp.MustCompile(`(\d+)\s+files?\s+changed`)
-	if m := filesRe.FindStringSubmatch(summary); len(m) >= 2 {
+	if m := filesChangedRe.FindStringSubmatch(summary); len(m) >= 2 {
 		filesChanged, _ = strconv.Atoi(m[1])
 	}
 
 	// Parse insertions and deletions
-	insertRe := regexp.MustCompile(`(\d+)\s+insertions?\(\+\)`)
-	deleteRe := regexp.MustCompile(`(\d+)\s+deletions?\(-\)`)
-
 	var insertions, deletions int
-	if m := insertRe.FindStringSubmatch(summary); len(m) >= 2 {
+	if m := insertionsRe.FindStringSubmatch(summary); len(m) >= 2 {
 		insertions, _ = strconv.Atoi(m[1])
 	}
-	if m := deleteRe.FindStringSubmatch(summary); len(m) >= 2 {
+	if m := deletionsRe.FindStringSubmatch(summary); len(m) >= 2 {
 		deletions, _ = strconv.Atoi(m[1])
 	}
 	diffLines = insertions + deletions
@@ -638,16 +651,15 @@ func ShouldAutoMerge(task *models.Task, diffLines, filesChanged int) (bool, stri
 
 // extractOwnerRepo parses owner and repo from a GitHub URL.
 // Supports both HTTPS and SSH URL formats.
+// TODO: move to github.ExtractOwnerRepo
 func extractOwnerRepo(repoURL string) (owner, repo string) {
 	// HTTPS: https://github.com/owner/repo.git or https://github.com/owner/repo
-	httpsRe := regexp.MustCompile(`github\.com/([^/]+)/([^/.]+)`)
-	if m := httpsRe.FindStringSubmatch(repoURL); len(m) >= 3 {
+	if m := httpsRepoRe.FindStringSubmatch(repoURL); len(m) >= 3 {
 		return m[1], m[2]
 	}
 
 	// SSH: git@github.com:owner/repo.git
-	sshRe := regexp.MustCompile(`github\.com:([^/]+)/([^/.]+)`)
-	if m := sshRe.FindStringSubmatch(repoURL); len(m) >= 3 {
+	if m := sshRepoRe.FindStringSubmatch(repoURL); len(m) >= 3 {
 		return m[1], m[2]
 	}
 
@@ -656,6 +668,12 @@ func extractOwnerRepo(repoURL string) (owner, repo string) {
 
 // claudeCodeSmokeTest verifies Claude Code CLI is available and functional.
 func (e *Executor) claudeCodeSmokeTest() error {
+	return SmokeTest(e.claude, "claude-sonnet-4-20250514")
+}
+
+// SmokeTest verifies the Claude CLI is available and responsive.
+// This is exported so it can be reused by other components (e.g., triager).
+func SmokeTest(runner *ClaudeCodeRunner, model string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 

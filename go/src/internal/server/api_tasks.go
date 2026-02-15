@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -9,9 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
-	"github.com/circle-oo/flux/internal/triager"
 )
 
 // handleCreateTask handles POST /api/tasks
@@ -40,6 +37,18 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "" {
 		writeError(w, http.StatusBadRequest, "type is required")
 		return
+	}
+
+	// Validate input for security
+	if err := ValidateTaskInput(req.Title, req.Description); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Prompt != "" {
+		if err := ValidatePrompt(req.Prompt); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	task := &models.Task{
@@ -71,16 +80,13 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
 	// If triager is enabled, operator tasks stay PENDING for the triager to pick up.
-	// If triager is disabled, run inline triage or promote directly.
+	// If triager is disabled, promote directly to READY.
 	if task.Source == models.TaskSourceOperator && task.Status == models.TaskPending {
 		if s.config.Triager.Enabled {
 			// Triager component will poll and pick up PENDING tasks
 			slog.Info("task created as PENDING, triager will process", "task_id", task.ID)
-		} else if s.config.Executor.MaxExecutionTime > 0 {
-			// Fallback: inline triage if triager is disabled but executor is configured
-			go s.triageTask(task.ID)
 		} else {
-			// No triage available — promote directly to READY
+			// When triager is disabled, tasks skip triage and go directly to READY
 			s.promoteToReady(task.ID)
 		}
 	}
@@ -273,77 +279,6 @@ func (s *Server) handleListSubtasks(w http.ResponseWriter, r *http.Request) {
 		subtasks = []*models.Task{}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": subtasks})
-}
-
-// triageTask runs async triage on a task using Claude to analyze requirements,
-// rewrite the description, and suggest priority. After triage completes (or fails),
-// the task is moved from PENDING to READY so the executor can pick it up.
-// Concurrency is limited by triageSem (max 10 concurrent triages).
-//
-// Takes taskID instead of a task pointer to avoid data races with the
-// HTTP handler that spawns this goroutine (writeJSON may still be
-// reading the shared task pointer when this goroutine starts modifying it).
-func (s *Server) triageTask(taskID string) {
-	// Acquire semaphore slot (blocks if 10 triages are already running)
-	s.triageSem <- struct{}{}
-	defer func() { <-s.triageSem }()
-
-	// Re-read task from DB to get a fresh, owned copy.
-	// This avoids data races with the HTTP handler's writeJSON and
-	// ensures we have DB-generated fields (created_at, updated_at).
-	task, err := s.tasks.GetByID(taskID)
-	if err != nil {
-		slog.Error("triage: failed to read task from DB", "task_id", taskID, "error", err)
-		return
-	}
-
-	slog.Info("starting async triage", "task_id", task.ID, "title", task.Title)
-
-	runner := executor.NewClaudeCodeRunner(&s.config.Executor)
-	ctx := context.Background()
-
-	result, err := triager.TriageTask(ctx, runner, task)
-	if err != nil {
-		slog.Warn("triage failed, task will use original description", "task_id", task.ID, "error", err)
-		// Even on failure, move PENDING -> READY so the task doesn't get stuck
-		s.promoteToReady(task.ID)
-		return
-	}
-
-	// Re-read task from DB before updating to avoid overwriting
-	// any changes made by other processes during triage execution.
-	task, err = s.tasks.GetByID(taskID)
-	if err != nil {
-		slog.Error("triage: failed to re-read task from DB", "task_id", taskID, "error", err)
-		return
-	}
-
-	// Update task with triage results
-	if result.Analysis != "" {
-		task.TriageAnalysis = result.Analysis
-	}
-	if result.Description != "" && result.Description != task.Description {
-		task.Description = result.Description
-	}
-	if result.Priority != task.Priority {
-		slog.Info("triage adjusted priority", "task_id", task.ID, "old", task.Priority, "new", result.Priority)
-		task.Priority = result.Priority
-	}
-	if result.Model != "" {
-		task.Model = result.Model
-	}
-
-	// Move to READY after triage
-	task.Status = models.TaskReady
-	task.ExecutorID = "" // Clear any claim
-
-	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to update task after triage", "task_id", task.ID, "error", err)
-		return
-	}
-
-	slog.Info("triage complete, task updated", "task_id", task.ID)
-	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 }
 
 // promoteToReady moves a PENDING task to READY status.

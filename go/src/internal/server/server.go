@@ -11,6 +11,8 @@ import (
 	"net/http"
 
 	"github.com/circle-oo/flux/internal/config"
+	github_pkg "github.com/circle-oo/flux/internal/github"
+	"github.com/circle-oo/flux/internal/manager"
 	"github.com/circle-oo/flux/internal/models"
 	"github.com/circle-oo/flux/internal/notifier"
 	"github.com/circle-oo/flux/internal/updater"
@@ -28,8 +30,8 @@ type Server struct {
 	notifier   *notifier.Discord
 	updater    *updater.Updater
 	webFS      fs.FS
-
-	triageSem chan struct{} // semaphore limiting concurrent triage goroutines
+	mgr      *manager.Manager
+	ghClient *github_pkg.Client
 
 	goals    *models.GoalStore
 	tasks    *models.TaskStore
@@ -39,15 +41,16 @@ type Server struct {
 }
 
 // NewServer creates a new Server.
-func NewServer(cfg *config.Config, db *sql.DB, discord *notifier.Discord, webFS fs.FS) *Server {
+// NOTE: mgr parameter added for Phase 2 integration. Pass nil if manager not initialized yet.
+func NewServer(cfg *config.Config, db *sql.DB, mgr *manager.Manager, discord *notifier.Discord, webFS fs.FS) *Server {
 	s := &Server{
 		config:    cfg,
 		db:        db,
-		mux:       http.NewServeMux(),
-		notifier:  discord,
-		webFS:     webFS,
-		triageSem: make(chan struct{}, 10), // max 10 concurrent triages
-		goals:     models.NewGoalStore(db),
+		mgr:       mgr,
+		mux:      http.NewServeMux(),
+		notifier: discord,
+		webFS:    webFS,
+		goals:    models.NewGoalStore(db),
 		tasks:     models.NewTaskStore(db),
 		projects:  models.NewProjectStore(db),
 		alerts:    models.NewAlertStore(db),
@@ -56,6 +59,11 @@ func NewServer(cfg *config.Config, db *sql.DB, discord *notifier.Discord, webFS 
 
 	s.auth = NewAuthManager(cfg.Server.Auth)
 	s.ws = NewWebSocketHub()
+
+	// Initialize GitHub client if configured
+	if cfg.GitHub.Token != "" {
+		s.ghClient = github_pkg.NewClient(cfg.GitHub.Token, cfg.GitHub.Username)
+	}
 
 	s.setupRoutes()
 

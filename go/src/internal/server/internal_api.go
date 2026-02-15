@@ -8,12 +8,11 @@ import (
 	"github.com/circle-oo/flux/internal/models"
 )
 
-// mgr is the package-level manager instance set during initialization.
-var mgr *manager.Manager
-
-// SetManager sets the manager for internal API handlers.
+// SetManager is deprecated. Use NewServer with mgr parameter instead.
+// Kept for backwards compatibility during integration.
 func SetManager(m *manager.Manager) {
-	mgr = m
+	// TODO(integration): Remove this function after main.go is updated
+	slog.Warn("SetManager is deprecated, pass mgr to NewServer instead")
 }
 
 // handleInternalNextTask handles POST /internal/tasks/next
@@ -34,12 +33,12 @@ func (s *Server) handleInternalNextTask(w http.ResponseWriter, r *http.Request) 
 	slog.Debug("internal API: next task requested", "pod_id", req.PodID, "pod_type", req.PodType)
 
 	// If manager not set, fall back to Phase 1 stub behavior
-	if mgr == nil {
+	if s.mgr == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"task": nil})
 		return
 	}
 
-	task, err := mgr.PopNextTask(req.PodType)
+	task, err := s.mgr.PopNextTask(req.PodType)
 	if err != nil {
 		slog.Error("failed to pop next task", "pod_type", req.PodType, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
@@ -96,9 +95,9 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 			"executor_id", req.ExecutorID)
 		// Don't change status, but still update cost/tokens for accounting
 		// This allows the executor to move on and pop the next task
-	} else if mgr != nil && req.Status != "" {
+	} else if s.mgr != nil && req.Status != "" {
 		// Use manager for state validation if available
-		if err := mgr.TransitionTask(id, req.Status); err != nil {
+		if err := s.mgr.TransitionTask(id, req.Status); err != nil {
 			slog.Error("invalid state transition", "id", id, "status", req.Status, "error", err)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -164,8 +163,8 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
 	// Check parent completion if this task has a parent
-	if task.ParentID != "" && mgr != nil {
-		if err := mgr.CheckParentCompletion(task.ParentID); err != nil {
+	if task.ParentID != "" && s.mgr != nil {
+		if err := s.mgr.CheckParentCompletion(task.ParentID); err != nil {
 			slog.Error("parent completion check failed", "parent_id", task.ParentID, "error", err)
 		}
 	}
@@ -232,12 +231,12 @@ func (s *Server) handleInternalNextPending(w http.ResponseWriter, r *http.Reques
 
 	slog.Debug("internal API: next pending task requested", "triager_id", req.TriagerID)
 
-	if mgr == nil {
+	if s.mgr == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"task": nil})
 		return
 	}
 
-	task, err := mgr.PopNextPending(req.TriagerID)
+	task, err := s.mgr.PopNextPending(req.TriagerID)
 	if err != nil {
 		slog.Error("failed to pop next pending task", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal server error")
@@ -410,6 +409,12 @@ func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Validate input for security
+	if err := ValidateTaskInput(req.Title, req.Description); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	task := &models.Task{
 		Title:       req.Title,
 		Description: req.Description,
@@ -459,8 +464,8 @@ func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) 
 
 	slog.Debug("internal API: model query", "task_id", taskID)
 
-	if mgr != nil {
-		task, err := mgr.GetTask(taskID)
+	if s.mgr != nil {
+		task, err := s.mgr.GetTask(taskID)
 		if err != nil {
 			slog.Error("failed to get task", "id", taskID, "error", err)
 			model := "sonnet"

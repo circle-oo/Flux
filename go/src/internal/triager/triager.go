@@ -125,6 +125,7 @@ func (t *Triager) processNext(ctx context.Context) {
 }
 
 // smokeTest verifies the Claude CLI is available.
+// TODO(integration): replace with executor.SmokeTest(t.claude, model)
 func (t *Triager) smokeTest() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -174,8 +175,6 @@ type TriageResult struct {
 // TriageTask uses Claude to analyze a task, rewrite its description with clear
 // requirements, suggest a priority level, and recommend an execution model.
 func TriageTask(ctx context.Context, runner *executor.ClaudeCodeRunner, task *models.Task) (*TriageResult, error) {
-	slog.Info("triaging task", "task_id", task.ID, "title", task.Title)
-
 	prompt := buildTriagePrompt(task)
 
 	triageCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
