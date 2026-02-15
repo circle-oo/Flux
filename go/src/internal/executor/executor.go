@@ -218,6 +218,22 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			fmt.Sprintf("Task %s diff exceeds guardrails: %d lines, %d files", task.ID, diffLines, filesChanged))
 	}
 
+	// 12.5. Rebase onto main to resolve conflicts before creating PR
+	if err := e.worktree.RebaseOnMain(worktreePath); err != nil {
+		slog.Error("failed to rebase on main", "task_id", task.ID, "error", err)
+		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, fmt.Sprintf("rebase conflict: %v", err), result.TokensUsed, result.CostUSD)
+		return
+	}
+
+	// Force push after rebase
+	forcePushCmd := exec.Command("git", "push", "-f", "origin", task.BranchName)
+	forcePushCmd.Dir = worktreePath
+	if output, err := forcePushCmd.CombinedOutput(); err != nil {
+		slog.Error("git force push failed after rebase", "output", string(output), "error", err)
+		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, "force push failed after rebase", result.TokensUsed, result.CostUSD)
+		return
+	}
+
 	// 13. Create PR
 	owner, repo := extractOwnerRepo(project.RepoURL)
 	if owner == "" || repo == "" {

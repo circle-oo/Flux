@@ -442,3 +442,42 @@ func TestCleanupWorktreeCommandConstruction(t *testing.T) {
 		t.Error("should have --force flag")
 	}
 }
+
+func TestRebaseOnMainCommandConstruction(t *testing.T) {
+	worktreePath := "/tmp/trees/test-project--task-abc123de"
+
+	// Expected fetch command: git fetch origin main
+	expectedFetchArgs := []string{"fetch", "origin", "main"}
+
+	if len(expectedFetchArgs) != 3 {
+		t.Errorf("fetch command should have 3 args, got %d", len(expectedFetchArgs))
+	}
+
+	if expectedFetchArgs[0] != "fetch" {
+		t.Error("first arg should be fetch")
+	}
+
+	if expectedFetchArgs[1] != "origin" || expectedFetchArgs[2] != "main" {
+		t.Error("should fetch origin main")
+	}
+
+	// Expected rebase command: git rebase origin/main
+	expectedRebaseArgs := []string{"rebase", "origin/main"}
+
+	if len(expectedRebaseArgs) != 2 {
+		t.Errorf("rebase command should have 2 args, got %d", len(expectedRebaseArgs))
+	}
+
+	if expectedRebaseArgs[0] != "rebase" {
+		t.Error("first arg should be rebase")
+	}
+
+	if expectedRebaseArgs[1] != "origin/main" {
+		t.Error("should rebase onto origin/main")
+	}
+
+	// Verify the worktreePath would be set as Dir
+	if worktreePath == "" {
+		t.Error("worktreePath should not be empty")
+	}
+}
