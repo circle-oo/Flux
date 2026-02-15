@@ -150,22 +150,24 @@ func main() {
 		logger.Info("triager disabled", "component", "main")
 	}
 
-	// 10. Start auto-updater (polls git remote, rebuilds, and restarts via SIGTERM)
+	// 10. Initialize updater (always create instance for manual checks)
 	var autoUpdater *updater.Updater
-	if cfg.AutoUpdate.Enabled {
-		repoDir, err := os.Getwd()
-		if err != nil {
-			logger.Error("failed to get working directory for auto-updater", "error", err)
-		} else {
-			autoUpdater = updater.New(cfg.AutoUpdate, repoDir)
-			autoUpdater.OnStatusChange = func(status updater.Status) {
-				srv.Hub().Broadcast(server.Event{Type: "DEPLOY_STATUS", Data: status})
-			}
+	repoDir, err := os.Getwd()
+	if err != nil {
+		logger.Error("failed to get working directory for updater", "error", err)
+	} else {
+		autoUpdater = updater.New(cfg.AutoUpdate, repoDir)
+		autoUpdater.OnStatusChange = func(status updater.Status) {
+			srv.Hub().Broadcast(server.Event{Type: "DEPLOY_STATUS", Data: status})
+		}
+
+		// Only start automatic polling if auto-updater is enabled
+		if cfg.AutoUpdate.Enabled {
 			go autoUpdater.Start(ctx)
 		}
 	}
 
-	// Wire updater into server for deploy API
+	// Wire updater into server for deploy API (manual checks work even if auto-update disabled)
 	if autoUpdater != nil {
 		srv.SetUpdater(autoUpdater)
 	}
