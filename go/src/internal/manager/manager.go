@@ -14,7 +14,7 @@ import (
 var validTransitions = map[string][]string{
 	models.TaskPending:   {models.TaskReady},
 	models.TaskReady:     {models.TaskRunning},
-	models.TaskRunning:   {models.TaskCompleted, models.TaskFailed},
+	models.TaskRunning:   {models.TaskCompleted, models.TaskFailed, models.TaskRetry},
 	models.TaskFailed:    {models.TaskRetry, models.TaskArchived},
 	models.TaskRetry:     {models.TaskRunning},
 	models.TaskCompleted: {models.TaskArchived},
