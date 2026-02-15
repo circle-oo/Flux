@@ -7,11 +7,11 @@ build: frontend embed-frontend
 
 embed-frontend:
 	rm -rf go/src/web/dist
-	cp -r react/flux-ui/dist go/src/web/dist
+	cp -r frontend/dist go/src/web/dist
 
 clean:
 	rm -rf go/bin/*
-	rm -rf react/flux-ui/dist
+	rm -rf frontend/dist
 	rm -rf go/src/web/dist
 	mkdir -p go/src/web/dist && echo ".gitkeep" > go/src/web/dist/.gitkeep
 
@@ -22,10 +22,10 @@ test:
 	cd go/src && go test ./...
 
 frontend:
-	cd react/flux-ui && npm run build
+	cd frontend && npm run build
 
 frontend-dev:
-	cd react/flux-ui && npm run dev
+	cd frontend && npm run dev
 
 lint:
 	cd go/src && go vet ./...
