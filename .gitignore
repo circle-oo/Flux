@@ -1,21 +1,19 @@
 .omc/
 .DS_Store
 
-# Go build output
-bin/
+# Go
+go/bin/
+go/src/web/dist/
+!go/src/web/dist/.gitkeep
 
-# Go embedded frontend (copied at build time)
-go/web/dist/
-!go/web/dist/.gitkeep
+# React
+react/flux-ui/node_modules/
+react/flux-ui/dist/
 
 # Runtime data
 data/
 workspaces/
 logs/
-
-# TypeScript
-typescript/node_modules/
-typescript/dist/
 
 # IDE
 .idea/

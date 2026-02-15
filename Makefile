@@ -3,29 +3,29 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 build: frontend embed-frontend
-	cd go && go build -ldflags "-X main.version=$(VERSION)" -o ../bin/flux ./cmd/flux
+	cd go/src && go build -ldflags "-X main.version=$(VERSION)" -o ../bin/flux ./cmd/flux
 
 embed-frontend:
-	rm -rf go/web/dist
-	cp -r typescript/dist go/web/dist
+	rm -rf go/src/web/dist
+	cp -r react/flux-ui/dist go/src/web/dist
 
 clean:
-	rm -rf bin/
-	rm -rf typescript/dist
-	rm -rf go/web/dist
-	mkdir -p go/web/dist && echo ".gitkeep" > go/web/dist/.gitkeep
+	rm -rf go/bin/*
+	rm -rf react/flux-ui/dist
+	rm -rf go/src/web/dist
+	mkdir -p go/src/web/dist && echo ".gitkeep" > go/src/web/dist/.gitkeep
 
 dev:
-	cd go && go run -ldflags "-X main.version=$(VERSION)" ./cmd/flux --config ../config.yaml
+	cd go/src && go run -ldflags "-X main.version=$(VERSION)" ./cmd/flux --config ../../config.yaml
 
 test:
-	cd go && go test ./...
+	cd go/src && go test ./...
 
 frontend:
-	cd typescript && npm run build
+	cd react/flux-ui && npm run build
 
 frontend-dev:
-	cd typescript && npm run dev
+	cd react/flux-ui && npm run dev
 
 lint:
-	cd go && go vet ./...
+	cd go/src && go vet ./...
