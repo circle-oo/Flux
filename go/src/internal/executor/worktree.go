@@ -129,6 +129,34 @@ func (wm *WorktreeManager) FindByBranch(projectName, branchName string) (string,
 	return "", fmt.Errorf("worktree not found for branch: %s", branchName)
 }
 
+// RebaseOnMain rebases the worktree's branch onto main to resolve conflicts
+func (wm *WorktreeManager) RebaseOnMain(worktreePath string) error {
+	// Fetch latest main
+	fetchCmd := exec.Command("git", "fetch", "origin", "main")
+	fetchCmd.Dir = worktreePath
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to fetch main: %w: %s", err, output)
+	}
+
+	// Rebase onto origin/main
+	rebaseCmd := exec.Command("git", "rebase", "origin/main")
+	rebaseCmd.Dir = worktreePath
+	output, err := rebaseCmd.CombinedOutput()
+	if err != nil {
+		// Check if it's a conflict
+		if strings.Contains(string(output), "CONFLICT") || strings.Contains(string(output), "conflict") {
+			// Abort the rebase
+			abortCmd := exec.Command("git", "rebase", "--abort")
+			abortCmd.Dir = worktreePath
+			_ = abortCmd.Run()
+			return fmt.Errorf("rebase conflict detected: %s", string(output))
+		}
+		return fmt.Errorf("failed to rebase: %w: %s", err, output)
+	}
+
+	return nil
+}
+
 // CleanupWorktree removes a worktree
 func (wm *WorktreeManager) CleanupWorktree(projectName, worktreePath string) error {
 	bareDir := filepath.Join(wm.reposDir, projectName+".git")
