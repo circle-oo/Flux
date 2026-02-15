@@ -61,16 +61,16 @@ func (b *PRDescriptionBuilder) buildRequirementsSection() string {
 		sb.WriteString("\n\n")
 	}
 
-	// Triage analysis (if available)
+	// Task metadata (moved up for better visibility)
+	sb.WriteString(fmt.Sprintf("**Task Type:** %s\n", b.task.Type))
+	sb.WriteString(fmt.Sprintf("**Priority:** %d\n", b.task.Priority))
+
+	// Triage analysis (if available) - now includes priority reasoning
 	if b.task.TriageAnalysis != "" {
-		sb.WriteString("### Triage Analysis\n\n")
+		sb.WriteString("\n### Triage Analysis\n\n")
 		sb.WriteString(b.task.TriageAnalysis)
 		sb.WriteString("\n\n")
 	}
-
-	// Task metadata
-	sb.WriteString(fmt.Sprintf("**Task Type:** %s\n", b.task.Type))
-	sb.WriteString(fmt.Sprintf("**Priority:** %d\n", b.task.Priority))
 
 	if b.task.Source != "" {
 		sb.WriteString(fmt.Sprintf("**Source:** %s\n", b.task.Source))

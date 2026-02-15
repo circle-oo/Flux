@@ -20,11 +20,18 @@ Tags: {{.Tags}}
 ## Instructions
 
 ### Analysis
-Consider:
+Your analysis MUST start with a clear explanation of why you chose the priority level.
+
+Then consider:
 - What problem this task solves
 - What the expected outcome should be
 - Key risks or dependencies to be aware of
 - What areas of the codebase are likely affected
+
+Format your analysis like this:
+**Priority Reasoning**: [1-2 sentences explaining why this priority was chosen, referencing the priority scale rules]
+
+[Rest of your analysis]
 
 If the task title or description is unclear, nonsensical, or appears to be a test input (e.g. random characters, placeholder text), state that the task needs clarification and cannot be meaningfully analyzed.
 
