@@ -125,13 +125,17 @@ func main() {
 		}
 	}()
 
-	// 9. Start Executor pod
+	// 9. Start Executor pods (3 instances)
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	exec := executor.NewExecutor("executor-01", cfg, discord, vaultWriter)
-	go func() {
-		logger.Info("executor pod started", "id", "executor-01")
-		exec.Run(ctx)
-	}()
+	executors := make([]*executor.Executor, 3)
+	for i := 0; i < 3; i++ {
+		execID := fmt.Sprintf("executor-%02d", i+1)
+		executors[i] = executor.NewExecutor(execID, cfg, discord, vaultWriter)
+		go func(e *executor.Executor, id string) {
+			logger.Info("executor pod started", "id", id)
+			e.Run(ctx)
+		}(executors[i], execID)
+	}
 
 	// 9b. Start Triager component (if enabled)
 	var triage *triager.Triager
@@ -178,9 +182,11 @@ func main() {
 		autoUpdater.Stop()
 	}
 
-	// Stop executor and triager
+	// Stop executors and triager
 	ctxCancel()
-	exec.Stop()
+	for _, exec := range executors {
+		exec.Stop()
+	}
 	if triage != nil {
 		triage.Stop()
 	}
