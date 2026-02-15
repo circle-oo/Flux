@@ -2,6 +2,8 @@ package testutil
 
 import (
 	"database/sql"
+	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/circle-oo/flux/internal/db"
@@ -31,4 +33,21 @@ func NewTestDB(t *testing.T) *sql.DB {
 	})
 
 	return database
+}
+
+// NewTestDBFile creates a file-based SQLite test database in the given directory.
+// Use this for concurrent access tests where in-memory DBs fail (separate DB per connection).
+func NewTestDBFile(dir string) (*sql.DB, error) {
+	dbPath := filepath.Join(dir, "test.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("open test database: %w", err)
+	}
+
+	if err := db.CreateSchema(database); err != nil {
+		database.Close()
+		return nil, fmt.Errorf("create schema: %w", err)
+	}
+
+	return database, nil
 }

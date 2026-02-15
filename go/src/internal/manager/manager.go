@@ -1,0 +1,253 @@
+package manager
+
+import (
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/circle-oo/flux/internal/config"
+	"github.com/circle-oo/flux/internal/models"
+)
+
+// validTransitions defines the state machine for task status transitions.
+var validTransitions = map[string][]string{
+	models.TaskPending:   {models.TaskReady},
+	models.TaskReady:     {models.TaskRunning},
+	models.TaskRunning:   {models.TaskCompleted, models.TaskFailed},
+	models.TaskFailed:    {models.TaskRetry, models.TaskArchived},
+	models.TaskRetry:     {models.TaskRunning},
+	models.TaskCompleted: {models.TaskArchived},
+}
+
+// Manager coordinates task distribution and state transitions.
+type Manager struct {
+	db       *sql.DB
+	config   *config.Config
+	goals    *models.GoalStore
+	tasks    *models.TaskStore
+	projects *models.ProjectStore
+}
+
+// NewManager creates a new Manager instance.
+func NewManager(db *sql.DB, cfg *config.Config) *Manager {
+	return &Manager{
+		db:       db,
+		config:   cfg,
+		goals:    models.NewGoalStore(db),
+		tasks:    models.NewTaskStore(db),
+		projects: models.NewProjectStore(db),
+	}
+}
+
+// PopNextTask atomically retrieves and claims the next READY task for the given pod type.
+// Uses BEGIN IMMEDIATE transaction for SQLite to ensure exclusive access.
+// Executor pods: any type except RESEARCH.
+// Researcher pods: RESEARCH type only.
+// Retries up to 5 times on SQLITE_BUSY to handle concurrent access.
+func (m *Manager) PopNextTask(podType string) (*models.Task, error) {
+	const maxRetries = 5
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		task, err := m.popNextTaskOnce(podType)
+		if err == nil {
+			return task, nil
+		}
+		// Retry on SQLite busy errors
+		if isSQLiteBusy(err) {
+			time.Sleep(time.Duration(10*(attempt+1)) * time.Millisecond)
+			continue
+		}
+		return nil, err
+	}
+	return nil, fmt.Errorf("pop next task: max retries exceeded due to database contention")
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "database is locked") || strings.Contains(s, "SQLITE_BUSY")
+}
+
+func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
+	tx, err := m.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Build query based on pod type
+	var query string
+	if podType == "RESEARCHER" {
+		query = `SELECT id, title, description, type, status, priority, source,
+			project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
+			result, error_log, executor_id, model, branch_name, pr_url, pr_status,
+			diff_lines, files_changed, test_passed, retry_count, crash_recovery,
+			tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
+			FROM tasks
+			WHERE status = ? AND type = ?
+			ORDER BY priority ASC, created_at ASC
+			LIMIT 1`
+	} else {
+		// Executor: any type except RESEARCH
+		query = `SELECT id, title, description, type, status, priority, source,
+			project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
+			result, error_log, executor_id, model, branch_name, pr_url, pr_status,
+			diff_lines, files_changed, test_passed, retry_count, crash_recovery,
+			tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
+			FROM tasks
+			WHERE status = ? AND type != ?
+			ORDER BY priority ASC, created_at ASC
+			LIMIT 1`
+	}
+
+	var task *models.Task
+	if podType == "RESEARCHER" {
+		row := tx.QueryRow(query, models.TaskReady, models.TaskTypeResearch)
+		task, err = scanTaskFromRow(row)
+	} else {
+		row := tx.QueryRow(query, models.TaskReady, models.TaskTypeResearch)
+		task, err = scanTaskFromRow(row)
+	}
+
+	if err == sql.ErrNoRows {
+		return nil, nil // No task available
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query task: %w", err)
+	}
+
+	// Transition to RUNNING and set started_at
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = tx.Exec(
+		`UPDATE tasks SET status = ?, started_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		models.TaskRunning, now, task.ID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update task status: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	// Update task object with new status
+	task.Status = models.TaskRunning
+	task.StartedAt = now
+
+	return task, nil
+}
+
+// TransitionTask enforces valid state transitions and retry logic.
+func (m *Manager) TransitionTask(taskID, newStatus string) error {
+	task, err := m.tasks.GetByID(taskID)
+	if err != nil {
+		return fmt.Errorf("get task: %w", err)
+	}
+
+	// Check if transition is valid
+	validNextStates, ok := validTransitions[task.Status]
+	if !ok {
+		return fmt.Errorf("no valid transitions from status %s", task.Status)
+	}
+
+	isValid := false
+	for _, state := range validNextStates {
+		if state == newStatus {
+			isValid = true
+			break
+		}
+	}
+	if !isValid {
+		return fmt.Errorf("invalid transition from %s to %s", task.Status, newStatus)
+	}
+
+	// RETRY validation
+	if newStatus == models.TaskRetry {
+		// Check if cancelled
+		if task.ErrorLog == "cancelled by operator" {
+			return fmt.Errorf("cannot retry cancelled task")
+		}
+
+		// Check retry count limit (unless crash recovery)
+		if !task.CrashRecovery && task.RetryCount >= 3 {
+			return fmt.Errorf("retry limit exceeded (max 3 retries)")
+		}
+
+		// Increment retry count unless crash recovery
+		if !task.CrashRecovery {
+			task.RetryCount++
+		} else {
+			// Reset crash recovery flag
+			task.CrashRecovery = false
+		}
+	}
+
+	// Update status
+	task.Status = newStatus
+
+	// Set timestamps
+	now := time.Now().UTC().Format(time.RFC3339)
+	if newStatus == models.TaskRunning {
+		task.StartedAt = now
+	}
+	if newStatus == models.TaskCompleted || newStatus == models.TaskFailed {
+		task.CompletedAt = now
+	}
+
+	// Save to database
+	if err := m.tasks.Update(task); err != nil {
+		return fmt.Errorf("update task: %w", err)
+	}
+
+	return nil
+}
+
+// CreateTask delegates to TaskStore.Create.
+func (m *Manager) CreateTask(task *models.Task) error {
+	return m.tasks.Create(task)
+}
+
+// GetCurrentGoal returns the single ACTIVE goal.
+func (m *Manager) GetCurrentGoal() (*models.Goal, error) {
+	return m.goals.GetCurrent()
+}
+
+// GetTask retrieves a task by ID.
+func (m *Manager) GetTask(taskID string) (*models.Task, error) {
+	return m.tasks.GetByID(taskID)
+}
+
+// GetProject retrieves a project by ID.
+func (m *Manager) GetProject(projectID string) (*models.Project, error) {
+	return m.projects.GetByID(projectID)
+}
+
+// scanTaskFromRow is a helper to scan a task from a sql.Row.
+func scanTaskFromRow(row *sql.Row) (*models.Task, error) {
+	var t models.Task
+	var dependsOnJSON, tagsJSON string
+	err := row.Scan(
+		&t.ID, &t.Title, &t.Description, &t.Type, &t.Status, &t.Priority, &t.Source,
+		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
+		&dependsOnJSON, &tagsJSON, &t.Prompt,
+		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
+		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged, &t.TestPassed,
+		&t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
+		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse JSON fields
+	if err := parseJSONField(dependsOnJSON, &t.DependsOn); err != nil {
+		t.DependsOn = []string{}
+	}
+	if err := parseJSONField(tagsJSON, &t.Tags); err != nil {
+		t.Tags = []string{}
+	}
+
+	return &t, nil
+}

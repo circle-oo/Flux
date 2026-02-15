@@ -115,6 +115,9 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle("POST /internal/subtasks", s.localhostOnly(http.HandlerFunc(s.handleInternalCreateSubtasks)))
 	s.mux.Handle("GET /internal/model/{task_id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetModel)))
 
+	// PR Review API (requires auth)
+	s.RegisterPRRoutes()
+
 	// WebSocket
 	s.mux.Handle("GET /ws/events", s.authMiddleware(http.HandlerFunc(s.handleWebSocket)))
 

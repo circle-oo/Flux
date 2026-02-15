@@ -4,15 +4,47 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/circle-oo/flux/internal/manager"
 	"github.com/circle-oo/flux/internal/models"
 )
 
+// mgr is the package-level manager instance set during initialization.
+var mgr *manager.Manager
+
+// SetManager sets the manager for internal API handlers.
+func SetManager(m *manager.Manager) {
+	mgr = m
+}
+
 // handleInternalNextTask handles POST /internal/tasks/next
 // Pod requests next task from Manager.
-// Phase 1 stub: always returns null task.
 func (s *Server) handleInternalNextTask(w http.ResponseWriter, r *http.Request) {
-	// Phase 1 stub: no task queue management yet
-	writeJSON(w, http.StatusOK, map[string]interface{}{"task": nil})
+	var req struct {
+		PodID   string `json:"pod_id"`
+		PodType string `json:"pod_type"`
+	}
+	// Accept empty body gracefully (backwards compat with Phase 1 stub tests)
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := readJSON(w, r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+
+	// If manager not set, fall back to Phase 1 stub behavior
+	if mgr == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"task": nil})
+		return
+	}
+
+	task, err := mgr.PopNextTask(req.PodType)
+	if err != nil {
+		slog.Error("failed to pop next task", "pod_type", req.PodType, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"task": task})
 }
 
 // handleInternalTaskDone handles POST /internal/tasks/{id}/done
@@ -21,11 +53,11 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 	id := r.PathValue("id")
 
 	var req struct {
-		Status    string  `json:"status"`
-		Result    string  `json:"result"`
-		ErrorLog  string  `json:"error_log"`
-		TokensUsed int    `json:"tokens_used"`
-		CostUSD   float64 `json:"cost_usd"`
+		Status     string  `json:"status"`
+		Result     string  `json:"result"`
+		ErrorLog   string  `json:"error_log"`
+		TokensUsed int     `json:"tokens_used"`
+		CostUSD    float64 `json:"cost_usd"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -38,9 +70,27 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if req.Status != "" {
-		task.Status = req.Status
+	// Use manager for state validation if available
+	if mgr != nil && req.Status != "" {
+		if err := mgr.TransitionTask(id, req.Status); err != nil {
+			slog.Error("invalid state transition", "id", id, "status", req.Status, "error", err)
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// Reload task to get updated state
+		task, err = s.tasks.GetByID(id)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+	} else {
+		// Fallback: direct update without validation
+		if req.Status != "" {
+			task.Status = req.Status
+		}
 	}
+
+	// Update other fields
 	if req.Result != "" {
 		task.Result = req.Result
 	}
@@ -132,8 +182,26 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 
 // handleInternalGetModel handles GET /internal/model/{task_id}
 // Pod queries which model to use for a task.
-// Phase 1 stub: always returns "sonnet".
 func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) {
-	// Phase 1 stub: always sonnet
+	taskID := r.PathValue("task_id")
+
+	// If manager available, use task.NeedsOpus() logic
+	if mgr != nil {
+		task, err := mgr.GetTask(taskID)
+		if err != nil {
+			slog.Error("failed to get task", "id", taskID, "error", err)
+			writeJSON(w, http.StatusOK, map[string]string{"model": "sonnet"})
+			return
+		}
+
+		model := "sonnet"
+		if task.NeedsOpus() {
+			model = "opus"
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"model": model})
+		return
+	}
+
+	// Fallback: always sonnet
 	writeJSON(w, http.StatusOK, map[string]string{"model": "sonnet"})
 }

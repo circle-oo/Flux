@@ -1,0 +1,237 @@
+package executor
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// WorktreeManager manages git worktrees for task execution
+type WorktreeManager struct {
+	reposDir string // workspaces/repos/
+	treesDir string // workspaces/trees/
+}
+
+// WorktreeTask represents a task's worktree state for cleanup decisions
+type WorktreeTask struct {
+	ProjectName string
+	TaskID      string
+	Status      string
+	PRStatus    string
+	CompletedAt time.Time
+}
+
+// NewWorktreeManager creates a new WorktreeManager
+func NewWorktreeManager(workspaceBase string) *WorktreeManager {
+	return &WorktreeManager{
+		reposDir: filepath.Join(workspaceBase, "repos"),
+		treesDir: filepath.Join(workspaceBase, "trees"),
+	}
+}
+
+// EnsureBareRepo ensures a bare repository exists and is up to date
+func (wm *WorktreeManager) EnsureBareRepo(repoURL, projectName string) error {
+	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+
+	// Check if bare repo exists
+	if _, err := os.Stat(bareDir); err == nil {
+		// Repository exists, fetch updates
+		cmd := exec.Command("git", "-C", bareDir, "fetch", "--all")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to fetch repo: %w: %s", err, output)
+		}
+		return nil
+	}
+
+	// Repository doesn't exist, clone it
+	if err := os.MkdirAll(wm.reposDir, 0755); err != nil {
+		return fmt.Errorf("failed to create repos directory: %w", err)
+	}
+
+	cmd := exec.Command("git", "clone", "--bare", repoURL, bareDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to clone bare repo: %w: %s", err, output)
+	}
+
+	return nil
+}
+
+// CreateWorktree creates a new worktree for a task
+func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreePath string, branchName string, err error) {
+	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+	branchName = fmt.Sprintf("task/%s", taskID[:8])
+	worktreePath = filepath.Join(wm.treesDir, fmt.Sprintf("%s--task-%s", projectName, taskID[:8]))
+
+	// Ensure trees directory exists
+	if err := os.MkdirAll(wm.treesDir, 0755); err != nil {
+		return "", "", fmt.Errorf("failed to create trees directory: %w", err)
+	}
+
+	// Create worktree
+	cmd := exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "main")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("failed to create worktree: %w: %s", err, output)
+	}
+
+	// Setup Claude configuration
+	if err := setupClaudeSettings(worktreePath); err != nil {
+		return "", "", fmt.Errorf("failed to setup Claude settings: %w", err)
+	}
+
+	if err := setupClaudeMD(worktreePath, projectName); err != nil {
+		return "", "", fmt.Errorf("failed to setup CLAUDE.md: %w", err)
+	}
+
+	return worktreePath, branchName, nil
+}
+
+// FindByBranch finds a worktree by its branch name
+func (wm *WorktreeManager) FindByBranch(projectName, branchName string) (string, error) {
+	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+
+	cmd := exec.Command("git", "-C", bareDir, "worktree", "list", "--porcelain")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to list worktrees: %w: %s", err, output)
+	}
+
+	// Parse porcelain output
+	// Format:
+	// worktree /path/to/worktree
+	// HEAD abcd1234...
+	// branch refs/heads/branch-name
+	// [blank line between worktrees]
+
+	lines := strings.Split(string(output), "\n")
+	var currentWorktree string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			currentWorktree = ""
+			continue
+		}
+
+		if strings.HasPrefix(line, "worktree ") {
+			currentWorktree = strings.TrimPrefix(line, "worktree ")
+		} else if strings.HasPrefix(line, "branch ") {
+			branch := strings.TrimPrefix(line, "branch refs/heads/")
+			if branch == branchName && currentWorktree != "" {
+				return currentWorktree, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("worktree not found for branch: %s", branchName)
+}
+
+// CleanupWorktree removes a worktree
+func (wm *WorktreeManager) CleanupWorktree(projectName, worktreePath string) error {
+	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+
+	cmd := exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", worktreePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to remove worktree: %w: %s", err, output)
+	}
+
+	return nil
+}
+
+// RunCleanup performs cleanup of worktrees based on task states
+func (wm *WorktreeManager) RunCleanup(tasks []WorktreeTask) error {
+	now := time.Now()
+
+	for _, task := range tasks {
+		shouldCleanup := false
+
+		switch task.Status {
+		case "COMPLETED":
+			// Clean up if PR is merged
+			if task.PRStatus == "MERGED" {
+				shouldCleanup = true
+			}
+			// Preserve if PR is still open for review
+
+		case "FAILED":
+			// Clean up after 24 hours
+			if !task.CompletedAt.IsZero() && now.Sub(task.CompletedAt) > 24*time.Hour {
+				shouldCleanup = true
+			}
+
+		case "CHANGES_REQUESTED":
+			// Preserve for fix task - don't clean up
+			shouldCleanup = false
+		}
+
+		if shouldCleanup {
+			branchName := fmt.Sprintf("task/%s", task.TaskID[:8])
+			worktreePath, err := wm.FindByBranch(task.ProjectName, branchName)
+			if err != nil {
+				// Worktree might already be cleaned up, continue
+				continue
+			}
+
+			if err := wm.CleanupWorktree(task.ProjectName, worktreePath); err != nil {
+				return fmt.Errorf("failed to cleanup worktree for task %s: %w", task.TaskID, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// setupClaudeSettings creates .claude/settings.json in the worktree
+func setupClaudeSettings(worktreePath string) error {
+	claudeDir := filepath.Join(worktreePath, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .claude directory: %w", err)
+	}
+
+	settings := map[string]interface{}{
+		"permissions": map[string]interface{}{
+			"allow": []string{
+				"Bash(*)",
+				"Read(*)",
+				"Write(*)",
+				"Edit(*)",
+				"Grep(*)",
+				"Glob(*)",
+				"TodoRead(*)",
+				"TodoWrite(*)",
+			},
+		},
+	}
+
+	settingsJSON, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, settingsJSON, 0644); err != nil {
+		return fmt.Errorf("failed to write settings.json: %w", err)
+	}
+
+	return nil
+}
+
+// setupClaudeMD creates CLAUDE.md in the worktree root
+func setupClaudeMD(worktreePath, projectName string) error {
+	content := fmt.Sprintf(`# %s
+
+You are working on a task for the %s project.
+Follow existing code conventions. Write tests for new code.
+Keep changes focused on the task description.
+`, projectName, projectName)
+
+	claudeMDPath := filepath.Join(worktreePath, "CLAUDE.md")
+	if err := os.WriteFile(claudeMDPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write CLAUDE.md: %w", err)
+	}
+
+	return nil
+}

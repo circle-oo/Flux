@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Goals from './pages/Goals'
 import Tasks from './pages/Tasks'
 import Projects from './pages/Projects'
+import PRs from './pages/PRs'
 
 function App() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -22,6 +23,7 @@ function App() {
         <Route path="goals" element={<Goals />} />
         <Route path="tasks" element={<Tasks />} />
         <Route path="projects" element={<Projects />} />
+        <Route path="prs" element={<PRs />} />
       </Route>
     </Routes>
   )

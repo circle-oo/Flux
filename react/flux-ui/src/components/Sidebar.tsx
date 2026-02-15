@@ -11,6 +11,7 @@ export default function Sidebar() {
     { path: '/goals', label: 'Goals', icon: '🎯' },
     { path: '/tasks', label: 'Tasks', icon: '📋' },
     { path: '/projects', label: 'Projects', icon: '🚀' },
+    { path: '/prs', label: 'Pull Requests', icon: '🔀' },
   ]
 
   return (
