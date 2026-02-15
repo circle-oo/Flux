@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Flux Startup Script
-# Usage: bash start.sh [--config path/to/config.yaml]
+# Usage: bash start-up.sh [--config path/to/config.yaml]
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
