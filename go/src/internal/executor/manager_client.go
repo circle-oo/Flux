@@ -61,18 +61,26 @@ func (c *ManagerClient) NextTask(podID, podType string) (*models.Task, error) {
 	return result.Task, nil
 }
 
+// TaskDoneRequest contains all fields reported when a task completes execution.
+type TaskDoneRequest struct {
+	Status       string  `json:"status"`
+	Result       string  `json:"result"`
+	ErrorLog     string  `json:"error_log"`
+	TokensUsed   int     `json:"tokens_used"`
+	CostUSD      float64 `json:"cost_usd"`
+	Model        string  `json:"model,omitempty"`
+	BranchName   string  `json:"branch_name,omitempty"`
+	PRUrl        string  `json:"pr_url,omitempty"`
+	PRStatus     string  `json:"pr_status,omitempty"`
+	DiffLines    int     `json:"diff_lines,omitempty"`
+	FilesChanged int     `json:"files_changed,omitempty"`
+	TestPassed   *bool   `json:"test_passed,omitempty"`
+}
+
 // ReportTaskDone reports task completion to the Manager.
 // POST /internal/tasks/{id}/done
-func (c *ManagerClient) ReportTaskDone(taskID, status, result, errorLog string, tokensUsed int, costUSD float64) error {
-	req := map[string]interface{}{
-		"status":      status,
-		"result":      result,
-		"error_log":   errorLog,
-		"tokens_used": tokensUsed,
-		"cost_usd":    costUSD,
-	}
-
-	body, err := json.Marshal(req)
+func (c *ManagerClient) ReportTaskDone(taskID string, done TaskDoneRequest) error {
+	body, err := json.Marshal(done)
 	if err != nil {
 		return fmt.Errorf("marshal request: %w", err)
 	}

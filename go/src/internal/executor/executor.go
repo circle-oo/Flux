@@ -85,6 +85,24 @@ func (e *Executor) Stop() {
 	close(e.stopCh)
 }
 
+// buildTaskDoneRequest creates a TaskDoneRequest from the current task state.
+func buildTaskDoneRequest(task *models.Task, status, resultText, errorLog string, tokensUsed int, costUSD float64) TaskDoneRequest {
+	return TaskDoneRequest{
+		Status:       status,
+		Result:       resultText,
+		ErrorLog:     errorLog,
+		TokensUsed:   tokensUsed,
+		CostUSD:      costUSD,
+		Model:        task.Model,
+		BranchName:   task.BranchName,
+		PRUrl:        task.PRUrl,
+		PRStatus:     task.PRStatus,
+		DiffLines:    task.DiffLines,
+		FilesChanged: task.FilesChanged,
+		TestPassed:   task.TestPassed,
+	}
+}
+
 // executeOnce runs one iteration of the task execution pipeline.
 func (e *Executor) executeOnce(ctx context.Context) {
 	// 1. Request next task
@@ -115,7 +133,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	project, err := e.manager.GetProject(task.ProjectID)
 	if err != nil {
 		slog.Error("failed to get project", "task_id", task.ID, "project_id", task.ProjectID, "error", err)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("failed to get project: %v", err), 0, 0)
+		_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskFailed, "", fmt.Sprintf("failed to get project: %v", err), 0, 0))
 		return
 	}
 
@@ -126,19 +144,19 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		worktreePath, err = e.worktree.FindByBranch(project.Name, task.BranchName)
 		if err != nil {
 			slog.Error("failed to find worktree by branch", "branch", task.BranchName, "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("worktree not found: %v", err), 0, 0)
+			_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskFailed, "", fmt.Sprintf("worktree not found: %v", err), 0, 0))
 			return
 		}
 	} else {
 		if err := e.worktree.EnsureBareRepo(project.RepoURL, project.Name); err != nil {
 			slog.Error("failed to ensure bare repo", "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("bare repo failed: %v", err), 0, 0)
+			_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskFailed, "", fmt.Sprintf("bare repo failed: %v", err), 0, 0))
 			return
 		}
 		worktreePath, task.BranchName, err = e.worktree.CreateWorktree(project.Name, task.ID)
 		if err != nil {
 			slog.Error("failed to create worktree", "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("worktree create failed: %v", err), 0, 0)
+			_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskFailed, "", fmt.Sprintf("worktree create failed: %v", err), 0, 0))
 			return
 		}
 	}
@@ -159,14 +177,14 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	})
 	if err != nil {
 		slog.Error("claude code execution failed", "task_id", task.ID, "error", err)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("execution error: %v", err), 0, 0)
+		_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskFailed, "", fmt.Sprintf("execution error: %v", err), 0, 0))
 		return
 	}
 
 	// 8. Check rate limit
 	if IsRateLimited(result.ExitCode, result.Stderr) {
 		slog.Warn("rate limited, retrying task", "task_id", task.ID)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskRetry, "", "rate limited", result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskRetry, "", "rate limited", result.TokensUsed, result.CostUSD))
 		return
 	}
 
@@ -175,7 +193,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		slog.Error("worktree integrity violation", "task_id", task.ID, "error", err)
 		_ = e.notifier.Send(notifier.LevelCritical,
 			fmt.Sprintf("INTEGRITY VIOLATION task %s: %v", task.ID, err))
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, "", fmt.Sprintf("integrity violation: %v", err), result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskFailed, "", fmt.Sprintf("integrity violation: %v", err), result.TokensUsed, result.CostUSD))
 		return
 	}
 
@@ -188,7 +206,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		task.TestPassed = &passed
 		if !passed {
 			slog.Warn("tests failed for task", "task_id", task.ID)
-			_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, "tests failed", result.TokensUsed, result.CostUSD)
+			_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskFailed, result.Stdout, "tests failed", result.TokensUsed, result.CostUSD))
 			return
 		}
 	}
@@ -209,7 +227,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	owner, repo := extractOwnerRepo(project.RepoURL)
 	if owner == "" || repo == "" {
 		slog.Error("failed to extract owner/repo from URL", "url", project.RepoURL)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, "invalid repo URL", result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskFailed, result.Stdout, "invalid repo URL", result.TokensUsed, result.CostUSD))
 		return
 	}
 
@@ -220,7 +238,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	prURL, prNumber, prErr := e.github.CreatePR(owner, repo, task.BranchName, "main", prTitle, prBody)
 	if prErr != nil {
 		slog.Error("failed to create PR", "task_id", task.ID, "error", prErr)
-		_ = e.manager.ReportTaskDone(task.ID, models.TaskFailed, result.Stdout, fmt.Sprintf("PR creation failed: %v", prErr), result.TokensUsed, result.CostUSD)
+		_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskFailed, result.Stdout, fmt.Sprintf("PR creation failed: %v", prErr), result.TokensUsed, result.CostUSD))
 		return
 	}
 	task.PRUrl = prURL
@@ -242,8 +260,8 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			fmt.Sprintf("PR ready for review: %s — %s", prURL, task.Title))
 	}
 
-	// 15. Report completion
-	_ = e.manager.ReportTaskDone(task.ID, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD)
+	// 15. Report completion with all execution metadata
+	_ = e.manager.ReportTaskDone(task.ID, buildTaskDoneRequest(task, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD))
 	slog.Info("task completed", "task_id", task.ID, "pr_url", prURL, "pr_status", task.PRStatus)
 }
 

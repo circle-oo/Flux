@@ -48,25 +48,26 @@ func (s *Server) handleInternalNextTask(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleInternalTaskDone handles POST /internal/tasks/{id}/done
-// Pod reports task completion.
+// Pod reports task completion with all execution metadata.
 func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	var req struct {
-		Status     string  `json:"status"`
-		Result     string  `json:"result"`
-		ErrorLog   string  `json:"error_log"`
-		TokensUsed int     `json:"tokens_used"`
-		CostUSD    float64 `json:"cost_usd"`
+		Status       string  `json:"status"`
+		Result       string  `json:"result"`
+		ErrorLog     string  `json:"error_log"`
+		TokensUsed   int     `json:"tokens_used"`
+		CostUSD      float64 `json:"cost_usd"`
+		Model        string  `json:"model"`
+		BranchName   string  `json:"branch_name"`
+		PRUrl        string  `json:"pr_url"`
+		PRStatus     string  `json:"pr_status"`
+		DiffLines    int     `json:"diff_lines"`
+		FilesChanged int     `json:"files_changed"`
+		TestPassed   *bool   `json:"test_passed"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	task, err := s.tasks.GetByID(id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
 
@@ -77,20 +78,21 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		// Reload task to get updated state
-		task, err = s.tasks.GetByID(id)
-		if err != nil {
-			writeError(w, http.StatusNotFound, "task not found")
-			return
-		}
-	} else {
-		// Fallback: direct update without validation
-		if req.Status != "" {
-			task.Status = req.Status
-		}
 	}
 
-	// Update other fields
+	// Reload task to get state after transition (or current state if no manager)
+	task, err := s.tasks.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	// Fallback: direct status update without validation when no manager
+	if mgr == nil && req.Status != "" {
+		task.Status = req.Status
+	}
+
+	// Apply execution result fields
 	if req.Result != "" {
 		task.Result = req.Result
 	}
@@ -99,6 +101,29 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 	}
 	task.TokensUsed = req.TokensUsed
 	task.CostUSD = req.CostUSD
+
+	// Apply execution metadata fields
+	if req.Model != "" {
+		task.Model = req.Model
+	}
+	if req.BranchName != "" {
+		task.BranchName = req.BranchName
+	}
+	if req.PRUrl != "" {
+		task.PRUrl = req.PRUrl
+	}
+	if req.PRStatus != "" {
+		task.PRStatus = req.PRStatus
+	}
+	if req.DiffLines != 0 {
+		task.DiffLines = req.DiffLines
+	}
+	if req.FilesChanged != 0 {
+		task.FilesChanged = req.FilesChanged
+	}
+	if req.TestPassed != nil {
+		task.TestPassed = req.TestPassed
+	}
 
 	if err := s.tasks.Update(task); err != nil {
 		slog.Error("failed to update task", "id", id, "error", err)
