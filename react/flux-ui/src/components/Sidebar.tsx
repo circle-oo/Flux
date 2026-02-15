@@ -1,10 +1,12 @@
 import { NavLink } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { useWSStore } from '../stores/wsStore'
 import { useState } from 'react'
 import { api } from '../lib/api'
 
 export default function Sidebar() {
   const { logout } = useAuthStore()
+  const wsConnected = useWSStore((s) => s.connected)
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
 
@@ -46,7 +48,13 @@ export default function Sidebar() {
       {/* Header */}
       <div className="p-4 border-b border-slate-700 flex items-center justify-between">
         {!isCollapsed && (
-          <h1 className="text-xl font-bold text-blue-400">Flux</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-blue-400">Flux</h1>
+            <div
+              className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`}
+              title={wsConnected ? 'Connected' : 'Disconnected'}
+            />
+          </div>
         )}
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
