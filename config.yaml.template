@@ -79,6 +79,8 @@ projects:
   - name: "flux"
     type: "REPO"
     repo_url: "https://github.com/circle-oo/flux"
+    description: "Autonomous engineering system. Go backend (server, manager, orchestrator, executor) + React/TypeScript frontend. Executor runs Claude Code CLI in git worktrees to produce PRs autonomously."
+    tech_stack: ["Go", "SQLite", "React", "TypeScript", "Tailwind CSS", "Claude Code CLI"]
 
 logging:
   level: "info"

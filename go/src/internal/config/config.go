@@ -133,9 +133,11 @@ type AutoUpdateConfig struct {
 }
 
 type ProjectSeed struct {
-	Name    string `yaml:"name"`
-	Type    string `yaml:"type"`
-	RepoURL string `yaml:"repo_url"`
+	Name        string   `yaml:"name"`
+	Type        string   `yaml:"type"`
+	RepoURL     string   `yaml:"repo_url"`
+	Description string   `yaml:"description"`
+	TechStack   []string `yaml:"tech_stack"`
 }
 
 type LoggingConfig struct {

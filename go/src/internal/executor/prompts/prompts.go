@@ -42,12 +42,14 @@ func MustRender(name string, data any) string {
 
 // SystemPromptData holds data for system.txt template.
 type SystemPromptData struct {
-	ProjectName     string
-	GoalID          string
-	GoalTitle       string
-	GoalDescription string
-	TaskType        string
-	Priority        int
+	ProjectName        string
+	ProjectDescription string
+	ProjectTechStack   string
+	GoalID             string
+	GoalTitle          string
+	GoalDescription    string
+	TaskType           string
+	Priority           int
 }
 
 // TriageData holds data for triage.txt template.
@@ -62,10 +64,12 @@ type TriageData struct {
 
 // AutopilotData holds data for autopilot.txt template.
 type AutopilotData struct {
-	Title          string
-	Description    string
-	TriageAnalysis string
-	Prompt         string
-	ProjectName    string
-	TaskType       string
+	Title              string
+	Description        string
+	TriageAnalysis     string
+	Prompt             string
+	ProjectName        string
+	ProjectDescription string
+	ProjectTechStack   string
+	TaskType           string
 }

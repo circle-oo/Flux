@@ -66,9 +66,11 @@ func main() {
 	seedProjects := make([]db.SeedProject, len(cfg.Projects))
 	for i, p := range cfg.Projects {
 		seedProjects[i] = db.SeedProject{
-			Name:    p.Name,
-			Type:    p.Type,
-			RepoURL: p.RepoURL,
+			Name:        p.Name,
+			Type:        p.Type,
+			RepoURL:     p.RepoURL,
+			Description: p.Description,
+			TechStack:   p.TechStack,
 		}
 	}
 

@@ -143,14 +143,16 @@ func parseTriageResponse(text string, task *models.Task) *TriageResult {
 
 // BuildAutopilotPrompt creates an enriched prompt that includes triage analysis,
 // guiding Claude Code to analyze → plan → execute in one autopilot session.
-func BuildAutopilotPrompt(task *models.Task, projectName string) string {
+func BuildAutopilotPrompt(task *models.Task, projectName, projectDesc, projectTech string) string {
 	result, err := prompts.Render("autopilot.txt", prompts.AutopilotData{
-		Title:          task.Title,
-		Description:    task.Description,
-		TriageAnalysis: task.TriageAnalysis,
-		Prompt:         task.Prompt,
-		ProjectName:    projectName,
-		TaskType:       task.Type,
+		Title:              task.Title,
+		Description:        task.Description,
+		TriageAnalysis:     task.TriageAnalysis,
+		Prompt:             task.Prompt,
+		ProjectName:        projectName,
+		ProjectDescription: projectDesc,
+		ProjectTechStack:   projectTech,
+		TaskType:           task.Type,
 	})
 	if err != nil {
 		slog.Warn("failed to render autopilot prompt template, using fallback", "error", err)

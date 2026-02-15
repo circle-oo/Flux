@@ -125,7 +125,8 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 
 	// 4. Build system prompt (with project context)
-	systemPrompt := e.buildSystemPrompt(task, project.Name, "", "")
+	techStack := strings.Join(project.TechStack, ", ")
+	systemPrompt := e.buildSystemPrompt(task, project.Name, project.Description, techStack, "", "")
 
 	// 5. Create or reuse worktree
 	var worktreePath string
@@ -165,7 +166,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 
 	// 6. Build autopilot prompt (includes triage analysis and project context)
-	prompt := BuildAutopilotPrompt(task, project.Name)
+	prompt := BuildAutopilotPrompt(task, project.Name, project.Description, techStack)
 
 	// Snapshot sensitive files before execution
 	preSnapshot := e.snapshotSensitiveFiles()
@@ -325,14 +326,16 @@ func (e *Executor) executeOnce(ctx context.Context) {
 }
 
 // buildSystemPrompt creates a system prompt with the current goal context.
-func (e *Executor) buildSystemPrompt(task *models.Task, projectName, goalTitle, goalDesc string) string {
+func (e *Executor) buildSystemPrompt(task *models.Task, projectName, projectDesc, projectTech, goalTitle, goalDesc string) string {
 	result, err := prompts.Render("system.txt", prompts.SystemPromptData{
-		ProjectName:     projectName,
-		GoalID:          task.GoalID,
-		GoalTitle:       goalTitle,
-		GoalDescription: goalDesc,
-		TaskType:        task.Type,
-		Priority:        task.Priority,
+		ProjectName:        projectName,
+		ProjectDescription: projectDesc,
+		ProjectTechStack:   projectTech,
+		GoalID:             task.GoalID,
+		GoalTitle:          goalTitle,
+		GoalDescription:    goalDesc,
+		TaskType:           task.Type,
+		Priority:           task.Priority,
 	})
 	if err != nil {
 		slog.Warn("failed to render system prompt template", "error", err)

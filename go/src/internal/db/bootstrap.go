@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -39,9 +40,11 @@ var VaultFiles = map[string]string{
 
 // SeedProject represents a project to register during bootstrap.
 type SeedProject struct {
-	Name    string
-	Type    string
-	RepoURL string
+	Name        string
+	Type        string
+	RepoURL     string
+	Description string
+	TechStack   []string
 }
 
 // CreateVaultDirs creates the Obsidian Vault directory structure.
@@ -74,14 +77,33 @@ func RegisterSeedProjects(database *sql.DB, projects []SeedProject) error {
 			return fmt.Errorf("check seed project %s: %w", p.Name, err)
 		}
 		if exists {
-			slog.Info("seed project already exists, skipping", "name", p.Name)
+			// Update description and tech_stack if they changed in config
+			techStackJSON := "[]"
+			if len(p.TechStack) > 0 {
+				if b, err := json.Marshal(p.TechStack); err == nil {
+					techStackJSON = string(b)
+				}
+			}
+			if p.Description != "" || len(p.TechStack) > 0 {
+				_, _ = database.Exec(
+					`UPDATE projects SET description = ?, tech_stack = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ? AND (description = '' OR description IS NULL)`,
+					p.Description, techStackJSON, p.Name,
+				)
+			}
+			slog.Info("seed project already exists, updated metadata", "name", p.Name)
 			continue
 		}
 
 		id := uuid.New().String()
+		techStackJSON := "[]"
+		if len(p.TechStack) > 0 {
+			if b, err := json.Marshal(p.TechStack); err == nil {
+				techStackJSON = string(b)
+			}
+		}
 		_, err = database.Exec(
-			`INSERT INTO projects (id, name, type, repo_url, status) VALUES (?, ?, ?, ?, 'ACTIVE')`,
-			id, p.Name, p.Type, p.RepoURL,
+			`INSERT INTO projects (id, name, type, repo_url, description, tech_stack, status) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+			id, p.Name, p.Type, p.RepoURL, p.Description, techStackJSON,
 		)
 		if err != nil {
 			return fmt.Errorf("insert seed project %s: %w", p.Name, err)
