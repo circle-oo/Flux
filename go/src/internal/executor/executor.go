@@ -46,7 +46,7 @@ func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord) *Exec
 		id:       id,
 		config:   cfg,
 		claude:   NewClaudeCodeRunner(&cfg.Executor),
-		worktree: NewWorktreeManager(cfg.Orchestrator.WorkspaceBase),
+		worktree: NewWorktreeManager(cfg.Orchestrator.WorkspaceBase, cfg.GitHub.Token, cfg.GitHub.Username),
 		manager:  NewManagerClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
 		github:   github.NewClient(cfg.GitHub.Token, cfg.GitHub.Username),
 		notifier: discord,

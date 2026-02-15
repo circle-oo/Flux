@@ -13,8 +13,10 @@ import (
 
 // WorktreeManager manages git worktrees for task execution
 type WorktreeManager struct {
-	reposDir string // workspaces/repos/
-	treesDir string // workspaces/trees/
+	reposDir    string // workspaces/repos/
+	treesDir    string // workspaces/trees/
+	githubToken string
+	githubUser  string
 }
 
 // WorktreeTask represents a task's worktree state for cleanup decisions
@@ -28,26 +30,35 @@ type WorktreeTask struct {
 
 // NewWorktreeManager creates a new WorktreeManager.
 // Paths are resolved to absolute to avoid mismatches between git -C and executor CWD.
-func NewWorktreeManager(workspaceBase string) *WorktreeManager {
+func NewWorktreeManager(workspaceBase, githubToken, githubUser string) *WorktreeManager {
 	absBase, err := filepath.Abs(workspaceBase)
 	if err != nil {
 		absBase = workspaceBase
 	}
 	wm := &WorktreeManager{
-		reposDir: filepath.Join(absBase, "repos"),
-		treesDir: filepath.Join(absBase, "trees"),
+		reposDir:    filepath.Join(absBase, "repos"),
+		treesDir:    filepath.Join(absBase, "trees"),
+		githubToken: githubToken,
+		githubUser:  githubUser,
 	}
 	slog.Debug("worktree manager created", "repos_dir", wm.reposDir, "trees_dir", wm.treesDir)
 	return wm
 }
 
-// EnsureBareRepo ensures a bare repository exists and is up to date
+// EnsureBareRepo ensures a bare repository exists and is up to date.
+// Uses token-based HTTPS URL when GitHub credentials are available.
 func (wm *WorktreeManager) EnsureBareRepo(repoURL, projectName string) error {
 	slog.Debug("ensuring bare repo", "repo_url", repoURL, "project", projectName)
 	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+	cloneURL := wm.tokenURL(repoURL)
 
 	// Check if bare repo exists
 	if _, err := os.Stat(bareDir); err == nil {
+		// Update remote URL in case credentials changed
+		if cloneURL != repoURL {
+			setURLCmd := exec.Command("git", "-C", bareDir, "remote", "set-url", "origin", cloneURL)
+			_ = setURLCmd.Run()
+		}
 		// Repository exists, fetch updates
 		slog.Debug("fetching updates for bare repo", "project", projectName)
 		cmd := exec.Command("git", "-C", bareDir, "fetch", "--all")
@@ -63,14 +74,30 @@ func (wm *WorktreeManager) EnsureBareRepo(repoURL, projectName string) error {
 		return fmt.Errorf("failed to create repos directory: %w", err)
 	}
 
-	slog.Info("cloning bare repo", "repo_url", repoURL, "project", projectName)
-	cmd := exec.Command("git", "clone", "--bare", repoURL, bareDir)
+	slog.Info("cloning bare repo", "project", projectName)
+	cmd := exec.Command("git", "clone", "--bare", cloneURL, bareDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to clone bare repo: %w: %s", err, output)
 	}
 
 	slog.Info("bare repo ready", "project", projectName)
 	return nil
+}
+
+// tokenURL converts a repo URL to token-based HTTPS if credentials are available.
+func (wm *WorktreeManager) tokenURL(repoURL string) string {
+	if wm.githubToken == "" {
+		return repoURL
+	}
+	owner, repo := extractOwnerRepo(repoURL)
+	if owner == "" || repo == "" {
+		return repoURL
+	}
+	user := wm.githubUser
+	if user == "" {
+		user = "flux-bot"
+	}
+	return fmt.Sprintf("https://%s:%s@github.com/%s/%s.git", user, wm.githubToken, owner, repo)
 }
 
 // CreateWorktree creates a new worktree for a task
@@ -114,6 +141,11 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 	}
 	slog.Debug("worktree directory created", "path", worktreePath)
 
+	// Configure git user and token-based push URL in the worktree
+	if err := wm.configureWorktreeGit(worktreePath); err != nil {
+		slog.Warn("failed to configure worktree git settings", "error", err)
+	}
+
 	// Setup Claude configuration
 	if err := setupClaudeSettings(worktreePath); err != nil {
 		return "", "", fmt.Errorf("failed to setup Claude settings: %w", err)
@@ -126,6 +158,45 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 
 	slog.Info("worktree ready", "project", projectName, "branch", branchName, "path", worktreePath)
 	return worktreePath, branchName, nil
+}
+
+// configureWorktreeGit sets up git user identity and token-based push URL in a worktree.
+func (wm *WorktreeManager) configureWorktreeGit(worktreePath string) error {
+	// Set user identity for commits
+	user := wm.githubUser
+	if user == "" {
+		user = "flux-bot"
+	}
+	gitCfg := [][]string{
+		{"config", "user.name", user},
+		{"config", "user.email", user + "@users.noreply.github.com"},
+	}
+
+	// Set token-based HTTPS push URL if we have credentials
+	if wm.githubToken != "" {
+		// Read current remote URL to extract owner/repo
+		getURL := exec.Command("git", "-C", worktreePath, "remote", "get-url", "origin")
+		urlOut, err := getURL.Output()
+		if err == nil {
+			remoteURL := strings.TrimSpace(string(urlOut))
+			owner, repo := extractOwnerRepo(remoteURL)
+			if owner != "" && repo != "" {
+				tokenURL := fmt.Sprintf("https://%s:%s@github.com/%s/%s.git", user, wm.githubToken, owner, repo)
+				gitCfg = append(gitCfg, []string{"remote", "set-url", "origin", tokenURL})
+				slog.Debug("configured token-based push URL", "owner", owner, "repo", repo)
+			}
+		}
+	}
+
+	for _, args := range gitCfg {
+		cmd := exec.Command("git", append([]string{"-C", worktreePath}, args...)...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git %s failed: %w: %s", args[0], err, output)
+		}
+	}
+
+	slog.Info("worktree git configured", "path", worktreePath, "user", user)
+	return nil
 }
 
 // cleanupBranchWorktree finds and removes any existing worktree checked out on the given branch.
