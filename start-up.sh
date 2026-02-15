@@ -7,9 +7,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-CONFIG="${1:-config.yaml}"
-if [[ "$1" == "--config" ]] && [[ -n "${2:-}" ]]; then
+DEFAULT_CONFIG="$SCRIPT_DIR/config.yaml"
+TEMPLATE_CONFIG="$SCRIPT_DIR/config.yaml.template"
+
+# Parse --config flag or use default
+CONFIG="$DEFAULT_CONFIG"
+if [[ "${1:-}" == "--config" ]] && [[ -n "${2:-}" ]]; then
     CONFIG="$2"
+elif [[ -n "${1:-}" ]] && [[ "${1:-}" != --* ]]; then
+    CONFIG="$1"
 fi
 
 # Check binary exists
@@ -19,15 +25,19 @@ if [ ! -f go/bin/flux ]; then
     echo ""
 fi
 
+# Auto-create config from template if missing
+if [ ! -f "$CONFIG" ] && [ -f "$TEMPLATE_CONFIG" ]; then
+    echo "Creating config.yaml from template..."
+    cp "$TEMPLATE_CONFIG" "$CONFIG"
+    echo "  Created: $CONFIG"
+    echo ""
+fi
+
 # Check config exists
 if [ ! -f "$CONFIG" ]; then
     echo "ERROR: Config file not found: $CONFIG"
+    echo "  Expected: $DEFAULT_CONFIG"
     echo ""
-    if [ -f config.yaml.template ]; then
-        echo "Create one from the template:"
-        echo "  cp config.yaml.template config.yaml"
-        echo "  # Edit config.yaml with your settings"
-    fi
     exit 1
 fi
 
