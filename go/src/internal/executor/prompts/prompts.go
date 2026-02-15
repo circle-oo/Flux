@@ -31,15 +31,6 @@ func Render(name string, data any) (string, error) {
 	return buf.String(), nil
 }
 
-// MustRender is like Render but panics on error. Use for templates that should never fail.
-func MustRender(name string, data any) string {
-	s, err := Render(name, data)
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
-
 // SystemPromptData holds data for system.txt template.
 type SystemPromptData struct {
 	ProjectName        string
@@ -50,16 +41,6 @@ type SystemPromptData struct {
 	GoalDescription    string
 	TaskType           string
 	Priority           int
-}
-
-// TriageData holds data for triage.txt template.
-type TriageData struct {
-	Title       string
-	Type        string
-	Priority    int
-	Description string
-	Tags        string
-	ProjectName string
 }
 
 // AutopilotData holds data for autopilot.txt template.

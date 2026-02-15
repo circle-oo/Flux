@@ -1,15 +1,40 @@
-package executor
+package triager
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"log/slog"
 	"strings"
+	"text/template"
 	"time"
 
-	"github.com/circle-oo/flux/internal/executor/prompts"
+	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
 )
+
+//go:embed triage.txt
+var triagePromptFS embed.FS
+
+var triageTemplate *template.Template
+
+func init() {
+	var err error
+	triageTemplate, err = template.ParseFS(triagePromptFS, "triage.txt")
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse triage prompt template: %v", err))
+	}
+}
+
+// triageData holds data for triage.txt template.
+type triageData struct {
+	Title       string
+	Type        string
+	Priority    int
+	Description string
+	Tags        string
+	ProjectName string
+}
 
 // TriageResult contains the output of task triage analysis.
 type TriageResult struct {
@@ -20,7 +45,7 @@ type TriageResult struct {
 
 // TriageTask uses Claude to analyze a task, rewrite its description with clear
 // requirements, and suggest a priority level. Called asynchronously after task creation.
-func TriageTask(ctx context.Context, runner *ClaudeCodeRunner, task *models.Task) (*TriageResult, error) {
+func TriageTask(ctx context.Context, runner *executor.ClaudeCodeRunner, task *models.Task) (*TriageResult, error) {
 	slog.Info("triaging task", "task_id", task.ID, "title", task.Title)
 
 	prompt := buildTriagePrompt(task)
@@ -28,7 +53,7 @@ func TriageTask(ctx context.Context, runner *ClaudeCodeRunner, task *models.Task
 	triageCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	result, err := runner.Run(triageCtx, ClaudeCodeOpts{
+	result, err := runner.Run(triageCtx, executor.ClaudeCodeOpts{
 		Prompt:   prompt,
 		Model:    "haiku",
 		MaxTurns: 1,
@@ -43,7 +68,7 @@ func TriageTask(ctx context.Context, runner *ClaudeCodeRunner, task *models.Task
 	}
 
 	// Parse the response
-	parsed, err := ParseResponse(result.Stdout)
+	parsed, err := executor.ParseResponse(result.Stdout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse triage response: %w", err)
 	}
@@ -59,7 +84,9 @@ func buildTriagePrompt(task *models.Task) string {
 	if len(task.Tags) > 0 {
 		tags = strings.Join(task.Tags, ", ")
 	}
-	result, err := prompts.Render("triage.txt", prompts.TriageData{
+
+	var buf strings.Builder
+	err := triageTemplate.ExecuteTemplate(&buf, "triage.txt", triageData{
 		Title:       task.Title,
 		Type:        task.Type,
 		Priority:    task.Priority,
@@ -70,7 +97,7 @@ func buildTriagePrompt(task *models.Task) string {
 		slog.Warn("failed to render triage prompt template, using fallback", "error", err)
 		return fmt.Sprintf("Analyze this task and suggest priority and rewrite description:\n\nTitle: %s\nType: %s\nDescription: %s", task.Title, task.Type, task.Description)
 	}
-	return result
+	return buf.String()
 }
 
 func parseTriageResponse(text string, task *models.Task) *TriageResult {
@@ -139,25 +166,5 @@ func parseTriageResponse(text string, task *models.Task) *TriageResult {
 		result.Description = desc
 	}
 
-	return result
-}
-
-// BuildAutopilotPrompt creates an enriched prompt that includes triage analysis,
-// guiding Claude Code to analyze → plan → execute in one autopilot session.
-func BuildAutopilotPrompt(task *models.Task, projectName, projectDesc, projectTech string) string {
-	result, err := prompts.Render("autopilot.txt", prompts.AutopilotData{
-		Title:              task.Title,
-		Description:        task.Description,
-		TriageAnalysis:     task.TriageAnalysis,
-		Prompt:             task.Prompt,
-		ProjectName:        projectName,
-		ProjectDescription: projectDesc,
-		ProjectTechStack:   projectTech,
-		TaskType:           task.Type,
-	})
-	if err != nil {
-		slog.Warn("failed to render autopilot prompt template, using fallback", "error", err)
-		return fmt.Sprintf("# Task: %s\n\n%s\n\nImplement this task. Follow existing conventions.", task.Title, task.Description)
-	}
 	return result
 }

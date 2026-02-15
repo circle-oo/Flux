@@ -83,7 +83,7 @@ func (t *Triager) processNext(ctx context.Context) {
 
 	slog.Info("triaging task", "task_id", task.ID, "title", task.Title, "component", component)
 
-	result, err := executor.TriageTask(ctx, t.claude, task)
+	result, err := TriageTask(ctx, t.claude, task)
 	if err != nil {
 		slog.Warn("triage failed, promoting with original description",
 			"task_id", task.ID, "error", err, "component", component)

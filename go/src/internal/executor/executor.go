@@ -116,11 +116,6 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 	task.Model = model
 
-	// 2b. Report execution start (executor_id + model) to server immediately
-	if err := e.manager.ReportTaskStarted(task.ID, e.id, model, task.BranchName); err != nil {
-		slog.Warn("failed to report task started", "task_id", task.ID, "error", err)
-	}
-
 	// 3. Get project info (needed for system prompt and worktree)
 	project, err := e.manager.GetProject(task.ProjectID)
 	if err != nil {
@@ -170,11 +165,9 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		}
 	}
 
-	// 5b. Report branch name to server now that worktree is created
-	if task.BranchName != "" {
-		if err := e.manager.ReportTaskStarted(task.ID, "", "", task.BranchName); err != nil {
-			slog.Warn("failed to report branch name", "task_id", task.ID, "error", err)
-		}
+	// 5b. Report execution start details now that worktree/branch is ready
+	if err := e.manager.ReportTaskStarted(task.ID, e.id, model, task.BranchName); err != nil {
+		slog.Warn("failed to report task started", "task_id", task.ID, "error", err)
 	}
 
 	// 6. Build autopilot prompt (includes triage analysis and project context)
@@ -214,16 +207,19 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 
 	// 10. Check subtask decomposition
-	decomp := e.parseDecomposition(result.Stdout)
-	if decomp != nil && len(decomp) > 0 {
-		slog.Info("task decomposed into subtasks", "task_id", task.ID, "subtask_count", len(decomp))
-		if err := e.manager.CreateSubtasks(task.ID, decomp); err != nil {
-			slog.Error("failed to create subtasks", "task_id", task.ID, "error", err)
-			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("subtask creation failed: %v", err), result.TokensUsed, result.CostUSD)
+	parsed, parseErr := ParseResponse(result.Stdout)
+	if parseErr == nil {
+		if decomp := ParseDecomposition(parsed.ResultText); decomp != nil {
+			subtasks := ToSubtaskRequests(decomp)
+			slog.Info("task decomposed into subtasks", "task_id", task.ID, "subtask_count", len(subtasks))
+			if err := e.manager.CreateSubtasks(task.ID, subtasks); err != nil {
+				slog.Error("failed to create subtasks", "task_id", task.ID, "error", err)
+				_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("subtask creation failed: %v", err), result.TokensUsed, result.CostUSD)
+				return
+			}
+			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskDecomposed, result.Stdout, "", result.TokensUsed, result.CostUSD)
 			return
 		}
-		_ = e.manager.ReportTaskDone(task.ID, task, models.TaskDecomposed, result.Stdout, "", result.TokensUsed, result.CostUSD)
-		return
 	}
 
 	// 10.5. Build verification: run build if applicable
@@ -368,25 +364,6 @@ func (e *Executor) buildSystemPrompt(task *models.Task, projectName, projectDesc
 	return result
 }
 
-// buildPrompt creates the execution prompt for Claude Code.
-func (e *Executor) buildPrompt(task *models.Task) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Task: %s\n\n", task.Title))
-	sb.WriteString(fmt.Sprintf("## Description\n%s\n\n", task.Description))
-
-	if task.Prompt != "" {
-		sb.WriteString(fmt.Sprintf("## Additional Instructions\n%s\n\n", task.Prompt))
-	}
-
-	sb.WriteString("## Requirements\n")
-	sb.WriteString("- Implement the changes described above\n")
-	sb.WriteString("- Write or update tests as needed\n")
-	sb.WriteString("- Follow existing code conventions\n")
-	sb.WriteString("- Keep changes focused and minimal\n")
-
-	return sb.String()
-}
-
 // snapshotSensitiveFiles records mod times of sensitive files before execution.
 func (e *Executor) snapshotSensitiveFiles() []sensitiveFile {
 	home, _ := os.UserHomeDir()
@@ -429,11 +406,6 @@ func (e *Executor) verifyWorktreeIntegrity(preSnapshot []sensitiveFile) error {
 			}
 		}
 	}
-	return nil
-}
-
-// parseDecomposition is a Phase 2A stub. Full implementation in Phase 2B.
-func (e *Executor) parseDecomposition(_ string) []SubtaskRequest {
 	return nil
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
+	"github.com/circle-oo/flux/internal/triager"
 )
 
 // handleCreateTask handles POST /api/tasks
@@ -288,7 +289,7 @@ func (s *Server) triageTask(task *models.Task) {
 	runner := executor.NewClaudeCodeRunner(&s.config.Executor)
 	ctx := context.Background()
 
-	result, err := executor.TriageTask(ctx, runner, task)
+	result, err := triager.TriageTask(ctx, runner, task)
 	if err != nil {
 		slog.Warn("triage failed, task will use original description", "task_id", task.ID, "error", err)
 		// Even on failure, move PENDING -> READY so the task doesn't get stuck
