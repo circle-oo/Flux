@@ -412,7 +412,33 @@ export default function TaskDetail() {
       {task.result && (
         <div className="card p-6">
           <h2 className="text-lg font-semibold text-slate-200 mb-3">Result</h2>
-          <ContentRenderer content={task.result} />
+          {(() => {
+            try {
+              // Try to parse as JSON and extract the result description
+              const parsed = JSON.parse(task.result)
+              if (parsed.result && typeof parsed.result === 'string') {
+                return (
+                  <>
+                    <div className="mb-4">
+                      <MarkdownRenderer content={parsed.result} />
+                    </div>
+                    <details className="mt-4">
+                      <summary className="text-sm text-slate-400 cursor-pointer hover:text-slate-300">
+                        Show full output
+                      </summary>
+                      <div className="mt-2">
+                        <ContentRenderer content={task.result} />
+                      </div>
+                    </details>
+                  </>
+                )
+              }
+            } catch (e) {
+              // Not JSON or parsing failed, fall through to default rendering
+            }
+            // Default: render the raw result
+            return <ContentRenderer content={task.result} />
+          })()}
         </div>
       )}
 
