@@ -58,15 +58,16 @@ type sensitiveFile struct {
 // NewExecutor creates a new Executor pod.
 func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord, vw *vault.Writer) *Executor {
 	return &Executor{
-		id:          id,
-		config:      cfg,
-		claude:      claudecli.NewRunner(&cfg.Executor),
-		worktree:    NewWorktreeManager(cfg.Orchestrator.WorkspaceBase, cfg.GitHub.Token, cfg.GitHub.Username),
-		manager:     apiclient.NewClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
-		github:      github.NewClient(cfg.GitHub.Token, cfg.GitHub.Username),
-		notifier:    discord,
-		vaultWriter: vw,
-		stopCh:      make(chan struct{}),
+		id:                 id,
+		config:             cfg,
+		claude:             claudecli.NewRunner(&cfg.Executor),
+		worktree:           NewWorktreeManager(cfg.Orchestrator.WorkspaceBase, cfg.GitHub.Token, cfg.GitHub.Username),
+		manager:            apiclient.NewClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
+		github:             github.NewClient(cfg.GitHub.Token, cfg.GitHub.Username),
+		notifier:           discord,
+		vaultWriter:        vw,
+		stopCh:             make(chan struct{}),
+		executionStartTime: time.Now(),
 	}
 }
 
@@ -738,6 +739,7 @@ func (e *Executor) registerPod() error {
 	payload := map[string]interface{}{
 		"id":         e.id,
 		"started_at": e.executionStartTime,
+		"pod_type":   "executor",
 	}
 
 	return e.manager.PostInternal("/internal/pods/register", payload, nil)

@@ -21,6 +21,7 @@ func (s *Server) handlePodRegister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID        string    `json:"id"`
 		StartedAt time.Time `json:"started_at"`
+		PodType   string    `json:"pod_type"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -33,8 +34,8 @@ func (s *Server) handlePodRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.podRegistry.Register(req.ID, req.StartedAt)
-	slog.Debug("pod registered", "id", req.ID)
+	s.podRegistry.Register(req.ID, req.StartedAt, req.PodType)
+	slog.Debug("pod registered", "id", req.ID, "pod_type", req.PodType)
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "registered",

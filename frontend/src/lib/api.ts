@@ -66,6 +66,7 @@ export interface Project {
 
 export interface Pod {
   id: string
+  pod_type: 'executor' | 'researcher'
   status: 'idle' | 'busy'
   current_task: string
   task_title: string
