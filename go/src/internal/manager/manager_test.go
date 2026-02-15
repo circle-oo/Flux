@@ -216,6 +216,40 @@ func TestTransitionTask_ValidTransitions(t *testing.T) {
 	}
 }
 
+func TestTransitionTask_RunningToRetry(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	task := &models.Task{
+		Title:    "Rate Limited Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// READY -> RUNNING
+	if err := mgr.TransitionTask(task.ID, models.TaskRunning); err != nil {
+		t.Fatalf("transition to RUNNING: %v", err)
+	}
+
+	// RUNNING -> RETRY (e.g. rate limited)
+	if err := mgr.TransitionTask(task.ID, models.TaskRetry); err != nil {
+		t.Errorf("transition RUNNING -> RETRY: %v", err)
+	}
+
+	updated, _ := mgr.GetTask(task.ID)
+	if updated.Status != models.TaskRetry {
+		t.Errorf("expected status RETRY, got %s", updated.Status)
+	}
+	if updated.RetryCount != 1 {
+		t.Errorf("expected retry_count 1, got %d", updated.RetryCount)
+	}
+}
+
 func TestTransitionTask_InvalidTransitions(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	cfg := &config.Config{}
