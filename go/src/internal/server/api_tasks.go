@@ -245,7 +245,12 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 // triageTask runs async triage on a task using Claude to analyze requirements,
 // rewrite the description, and suggest priority. After triage completes (or fails),
 // the task is moved from PENDING to READY so the executor can pick it up.
+// Concurrency is limited by triageSem (max 10 concurrent triages).
 func (s *Server) triageTask(task *models.Task) {
+	// Acquire semaphore slot (blocks if 10 triages are already running)
+	s.triageSem <- struct{}{}
+	defer func() { <-s.triageSem }()
+
 	slog.Info("starting async triage", "task_id", task.ID, "title", task.Title)
 
 	runner := executor.NewClaudeCodeRunner(&s.config.Executor)

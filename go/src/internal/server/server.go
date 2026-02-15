@@ -29,6 +29,8 @@ type Server struct {
 	updater    *updater.Updater
 	webFS      fs.FS
 
+	triageSem chan struct{} // semaphore limiting concurrent triage goroutines
+
 	goals    *models.GoalStore
 	tasks    *models.TaskStore
 	projects *models.ProjectStore
@@ -39,16 +41,17 @@ type Server struct {
 // NewServer creates a new Server.
 func NewServer(cfg *config.Config, db *sql.DB, discord *notifier.Discord, webFS fs.FS) *Server {
 	s := &Server{
-		config:   cfg,
-		db:       db,
-		mux:      http.NewServeMux(),
-		notifier: discord,
-		webFS:    webFS,
-		goals:    models.NewGoalStore(db),
-		tasks:    models.NewTaskStore(db),
-		projects: models.NewProjectStore(db),
-		alerts:   models.NewAlertStore(db),
-		usage:    models.NewUsageStore(db),
+		config:    cfg,
+		db:        db,
+		mux:       http.NewServeMux(),
+		notifier:  discord,
+		webFS:     webFS,
+		triageSem: make(chan struct{}, 10), // max 10 concurrent triages
+		goals:     models.NewGoalStore(db),
+		tasks:     models.NewTaskStore(db),
+		projects:  models.NewProjectStore(db),
+		alerts:    models.NewAlertStore(db),
+		usage:     models.NewUsageStore(db),
 	}
 
 	s.auth = NewAuthManager(cfg.Server.Auth)
