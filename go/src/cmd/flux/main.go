@@ -138,9 +138,11 @@ func main() {
 	if cfg.Triager.Enabled {
 		triage = triager.New("triager-01", cfg, discord)
 		go func() {
-			logger.Info("triager started", "id", "triager-01")
+			logger.Info("triager pod started", "id", "triager-01", "component", "main")
 			triage.Run(ctx)
 		}()
+	} else {
+		logger.Info("triager disabled", "component", "main")
 	}
 
 	// 10. Start auto-updater (polls git remote, rebuilds, and restarts via SIGTERM)

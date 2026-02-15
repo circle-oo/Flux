@@ -183,13 +183,30 @@ export default function TaskDetail() {
 
       {/* Description */}
       <div className="card p-6">
-        <h2 className="text-lg font-semibold text-slate-200 mb-3">Description</h2>
+        <div className="flex items-center gap-2 mb-3">
+          <h2 className="text-lg font-semibold text-slate-200">Description</h2>
+          {task.triage_analysis && (
+            <span className="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-2 py-0.5 rounded text-xs font-medium">
+              Triaged
+            </span>
+          )}
+        </div>
         {task.description ? (
           <MarkdownRenderer content={task.description} />
         ) : (
           <p className="text-slate-400">—</p>
         )}
       </div>
+
+      {/* Triage Analysis */}
+      {task.triage_analysis && (
+        <div className="card p-6 border border-cyan-600/30 bg-cyan-950/10">
+          <h2 className="text-lg font-semibold text-cyan-400 mb-3">Triage Analysis</h2>
+          <div className="text-sm text-slate-300 leading-relaxed">
+            <MarkdownRenderer content={task.triage_analysis} />
+          </div>
+        </div>
+      )}
 
       {/* Overview */}
       <div className="card p-6">
@@ -346,14 +363,6 @@ export default function TaskDetail() {
         <InfoRow label="Updated">{formatDate(task.updated_at)}</InfoRow>
         <InfoRow label="Duration">{formatDuration(task.started_at, task.completed_at)}</InfoRow>
       </div>
-
-      {/* Triage Analysis */}
-      {task.triage_analysis && (
-        <div className="card p-6">
-          <h2 className="text-lg font-semibold text-slate-200 mb-3">Triage Analysis</h2>
-          <ContentRenderer content={task.triage_analysis} />
-        </div>
-      )}
 
       {/* Plan */}
       {task.plan && (
