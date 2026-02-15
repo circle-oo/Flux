@@ -1161,6 +1161,49 @@ func TestInternal_NextPending(t *testing.T) {
 	}
 }
 
+func TestInternal_TaskStarted(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Create a task
+	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title": "Track me", "type": "CODING",
+	})
+	var created map[string]interface{}
+	parseResponse(t, rr, &created)
+	id := created["id"].(string)
+
+	// Report execution start
+	body, _ := json.Marshal(map[string]interface{}{
+		"executor_id": "executor-01",
+		"model":       "opus",
+		"branch_name": "flux/task-abc",
+	})
+	req := httptest.NewRequest("POST", "/internal/tasks/"+id+"/started", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify fields were persisted
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/"+id, nil)
+	var task map[string]interface{}
+	parseResponse(t, rr, &task)
+
+	if task["executor_id"] != "executor-01" {
+		t.Errorf("expected executor_id executor-01, got %v", task["executor_id"])
+	}
+	if task["model"] != "opus" {
+		t.Errorf("expected model opus, got %v", task["model"])
+	}
+	if task["branch_name"] != "flux/task-abc" {
+		t.Errorf("expected branch flux/task-abc, got %v", task["branch_name"])
+	}
+}
+
 func TestInternal_Triaged(t *testing.T) {
 	srv, database := setupTestServer(t)
 

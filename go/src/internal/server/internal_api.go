@@ -165,6 +165,50 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleInternalTaskStarted handles POST /internal/tasks/{id}/started
+// Executor reports execution start — sets executor_id, model, and branch immediately.
+func (s *Server) handleInternalTaskStarted(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req struct {
+		ExecutorID string `json:"executor_id"`
+		Model      string `json:"model"`
+		BranchName string `json:"branch_name"`
+	}
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	task, err := s.tasks.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+
+	if req.ExecutorID != "" {
+		task.ExecutorID = req.ExecutorID
+	}
+	if req.Model != "" {
+		task.Model = req.Model
+	}
+	if req.BranchName != "" {
+		task.BranchName = req.BranchName
+	}
+
+	if err := s.tasks.Update(task); err != nil {
+		slog.Error("failed to update task on start", "task_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	slog.Info("internal API: task execution started",
+		"task_id", id, "executor_id", req.ExecutorID, "model", req.Model, "branch", req.BranchName)
+	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // handleInternalNextPending handles POST /internal/tasks/next-pending
 // Triager requests next PENDING task.
 func (s *Server) handleInternalNextPending(w http.ResponseWriter, r *http.Request) {

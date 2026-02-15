@@ -218,6 +218,36 @@ func (c *ManagerClient) CreateSubtasks(parentID string, subtasks []SubtaskReques
 	return nil
 }
 
+// ReportTaskStarted reports execution start details to the server immediately.
+// POST /internal/tasks/{id}/started
+func (c *ManagerClient) ReportTaskStarted(taskID, executorID, model, branchName string) error {
+	slog.Debug("reporting task execution start", "task_id", taskID, "executor_id", executorID, "model", model)
+	req := map[string]string{
+		"executor_id": executorID,
+		"model":       model,
+		"branch_name": branchName,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/internal/tasks/%s/started", c.baseURL, taskID)
+	resp, err := c.http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("post request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
+}
+
 // NextPending requests the next PENDING task for the triager.
 // POST /internal/tasks/next-pending
 func (c *ManagerClient) NextPending(triagerID string) (*models.Task, error) {

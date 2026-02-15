@@ -132,6 +132,7 @@ func (s *Server) setupRoutes() {
 	// Internal API (localhost only, no auth)
 	s.mux.Handle("POST /internal/tasks/next", s.localhostOnly(http.HandlerFunc(s.handleInternalNextTask)))
 	s.mux.Handle("POST /internal/tasks/next-pending", s.localhostOnly(http.HandlerFunc(s.handleInternalNextPending)))
+	s.mux.Handle("POST /internal/tasks/{id}/started", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskStarted)))
 	s.mux.Handle("POST /internal/tasks/{id}/done", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskDone)))
 	s.mux.Handle("POST /internal/tasks/{id}/triaged", s.localhostOnly(http.HandlerFunc(s.handleInternalTriaged)))
 	s.mux.Handle("POST /internal/tasks", s.localhostOnly(http.HandlerFunc(s.handleInternalCreateTask)))

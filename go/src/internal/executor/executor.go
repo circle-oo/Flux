@@ -116,6 +116,11 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 	task.Model = model
 
+	// 2b. Report execution start (executor_id + model) to server immediately
+	if err := e.manager.ReportTaskStarted(task.ID, e.id, model, task.BranchName); err != nil {
+		slog.Warn("failed to report task started", "task_id", task.ID, "error", err)
+	}
+
 	// 3. Get project info (needed for system prompt and worktree)
 	project, err := e.manager.GetProject(task.ProjectID)
 	if err != nil {
@@ -162,6 +167,13 @@ func (e *Executor) executeOnce(ctx context.Context) {
 			slog.Error("failed to create worktree", "error", err)
 			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("worktree create failed: %v", err), 0, 0)
 			return
+		}
+	}
+
+	// 5b. Report branch name to server now that worktree is created
+	if task.BranchName != "" {
+		if err := e.manager.ReportTaskStarted(task.ID, "", "", task.BranchName); err != nil {
+			slog.Warn("failed to report branch name", "task_id", task.ID, "error", err)
 		}
 	}
 
