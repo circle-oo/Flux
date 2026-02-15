@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useGoalStore } from '../stores/goalStore'
@@ -106,6 +106,7 @@ export default function Tasks() {
   const { projects, fetchProjects } = useProjectStore()
   const { currentGoal, fetchCurrentGoal } = useGoalStore()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [showForm, setShowForm] = useState(false)
   const [showDetailedFilters, setShowDetailedFilters] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('newest')
@@ -123,6 +124,20 @@ export default function Tasks() {
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   const [subtaskCounts, setSubtaskCounts] = useState<Record<string, number>>({})
+
+  // Initialize filters from URL params on mount
+  useEffect(() => {
+    const statusParam = searchParams.get('status')
+    if (statusParam) {
+      // Valid status values
+      const validStatuses = ['PENDING', 'READY', 'RUNNING', 'DECOMPOSED', 'COMPLETED', 'CANCELLED', 'RETRY', 'ARCHIVED', 'FAILED']
+      if (validStatuses.includes(statusParam)) {
+        setFilters({ status: statusParam })
+        // Clear the group filter when coming from URL
+        setActiveFilterGroup('')
+      }
+    }
+  }, []) // Run only on mount
 
   useEffect(() => {
     fetchTasks()
