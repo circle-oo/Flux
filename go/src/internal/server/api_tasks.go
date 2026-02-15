@@ -78,10 +78,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 			slog.Info("task created as PENDING, triager will process", "task_id", task.ID)
 		} else if s.config.Executor.MaxExecutionTime > 0 {
 			// Fallback: inline triage if triager is disabled but executor is configured
-			go s.triageTask(task)
+			go s.triageTask(task.ID)
 		} else {
 			// No triage available — promote directly to READY
-			s.promoteToReady(task)
+			s.promoteToReady(task.ID)
 		}
 	}
 
@@ -279,10 +279,23 @@ func (s *Server) handleListSubtasks(w http.ResponseWriter, r *http.Request) {
 // rewrite the description, and suggest priority. After triage completes (or fails),
 // the task is moved from PENDING to READY so the executor can pick it up.
 // Concurrency is limited by triageSem (max 10 concurrent triages).
-func (s *Server) triageTask(task *models.Task) {
+//
+// Takes taskID instead of a task pointer to avoid data races with the
+// HTTP handler that spawns this goroutine (writeJSON may still be
+// reading the shared task pointer when this goroutine starts modifying it).
+func (s *Server) triageTask(taskID string) {
 	// Acquire semaphore slot (blocks if 10 triages are already running)
 	s.triageSem <- struct{}{}
 	defer func() { <-s.triageSem }()
+
+	// Re-read task from DB to get a fresh, owned copy.
+	// This avoids data races with the HTTP handler's writeJSON and
+	// ensures we have DB-generated fields (created_at, updated_at).
+	task, err := s.tasks.GetByID(taskID)
+	if err != nil {
+		slog.Error("triage: failed to read task from DB", "task_id", taskID, "error", err)
+		return
+	}
 
 	slog.Info("starting async triage", "task_id", task.ID, "title", task.Title)
 
@@ -293,7 +306,15 @@ func (s *Server) triageTask(task *models.Task) {
 	if err != nil {
 		slog.Warn("triage failed, task will use original description", "task_id", task.ID, "error", err)
 		// Even on failure, move PENDING -> READY so the task doesn't get stuck
-		s.promoteToReady(task)
+		s.promoteToReady(task.ID)
+		return
+	}
+
+	// Re-read task from DB before updating to avoid overwriting
+	// any changes made by other processes during triage execution.
+	task, err = s.tasks.GetByID(taskID)
+	if err != nil {
+		slog.Error("triage: failed to re-read task from DB", "task_id", taskID, "error", err)
 		return
 	}
 
@@ -312,6 +333,7 @@ func (s *Server) triageTask(task *models.Task) {
 
 	// Move to READY after triage
 	task.Status = models.TaskReady
+	task.ExecutorID = "" // Clear any claim
 
 	if err := s.tasks.Update(task); err != nil {
 		slog.Error("failed to update task after triage", "task_id", task.ID, "error", err)
@@ -323,8 +345,15 @@ func (s *Server) triageTask(task *models.Task) {
 }
 
 // promoteToReady moves a PENDING task to READY status.
-func (s *Server) promoteToReady(task *models.Task) {
+// Takes taskID and re-reads from DB to avoid stale state.
+func (s *Server) promoteToReady(taskID string) {
+	task, err := s.tasks.GetByID(taskID)
+	if err != nil {
+		slog.Error("promoteToReady: failed to read task", "task_id", taskID, "error", err)
+		return
+	}
 	task.Status = models.TaskReady
+	task.ExecutorID = "" // Clear any claim
 	if err := s.tasks.Update(task); err != nil {
 		slog.Error("failed to promote task to READY", "task_id", task.ID, "error", err)
 		return
