@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { Task } from '../lib/api'
@@ -12,8 +13,10 @@ export default function Tasks() {
     fetchTasks,
     createTask,
     cancelTask,
+    retryTask,
   } = useTaskStore()
   const { projects, fetchProjects } = useProjectStore()
+  const navigate = useNavigate()
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({
     title: '',
@@ -59,6 +62,16 @@ export default function Tasks() {
         await cancelTask(id)
       } catch (error) {
         console.error('Failed to cancel task:', error)
+      }
+    }
+  }
+
+  const handleRetry = async (id: string, title: string) => {
+    if (confirm(`Retry task: ${title}?`)) {
+      try {
+        await retryTask(id)
+      } catch (error) {
+        console.error('Failed to retry task:', error)
       }
     }
   }
@@ -244,7 +257,10 @@ export default function Tasks() {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
-                      <h3 className="text-lg font-medium text-slate-100">
+                      <h3
+                        className="text-lg font-medium text-slate-100 hover:text-blue-400 cursor-pointer transition-colors"
+                        onClick={() => navigate(`/tasks/${task.id}`)}
+                      >
                         {task.title}
                       </h3>
                       <span
@@ -292,14 +308,24 @@ export default function Tasks() {
                       </div>
                     )}
                   </div>
-                  {(task.status === 'READY' || task.status === 'RUNNING') && (
-                    <button
-                      onClick={() => handleCancel(task.id, task.title)}
-                      className="btn-danger ml-4"
-                    >
-                      Cancel
-                    </button>
-                  )}
+                  <div className="flex gap-2 ml-4">
+                    {(task.status === 'FAILED' || task.status === 'RETRY') && (
+                      <button
+                        onClick={() => handleRetry(task.id, task.title)}
+                        className="px-3 py-1.5 rounded text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                      >
+                        Retry
+                      </button>
+                    )}
+                    {(task.status === 'READY' || task.status === 'RUNNING') && (
+                      <button
+                        onClick={() => handleCancel(task.id, task.title)}
+                        className="btn-danger"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {task.error_log && (
                   <div className="mt-3 p-3 bg-red-900/30 border border-red-600 rounded text-sm text-red-200">

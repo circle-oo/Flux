@@ -25,6 +25,7 @@ interface TaskState {
   updateTask: (id: string, updates: Partial<Task>) => Promise<void>
   deleteTask: (id: string) => Promise<void>
   cancelTask: (id: string) => Promise<void>
+  retryTask: (id: string) => Promise<void>
 }
 
 export const useTaskStore = create<TaskState>((set, get) => ({
@@ -120,6 +121,21 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Failed to cancel task',
+        isLoading: false,
+      })
+      throw error
+    }
+  },
+
+  retryTask: async (id) => {
+    set({ isLoading: true, error: null })
+    try {
+      await api.retryTask(id)
+      await get().fetchTasks()
+      set({ isLoading: false })
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Failed to retry task',
         isLoading: false,
       })
       throw error

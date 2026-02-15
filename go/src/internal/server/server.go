@@ -17,14 +17,15 @@ import (
 
 // Server is the main HTTP server for Flux.
 type Server struct {
-	config   *config.Config
-	db       *sql.DB
-	mux      *http.ServeMux
-	server   *http.Server
-	auth     *AuthManager
-	ws       *WebSocketHub
-	notifier *notifier.Discord
-	webFS    fs.FS
+	config     *config.Config
+	db         *sql.DB
+	mux        *http.ServeMux
+	server     *http.Server
+	auth       *AuthManager
+	ws         *WebSocketHub
+	logHandler *LogBroadcastHandler
+	notifier   *notifier.Discord
+	webFS      fs.FS
 
 	goals    *models.GoalStore
 	tasks    *models.TaskStore
@@ -96,6 +97,7 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle("PATCH /api/tasks/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateTask)))
 	s.mux.Handle("DELETE /api/tasks/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteTask)))
 	s.mux.Handle("POST /api/tasks/{id}/cancel", s.authMiddleware(http.HandlerFunc(s.handleCancelTask)))
+	s.mux.Handle("POST /api/tasks/{id}/retry", s.authMiddleware(http.HandlerFunc(s.handleRetryTask)))
 
 	// Projects API (requires auth)
 	s.mux.Handle("POST /api/projects", s.authMiddleware(http.HandlerFunc(s.handleCreateProject)))
@@ -117,9 +119,13 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle("POST /internal/tasks/{id}/done", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskDone)))
 	s.mux.Handle("POST /internal/subtasks", s.localhostOnly(http.HandlerFunc(s.handleInternalCreateSubtasks)))
 	s.mux.Handle("GET /internal/model/{task_id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetModel)))
+	s.mux.Handle("GET /internal/projects/{id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetProject)))
 
 	// PR Review API (requires auth)
 	s.RegisterPRRoutes()
+
+	// Logs API (requires auth)
+	s.mux.Handle("GET /api/logs/recent", s.authMiddleware(http.HandlerFunc(s.handleRecentLogs)))
 
 	// WebSocket
 	s.mux.Handle("GET /ws/events", s.authMiddleware(http.HandlerFunc(s.handleWebSocket)))
@@ -190,6 +196,26 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// Hub returns the WebSocket hub for external wiring (e.g. log broadcasting).
+func (s *Server) Hub() *WebSocketHub {
+	return s.ws
+}
+
+// SetLogHandler sets the log broadcast handler so the server can serve recent logs.
+func (s *Server) SetLogHandler(h *LogBroadcastHandler) {
+	s.logHandler = h
+}
+
+// handleRecentLogs returns buffered log entries.
+func (s *Server) handleRecentLogs(w http.ResponseWriter, r *http.Request) {
+	if s.logHandler == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"logs": []LogEntry{}})
+		return
+	}
+	logs := s.logHandler.GetRecentLogs()
+	writeJSON(w, http.StatusOK, map[string]any{"logs": logs})
 }
 
 // writeError writes a JSON error response.

@@ -34,6 +34,7 @@ export default function Sidebar() {
     { path: '/tasks', label: 'Tasks', icon: '📋' },
     { path: '/projects', label: 'Projects', icon: '🚀' },
     { path: '/prs', label: 'Pull Requests', icon: '🔀' },
+    { path: '/logs', label: 'Logs', icon: '📜' },
   ]
 
   return (

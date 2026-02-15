@@ -24,6 +24,7 @@ type Config struct {
 	Notifications NotificationsConfig `yaml:"notifications"`
 	Services      []ServiceConfig     `yaml:"services"`
 	Cleanup       CleanupConfig       `yaml:"cleanup"`
+	AutoUpdate    AutoUpdateConfig    `yaml:"auto_update"`
 	Projects      []ProjectSeed       `yaml:"projects"`
 	Logging       LoggingConfig       `yaml:"logging"`
 }
@@ -123,6 +124,12 @@ type CleanupConfig struct {
 	JSONLRetentionDays    int `yaml:"jsonl_retention_days"`
 	UsageSnapshotsDays    int `yaml:"usage_snapshots_days"`
 	FailedWorktreeHours   int `yaml:"failed_worktree_hours"`
+}
+
+type AutoUpdateConfig struct {
+	Enabled       bool          `yaml:"enabled"`
+	CheckInterval time.Duration `yaml:"check_interval"`
+	Branch        string        `yaml:"branch"`
 }
 
 type ProjectSeed struct {

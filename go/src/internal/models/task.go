@@ -300,6 +300,26 @@ func (s *TaskStore) Cancel(id string) error {
 	return nil
 }
 
+// Retry resets a FAILED task back to READY so it can be picked up again.
+func (s *TaskStore) Retry(id string) error {
+	result, err := s.DB.Exec(
+		`UPDATE tasks SET status = ?, error_log = '', result = '',
+		 retry_count = retry_count + 1, started_at = '', completed_at = '',
+		 executor_id = '', branch_name = '', pr_url = '', pr_status = '',
+		 updated_at = CURRENT_TIMESTAMP
+		 WHERE id = ? AND status IN (?, ?)`,
+		TaskReady, id, TaskFailed, TaskRetry,
+	)
+	if err != nil {
+		return fmt.Errorf("retry task: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task %s is not in a retryable state", id)
+	}
+	return nil
+}
+
 // CountByParent counts the number of subtasks for a given parent task.
 func (s *TaskStore) CountByParent(parentID string) (int, error) {
 	var count int
