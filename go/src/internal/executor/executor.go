@@ -227,7 +227,15 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	task.PRStatus = "OPEN"
 
 	// 14. Auto-merge decision
-	if ShouldAutoMerge(task, diffLines, filesChanged) {
+	shouldMerge, reason := ShouldAutoMerge(task, diffLines, filesChanged)
+
+	// Post comment explaining the decision
+	if commentErr := e.github.CreateComment(owner, repo, prNumber, reason); commentErr != nil {
+		slog.Warn("failed to post auto-merge comment", "task_id", task.ID, "pr", prNumber, "error", commentErr)
+		// Don't fail the task if comment posting fails - it's not critical
+	}
+
+	if shouldMerge {
 		if mergeErr := e.github.MergePR(owner, repo, prNumber); mergeErr != nil {
 			slog.Error("auto-merge failed", "task_id", task.ID, "pr", prNumber, "error", mergeErr)
 			_ = e.notifier.Send(notifier.LevelWarning,
@@ -457,34 +465,35 @@ func parseDiffStat(output string) (diffLines, filesChanged int) {
 }
 
 // ShouldAutoMerge determines if a PR should be auto-merged based on task attributes and diff size.
-func ShouldAutoMerge(task *models.Task, diffLines, filesChanged int) bool {
+// Returns (shouldMerge bool, reason string).
+func ShouldAutoMerge(task *models.Task, diffLines, filesChanged int) (bool, string) {
 	// Large diffs always require operator review
 	if diffLines > 2000 || filesChanged > 20 {
-		return false
+		return false, fmt.Sprintf("⏸️ **Auto-merge skipped**: Large diff (%d lines, %d files) requires operator review", diffLines, filesChanged)
 	}
 
 	// System/self source: auto-merge
 	if task.Source == models.TaskSourceSystem || task.Source == models.TaskSourceSelf {
-		return true
+		return true, fmt.Sprintf("✅ **Auto-merged**: System/self-generated task (%d lines, %d files)", diffLines, filesChanged)
 	}
 
 	// Maintenance type: auto-merge
 	if task.Type == models.TaskTypeMaintenance {
-		return true
+		return true, fmt.Sprintf("✅ **Auto-merged**: Maintenance task (%d lines, %d files)", diffLines, filesChanged)
 	}
 
 	// Bugfix with high priority (low number): auto-merge
 	if task.Type == models.TaskTypeBugfix && task.Priority <= 10 {
-		return true
+		return true, fmt.Sprintf("✅ **Auto-merged**: High-priority bugfix (P:%d, %d lines, %d files)", task.Priority, diffLines, filesChanged)
 	}
 
 	// Small changes: auto-merge
 	if filesChanged <= 3 && diffLines < 100 {
-		return true
+		return true, fmt.Sprintf("✅ **Auto-merged**: Small change (%d lines, %d files)", diffLines, filesChanged)
 	}
 
 	// Otherwise: operator review
-	return false
+	return false, fmt.Sprintf("⏸️ **Auto-merge skipped**: Requires operator review (Type: %s, Priority: %d, %d lines, %d files)", task.Type, task.Priority, diffLines, filesChanged)
 }
 
 // extractOwnerRepo parses owner and repo from a GitHub URL.
