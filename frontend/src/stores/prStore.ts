@@ -4,11 +4,15 @@ import { Task, api } from '../lib/api'
 type SortField = 'created_at' | 'updated_at'
 type SortOrder = 'asc' | 'desc'
 
+// Default statuses to show (actionable PRs)
+const DEFAULT_VISIBLE_STATUSES = ['OPEN', 'CHANGES_REQUESTED']
+
 interface PRState {
   pendingPRs: Task[]
+  allPRs: Task[] // Store all fetched PRs
   loading: boolean
   error: string | null
-  statusFilter: string
+  statusFilter: string // Empty string means "default view" (OPEN + CHANGES_REQUESTED)
   sortBy: SortField
   sortOrder: SortOrder
   setStatusFilter: (filter: string) => void
@@ -37,43 +41,68 @@ const sortPRs = (tasks: Task[], sortBy: SortField, sortOrder: SortOrder): Task[]
   })
 }
 
+const filterPRs = (tasks: Task[], statusFilter: string): Task[] => {
+  // Empty filter means "default view" - show actionable PRs only
+  if (statusFilter === '') {
+    return tasks.filter(task => DEFAULT_VISIBLE_STATUSES.includes(task.pr_status || ''))
+  }
+  // 'ALL' shows everything
+  if (statusFilter === 'ALL') {
+    return tasks
+  }
+  // Specific filter selected
+  return tasks.filter(task => task.pr_status === statusFilter)
+}
+
 export const usePRStore = create<PRState>((set, get) => ({
   pendingPRs: [],
+  allPRs: [],
   loading: false,
   error: null,
-  statusFilter: '',
+  statusFilter: '', // Empty = default view (OPEN + CHANGES_REQUESTED)
   sortBy: 'updated_at',
   sortOrder: 'desc',
 
   setStatusFilter: (filter: string) => {
-    set({ statusFilter: filter })
-    get().fetchPendingPRs()
+    const { allPRs, sortBy, sortOrder } = get()
+    const filtered = filterPRs(allPRs, filter)
+    const sorted = sortPRs(filtered, sortBy, sortOrder)
+    set({ statusFilter: filter, pendingPRs: sorted })
   },
 
   setSortBy: (field: SortField) => {
-    const { sortBy, pendingPRs, sortOrder } = get()
+    const { sortBy, allPRs, sortOrder, statusFilter } = get()
     // If clicking the same field, toggle order; otherwise set new field with desc order
     if (field === sortBy) {
       const newOrder: SortOrder = sortOrder === 'desc' ? 'asc' : 'desc'
-      set({ sortOrder: newOrder, pendingPRs: sortPRs(pendingPRs, field, newOrder) })
+      const filtered = filterPRs(allPRs, statusFilter)
+      const sorted = sortPRs(filtered, field, newOrder)
+      set({ sortOrder: newOrder, pendingPRs: sorted })
     } else {
-      set({ sortBy: field, sortOrder: 'desc', pendingPRs: sortPRs(pendingPRs, field, 'desc') })
+      const filtered = filterPRs(allPRs, statusFilter)
+      const sorted = sortPRs(filtered, field, 'desc')
+      set({ sortBy: field, sortOrder: 'desc', pendingPRs: sorted })
     }
   },
 
   toggleSortOrder: () => {
-    const { sortOrder, sortBy, pendingPRs } = get()
+    const { sortOrder, sortBy, allPRs, statusFilter } = get()
     const newOrder: SortOrder = sortOrder === 'desc' ? 'asc' : 'desc'
-    set({ sortOrder: newOrder, pendingPRs: sortPRs(pendingPRs, sortBy, newOrder) })
+    const filtered = filterPRs(allPRs, statusFilter)
+    const sorted = sortPRs(filtered, sortBy, newOrder)
+    set({ sortOrder: newOrder, pendingPRs: sorted })
   },
 
   fetchPendingPRs: async () => {
     set({ loading: true, error: null })
     try {
       const { statusFilter, sortBy, sortOrder } = get()
-      const tasks = await api.listPRs(statusFilter || undefined)
-      const sortedTasks = sortPRs(tasks, sortBy, sortOrder)
-      set({ pendingPRs: sortedTasks, loading: false })
+      // Fetch all PRs (no status filter to API)
+      const allTasks = await api.listPRs()
+      // Apply client-side filtering based on current filter
+      const filtered = filterPRs(allTasks, statusFilter)
+      const sorted = sortPRs(filtered, sortBy, sortOrder)
+      set({ allPRs: allTasks, pendingPRs: sorted, loading: false })
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Failed to fetch PRs',

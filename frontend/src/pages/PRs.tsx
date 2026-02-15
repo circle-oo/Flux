@@ -17,7 +17,8 @@ function timeAgo(iso: string): string {
 }
 
 const statusFilters = [
-  { value: '', label: 'All' },
+  { value: '', label: 'Actionable', description: 'Open & Changes Requested' },
+  { value: 'ALL', label: 'All' },
   { value: 'OPEN', label: 'Open' },
   { value: 'MERGED', label: 'Merged' },
   { value: 'CHANGES_REQUESTED', label: 'Changes Requested' },
@@ -103,8 +104,9 @@ export default function PRs() {
   }
 
   const handleStatusFilter = (value: string) => {
-    const newFilter = statusFilter === value ? '' : value
-    setStatusFilter(newFilter)
+    // If clicking the active filter, do nothing (keep it active)
+    if (statusFilter === value) return
+    setStatusFilter(value)
   }
 
   return (
