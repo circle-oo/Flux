@@ -149,7 +149,7 @@ export default function Settings() {
               </div>
             </div>
 
-            {/* Git Info */}
+            {/* Git Info - Show when local_commit is available, regardless of updater enabled status */}
             {updater?.local_commit && (
               <div className="border-t border-slate-700 pt-4">
                 <div className="flex items-center justify-between mb-3">
