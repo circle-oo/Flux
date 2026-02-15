@@ -234,6 +234,13 @@ class APIClient {
     })
   }
 
+  // System
+  async restart(): Promise<{ status: string; message: string }> {
+    return this.fetch('/api/system/restart', {
+      method: 'POST',
+    })
+  }
+
   // Logs
   async getRecentLogs(): Promise<
     { time: string; level: string; msg: string; attrs: Record<string, unknown> }[]

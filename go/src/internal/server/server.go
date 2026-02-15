@@ -111,6 +111,9 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle("GET /api/services", s.authMiddleware(http.HandlerFunc(s.handleListServices)))
 	s.mux.Handle("GET /api/alerts", s.authMiddleware(http.HandlerFunc(s.handleListAlerts)))
 
+	// System endpoints (requires auth)
+	s.mux.Handle("POST /api/system/restart", s.authMiddleware(http.HandlerFunc(s.handleRestart)))
+
 	// Internal API (localhost only, no auth)
 	s.mux.Handle("POST /internal/tasks/next", s.localhostOnly(http.HandlerFunc(s.handleInternalNextTask)))
 	s.mux.Handle("POST /internal/tasks/{id}/done", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskDone)))
