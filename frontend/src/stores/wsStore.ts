@@ -22,6 +22,7 @@ interface WSState {
   connected: boolean
   reconnecting: boolean
   socket: WebSocket | null
+  taskUpdateCounter: number
   connect: () => void
   disconnect: () => void
   send: (event: WSEvent) => void
@@ -36,6 +37,7 @@ export const useWSStore = create<WSState>((set, get) => ({
   connected: false,
   reconnecting: false,
   socket: null,
+  taskUpdateCounter: 0,
 
   connect: () => {
     const { socket, connected } = get()
@@ -144,8 +146,9 @@ function handleEvent(event: WSEvent) {
 
   switch (event.type) {
     case 'TASK_UPDATED':
-      // Refresh tasks list
+      // Refresh tasks list and notify detail views
       useTaskStore.getState().fetchTasks()
+      useWSStore.setState((s) => ({ taskUpdateCounter: s.taskUpdateCounter + 1 }))
       break
 
     case 'GOAL_CHANGED':

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
+import { useWSStore } from '../stores/wsStore'
 import { Task } from '../lib/api'
 import ContentRenderer from '../components/ContentRenderer'
 import MarkdownRenderer from '../components/MarkdownRenderer'
@@ -85,10 +86,19 @@ export default function TaskDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { getTask, cancelTask, retryTask, fetchSubtasks } = useTaskStore()
+  const taskUpdateCounter = useWSStore((s) => s.taskUpdateCounter)
   const [task, setTask] = useState<Task | null>(null)
   const [subtasks, setSubtasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const refreshTask = useCallback(() => {
+    if (!id) return
+    getTask(id).then((t) => {
+      setTask(t)
+      fetchSubtasks(t.id).then(setSubtasks)
+    }).catch(() => {})
+  }, [id, getTask, fetchSubtasks])
 
   useEffect(() => {
     if (!id) return
@@ -102,6 +112,12 @@ export default function TaskDetail() {
       .finally(() => setLoading(false))
   }, [id, getTask, fetchSubtasks])
 
+  // Refresh task when WebSocket broadcasts a task update
+  useEffect(() => {
+    if (!id || loading) return
+    refreshTask()
+  }, [taskUpdateCounter]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Auto-refresh running/pending/decomposed tasks every 5s
   useEffect(() => {
     if (!task || !id) return
@@ -109,14 +125,11 @@ export default function TaskDetail() {
     if (!activeStatuses.includes(task.status)) return
 
     const interval = setInterval(() => {
-      getTask(id).then((t) => {
-        setTask(t)
-        fetchSubtasks(t.id).then(setSubtasks)
-      }).catch(() => {})
+      refreshTask()
     }, 5000)
 
     return () => clearInterval(interval)
-  }, [task?.status, id, getTask, fetchSubtasks])
+  }, [task?.status, id, refreshTask])
 
   const handleRetry = async () => {
     if (!task || !confirm(`Retry task: ${task.title}?`)) return
@@ -196,32 +209,30 @@ export default function TaskDetail() {
         </div>
       </div>
 
+      {/* Triage Analysis */}
+      {task.triage_analysis && (
+        <div className="card p-6 border border-cyan-600/30">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-lg font-semibold text-cyan-400">Triage Analysis</h2>
+            <span className="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-2 py-0.5 rounded text-xs font-medium">
+              AI
+            </span>
+          </div>
+          <div className="text-sm text-slate-300 leading-relaxed">
+            <MarkdownRenderer content={task.triage_analysis} />
+          </div>
+        </div>
+      )}
+
       {/* Description */}
       <div className="card p-6">
-        <div className="flex items-center gap-2 mb-3">
-          <h2 className="text-lg font-semibold text-slate-200">Description</h2>
-          {task.triage_analysis && (
-            <span className="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-2 py-0.5 rounded text-xs font-medium">
-              Triaged
-            </span>
-          )}
-        </div>
+        <h2 className="text-lg font-semibold text-slate-200 mb-3">Description</h2>
         {task.description ? (
           <MarkdownRenderer content={task.description} />
         ) : (
           <p className="text-slate-400">—</p>
         )}
       </div>
-
-      {/* Triage Analysis */}
-      {task.triage_analysis && (
-        <div className="card p-6 border border-cyan-600/30 bg-cyan-950/10">
-          <h2 className="text-lg font-semibold text-cyan-400 mb-3">Triage Analysis</h2>
-          <div className="text-sm text-slate-300 leading-relaxed">
-            <MarkdownRenderer content={task.triage_analysis} />
-          </div>
-        </div>
-      )}
 
       {/* Overview */}
       <div className="card p-6">
