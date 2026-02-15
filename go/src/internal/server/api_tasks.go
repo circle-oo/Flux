@@ -220,3 +220,25 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, task)
 }
+
+// handleRetryTask handles POST /api/tasks/{id}/retry
+func (s *Server) handleRetryTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	if err := s.tasks.Retry(id); err != nil {
+		slog.Error("failed to retry task", "id", id, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	task, err := s.tasks.GetByID(id)
+	if err != nil {
+		slog.Error("failed to get task after retry", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
+
+	writeJSON(w, http.StatusOK, task)
+}

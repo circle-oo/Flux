@@ -19,6 +19,7 @@ import (
 	"github.com/circle-oo/flux/internal/manager"
 	"github.com/circle-oo/flux/internal/notifier"
 	"github.com/circle-oo/flux/internal/server"
+	"github.com/circle-oo/flux/internal/updater"
 	"github.com/circle-oo/flux/web"
 )
 
@@ -89,6 +90,13 @@ func main() {
 	}
 	srv := server.NewServer(cfg, database, discord, webFS)
 
+	// 6b. Wrap logger with broadcast handler so logs stream to the Web UI
+	logBroadcast := server.NewLogBroadcastHandler(slog.Default().Handler(), srv.Hub())
+	broadcastLogger := slog.New(logBroadcast)
+	slog.SetDefault(broadcastLogger)
+	logger = broadcastLogger
+	srv.SetLogHandler(logBroadcast)
+
 	// 7. Send Discord notification
 	discord.Send(notifier.LevelInfo, "Flux initialized. Please set a Goal.")
 
@@ -111,6 +119,18 @@ func main() {
 		exec.Run(ctx)
 	}()
 
+	// 10. Start auto-updater (polls git remote, rebuilds, and restarts via SIGTERM)
+	var autoUpdater *updater.Updater
+	if cfg.AutoUpdate.Enabled {
+		repoDir, err := os.Getwd()
+		if err != nil {
+			logger.Error("failed to get working directory for auto-updater", "error", err)
+		} else {
+			autoUpdater = updater.New(cfg.AutoUpdate, repoDir)
+			go autoUpdater.Start(ctx)
+		}
+	}
+
 	logger.Info("flux ready", "port", cfg.Server.Port)
 
 	// 10. Block on SIGTERM/SIGINT for graceful shutdown
@@ -118,6 +138,11 @@ func main() {
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-quit
 	logger.Info("shutting down", "signal", sig.String())
+
+	// Stop auto-updater
+	if autoUpdater != nil {
+		autoUpdater.Stop()
+	}
 
 	// Stop executor
 	ctxCancel()
