@@ -35,6 +35,7 @@ type ClaudeCodeOpts struct {
 	WorkDir      string
 	Model        string // "sonnet" or "opus"
 	SystemPrompt string // Goal + context injected here
+	MaxTurns     int    // 0 = unlimited (default), 1 = single response (used for triage)
 }
 
 // ParsedResponse contains parsed fields from Claude Code JSON output.
@@ -68,6 +69,10 @@ func (r *ClaudeCodeRunner) Run(ctx context.Context, opts ClaudeCodeOpts) (*Claud
 		"--dangerously-skip-permissions",
 	}
 	slog.Debug("claude code CLI args", "args", args)
+
+	if opts.MaxTurns > 0 {
+		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
+	}
 
 	if opts.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", opts.SystemPrompt)

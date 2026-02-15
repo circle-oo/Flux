@@ -25,13 +25,14 @@ func TriageTask(ctx context.Context, runner *ClaudeCodeRunner, task *models.Task
 
 	prompt := buildTriagePrompt(task)
 
-	triageCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	triageCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	result, err := runner.Run(triageCtx, ClaudeCodeOpts{
-		Prompt: prompt,
-		Model:  "haiku",
-		WorkDir: "/tmp",
+		Prompt:   prompt,
+		Model:    "haiku",
+		MaxTurns: 1,
+		WorkDir:  "/tmp",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("triage execution failed: %w", err)
