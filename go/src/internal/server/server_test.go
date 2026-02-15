@@ -62,6 +62,7 @@ func doRequest(t *testing.T, srv *Server, method, path string, body interface{})
 
 	req := httptest.NewRequest(method, path, reqBody)
 	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.1:12345" // Set localhost for internal endpoints
 	rr := httptest.NewRecorder()
 	srv.mux.ServeHTTP(rr, req)
 	return rr
@@ -1680,5 +1681,73 @@ func TestRequestBodySizeLimit(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for oversized body, got %d", rr.Code)
+	}
+}
+
+func TestPodsAPI(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Test GET /api/pods endpoint (initially empty)
+	rr := doAuthRequest(t, srv, "GET", "/api/pods", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+	pods, ok := resp["pods"].([]interface{})
+	if !ok {
+		t.Fatal("expected 'pods' array in response")
+	}
+	if len(pods) != 0 {
+		t.Errorf("expected 0 pods initially, got %d", len(pods))
+	}
+
+	// Test pod registration (internal endpoint, no auth required)
+	regReq := map[string]interface{}{
+		"id":         "executor-01",
+		"started_at": "2024-01-01T00:00:00Z",
+	}
+	rr = doRequest(t, srv, "POST", "/internal/pods/register", regReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for registration, got %d", rr.Code)
+	}
+
+	// Test pod status update (internal endpoint)
+	statusReq := map[string]interface{}{
+		"id":         "executor-01",
+		"status":     "busy",
+		"task_id":    "task-123",
+		"task_title": "Test Task",
+	}
+	rr = doRequest(t, srv, "POST", "/internal/pods/status", statusReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for status update, got %d", rr.Code)
+	}
+
+	// Test GET /api/pods again (should have one pod)
+	rr = doAuthRequest(t, srv, "GET", "/api/pods", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rr.Code)
+	}
+
+	parseResponse(t, rr, &resp)
+	pods, ok = resp["pods"].([]interface{})
+	if !ok {
+		t.Fatal("expected 'pods' array in response")
+	}
+	if len(pods) != 1 {
+		t.Fatalf("expected 1 pod, got %d", len(pods))
+	}
+
+	pod := pods[0].(map[string]interface{})
+	if pod["id"] != "executor-01" {
+		t.Errorf("expected pod ID 'executor-01', got %v", pod["id"])
+	}
+	if pod["status"] != "busy" {
+		t.Errorf("expected pod status 'busy', got %v", pod["status"])
+	}
+	if pod["current_task"] != "task-123" {
+		t.Errorf("expected current_task 'task-123', got %v", pod["current_task"])
 	}
 }

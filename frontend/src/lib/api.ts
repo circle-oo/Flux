@@ -64,6 +64,16 @@ export interface Project {
   updated_at?: string
 }
 
+export interface Pod {
+  id: string
+  status: 'idle' | 'busy'
+  current_task: string
+  task_title: string
+  started_at: string
+  last_seen: string
+  task_count: number
+}
+
 export interface UpdaterStatus {
   enabled: boolean
   running: boolean
@@ -327,6 +337,12 @@ class APIClient {
       logs: { time: string; level: string; msg: string; attrs: Record<string, unknown> }[]
     }>('/api/logs/recent')
     return data.logs || []
+  }
+
+  // Pods
+  async listPods(): Promise<Pod[]> {
+    const data = await this.fetch<{ pods: Pod[] }>('/api/pods')
+    return data.pods || []
   }
 }
 

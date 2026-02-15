@@ -30,8 +30,9 @@ type Server struct {
 	notifier   *notifier.Discord
 	updater    *updater.Updater
 	webFS      fs.FS
-	mgr      *manager.Manager
-	ghClient *github_pkg.Client
+	mgr        *manager.Manager
+	ghClient   *github_pkg.Client
+	podRegistry *PodRegistry
 
 	goals    *models.GoalStore
 	tasks    *models.TaskStore
@@ -44,17 +45,18 @@ type Server struct {
 // NOTE: mgr parameter added for Phase 2 integration. Pass nil if manager not initialized yet.
 func NewServer(cfg *config.Config, db *sql.DB, mgr *manager.Manager, discord *notifier.Discord, webFS fs.FS) *Server {
 	s := &Server{
-		config:    cfg,
-		db:        db,
-		mgr:       mgr,
-		mux:      http.NewServeMux(),
-		notifier: discord,
-		webFS:    webFS,
-		goals:    models.NewGoalStore(db),
-		tasks:     models.NewTaskStore(db),
-		projects:  models.NewProjectStore(db),
-		alerts:    models.NewAlertStore(db),
-		usage:     models.NewUsageStore(db),
+		config:      cfg,
+		db:          db,
+		mgr:         mgr,
+		mux:         http.NewServeMux(),
+		notifier:    discord,
+		webFS:       webFS,
+		podRegistry: NewPodRegistry(),
+		goals:       models.NewGoalStore(db),
+		tasks:       models.NewTaskStore(db),
+		projects:    models.NewProjectStore(db),
+		alerts:      models.NewAlertStore(db),
+		usage:       models.NewUsageStore(db),
 	}
 
 	s.auth = NewAuthManager(cfg.Server.Auth)
@@ -156,6 +158,13 @@ func (s *Server) setupRoutes() {
 	// Logs API (requires auth)
 	s.mux.Handle("GET /api/logs/recent", s.authMiddleware(http.HandlerFunc(s.handleRecentLogs)))
 
+	// Pods API (requires auth)
+	s.mux.Handle("GET /api/pods", s.authMiddleware(http.HandlerFunc(s.handleListPods)))
+
+	// Pod registration (internal, localhost only)
+	s.mux.Handle("POST /internal/pods/register", s.localhostOnly(http.HandlerFunc(s.handlePodRegister)))
+	s.mux.Handle("POST /internal/pods/status", s.localhostOnly(http.HandlerFunc(s.handlePodStatus)))
+
 	// WebSocket
 	s.mux.Handle("GET /ws/events", s.authMiddleware(http.HandlerFunc(s.handleWebSocket)))
 
@@ -245,6 +254,11 @@ func serverError(w http.ResponseWriter, msg string, args ...any) {
 // Hub returns the WebSocket hub for external wiring (e.g. log broadcasting).
 func (s *Server) Hub() *WebSocketHub {
 	return s.ws
+}
+
+// PodRegistry returns the pod registry for external access (e.g. executor registration).
+func (s *Server) PodRegistry() *PodRegistry {
+	return s.podRegistry
 }
 
 // SetLogHandler sets the log broadcast handler so the server can serve recent logs.
