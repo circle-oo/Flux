@@ -42,13 +42,15 @@ function StatCard({
 export default function Dashboard() {
   const navigate = useNavigate()
   const { currentGoal, fetchCurrentGoal } = useGoalStore()
-  const { tasks, fetchTasks } = useTaskStore()
+  const { tasks, fetchTasks, setFilters } = useTaskStore()
   const { projects, fetchProjects } = useProjectStore()
   const wsConnected = useWSStore((s) => s.connected)
   const wsReconnecting = useWSStore((s) => s.reconnecting)
   const [pods, setPods] = useState<Pod[]>([])
 
   useEffect(() => {
+    // Reset filters to ensure dashboard shows all tasks
+    setFilters({})
     fetchCurrentGoal()
     fetchTasks()
     fetchProjects()
@@ -57,7 +59,7 @@ export default function Dashboard() {
     // Poll pod status every 10 seconds
     const interval = setInterval(fetchPods, 10000)
     return () => clearInterval(interval)
-  }, [fetchCurrentGoal, fetchTasks, fetchProjects])
+  }, [fetchCurrentGoal, fetchTasks, fetchProjects, setFilters])
 
   async function fetchPods() {
     try {
