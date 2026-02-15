@@ -111,8 +111,9 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 		query = `SELECT id, title, description, type, status, priority, source,
 			project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 			result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-			diff_lines, files_changed, test_passed, retry_count, crash_recovery,
-			tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
+			diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
+			crash_recovery, tokens_used, cost_usd, created_at, updated_at, started_at,
+			completed_at
 			FROM tasks
 			WHERE status = ? AND type = ?
 			ORDER BY priority ASC,
@@ -124,8 +125,9 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 		query = `SELECT id, title, description, type, status, priority, source,
 			project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 			result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-			diff_lines, files_changed, test_passed, retry_count, crash_recovery,
-			tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
+			diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
+			crash_recovery, tokens_used, cost_usd, created_at, updated_at, started_at,
+			completed_at
 			FROM tasks
 			WHERE status = ? AND type != ?
 			ORDER BY priority ASC,
@@ -371,8 +373,9 @@ func (m *Manager) popNextPendingOnce(triagerID string) (*models.Task, error) {
 	query := `SELECT id, title, description, type, status, priority, source,
 		project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 		result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-		diff_lines, files_changed, test_passed, retry_count, crash_recovery,
-		tokens_used, cost_usd, created_at, updated_at, started_at, completed_at
+		diff_lines, files_changed, triage_analysis, plan, test_passed, retry_count,
+		crash_recovery, tokens_used, cost_usd, created_at, updated_at, started_at,
+		completed_at
 		FROM tasks
 		WHERE status = ? AND (executor_id = '' OR executor_id IS NULL)
 		ORDER BY priority ASC, created_at ASC
@@ -459,7 +462,8 @@ func scanTaskFromRow(row *sql.Row) (*models.Task, error) {
 		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
 		&dependsOnJSON, &tagsJSON, &t.Prompt,
 		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
-		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged, &t.TestPassed,
+		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged,
+		&t.TriageAnalysis, &t.Plan, &t.TestPassed,
 		&t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
 		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
 	)
