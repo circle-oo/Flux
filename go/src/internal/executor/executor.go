@@ -734,7 +734,7 @@ func SmokeTest(runner *claudecli.Runner, model string) error {
 	return fmt.Errorf("smoke test response did not contain SMOKE_TEST_OK")
 }
 
-// registerPod registers this executor with the server pod registry.
+// registerPod registers this executor with the server pod registry with exponential backoff retry.
 func (e *Executor) registerPod() error {
 	payload := map[string]interface{}{
 		"id":         e.id,
@@ -742,7 +742,63 @@ func (e *Executor) registerPod() error {
 		"pod_type":   "executor",
 	}
 
-	return e.manager.PostInternal("/internal/pods/register", payload, nil)
+	// Default retry parameters if not configured
+	maxRetries := e.config.Executor.RegistrationMaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 10 // default: 10 attempts
+	}
+
+	initialDelay := e.config.Executor.RegistrationInitialDelay
+	if initialDelay <= 0 {
+		initialDelay = 100 * time.Millisecond // default: 100ms
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err := e.manager.PostInternal("/internal/pods/register", payload, nil)
+		if err == nil {
+			if attempt > 1 {
+				slog.Info("pod registration succeeded after retries",
+					"id", e.id, "attempt", attempt, "total_attempts", maxRetries)
+			}
+			return nil
+		}
+
+		lastErr = err
+
+		// Don't retry on last attempt
+		if attempt == maxRetries {
+			break
+		}
+
+		// Calculate exponential backoff with jitter
+		delay := time.Duration(1<<uint(attempt-1)) * initialDelay
+		// Add jitter (0-25% of delay) to avoid thundering herd
+		jitter := time.Duration(float64(delay) * 0.25 * (0.5 + 0.5*float64(time.Now().UnixNano()%100)/100.0))
+		totalDelay := delay + jitter
+
+		// Cap maximum delay at 10 seconds
+		if totalDelay > 10*time.Second {
+			totalDelay = 10 * time.Second
+		}
+
+		slog.Warn("pod registration failed, retrying",
+			"id", e.id,
+			"attempt", attempt,
+			"max_attempts", maxRetries,
+			"error", err,
+			"retry_after", totalDelay)
+
+		time.Sleep(totalDelay)
+	}
+
+	// Registration failed after all retries - log but don't fail startup
+	slog.Error("pod registration failed after all retries, continuing anyway",
+		"id", e.id,
+		"attempts", maxRetries,
+		"last_error", lastErr)
+
+	return lastErr
 }
 
 // updatePodStatus updates the pod's current status in the registry.

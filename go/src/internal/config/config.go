@@ -93,11 +93,13 @@ type ModelsConfig struct {
 }
 
 type ExecutorConfig struct {
-	MaxExecutionTime time.Duration `yaml:"max_execution_time"`
-	MaxOutputSize    int64         `yaml:"max_output_size"`
-	MaxTurns         int           `yaml:"max_turns"`
-	MaxDiffLines     int           `yaml:"max_diff_lines"`
-	MaxFilesChanged  int           `yaml:"max_files_changed"`
+	MaxExecutionTime       time.Duration `yaml:"max_execution_time"`
+	MaxOutputSize          int64         `yaml:"max_output_size"`
+	MaxTurns               int           `yaml:"max_turns"`
+	MaxDiffLines           int           `yaml:"max_diff_lines"`
+	MaxFilesChanged        int           `yaml:"max_files_changed"`
+	RegistrationMaxRetries int           `yaml:"registration_max_retries"`
+	RegistrationInitialDelay time.Duration `yaml:"registration_initial_delay"`
 }
 
 type SubtaskConfig struct {
