@@ -258,3 +258,9 @@ func (c *Client) GetProject(projectID string) (*models.Project, error) {
 
 	return &project, nil
 }
+
+// PostInternal sends a generic POST request to an internal endpoint.
+// This is a general-purpose helper for internal endpoints that don't need specialized handling.
+func (c *Client) PostInternal(path string, reqBody, respBody interface{}) error {
+	return c.postJSON(path, http.StatusOK, reqBody, respBody)
+}

@@ -74,6 +74,11 @@ func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord, vw *v
 func (e *Executor) Run(ctx context.Context) {
 	slog.Info("executor started", "id", e.id)
 
+	// Register with server
+	if err := e.registerPod(); err != nil {
+		slog.Warn("failed to register pod", "id", e.id, "error", err)
+	}
+
 	// Run smoke test on startup
 	if err := e.claudeCodeSmokeTest(); err != nil {
 		slog.Error("claude code smoke test failed", "error", err)
@@ -145,6 +150,11 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		slog.Warn("failed to report task started", "task_id", task.ID, "error", err)
 	}
 
+	// Update pod status to busy
+	if err := e.updatePodStatus("busy", task.ID, task.Title); err != nil {
+		slog.Warn("failed to update pod status", "id", e.id, "error", err)
+	}
+
 	// 4. Run execution
 	result, err := e.runExecution(ctx, task, project, worktreePath, model, systemPrompt)
 	if err != nil {
@@ -161,6 +171,11 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	if err := e.processResults(task, result, worktreePath, project); err != nil {
 		slog.Error("failed to process results", "task_id", task.ID, "error", err)
 		return
+	}
+
+	// 6. Update pod status to idle after task completion
+	if err := e.updatePodStatus("idle", "", ""); err != nil {
+		slog.Warn("failed to update pod status to idle", "id", e.id, "error", err)
 	}
 }
 
@@ -716,4 +731,26 @@ func SmokeTest(runner *claudecli.Runner, model string) error {
 	}
 
 	return fmt.Errorf("smoke test response did not contain SMOKE_TEST_OK")
+}
+
+// registerPod registers this executor with the server pod registry.
+func (e *Executor) registerPod() error {
+	payload := map[string]interface{}{
+		"id":         e.id,
+		"started_at": e.executionStartTime,
+	}
+
+	return e.manager.PostInternal("/internal/pods/register", payload, nil)
+}
+
+// updatePodStatus updates the pod's current status in the registry.
+func (e *Executor) updatePodStatus(status, taskID, taskTitle string) error {
+	payload := map[string]interface{}{
+		"id":         e.id,
+		"status":     status,
+		"task_id":    taskID,
+		"task_title": taskTitle,
+	}
+
+	return e.manager.PostInternal("/internal/pods/status", payload, nil)
 }

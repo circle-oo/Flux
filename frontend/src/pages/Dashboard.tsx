@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGoalStore } from '../stores/goalStore'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useWSStore } from '../stores/wsStore'
+import { api, Pod } from '../lib/api'
 
 function StatCard({
   label,
@@ -34,12 +35,27 @@ export default function Dashboard() {
   const { projects, fetchProjects } = useProjectStore()
   const wsConnected = useWSStore((s) => s.connected)
   const wsReconnecting = useWSStore((s) => s.reconnecting)
+  const [pods, setPods] = useState<Pod[]>([])
 
   useEffect(() => {
     fetchCurrentGoal()
     fetchTasks()
     fetchProjects()
+    fetchPods()
+
+    // Poll pod status every 10 seconds
+    const interval = setInterval(fetchPods, 10000)
+    return () => clearInterval(interval)
   }, [fetchCurrentGoal, fetchTasks, fetchProjects])
+
+  async function fetchPods() {
+    try {
+      const data = await api.listPods()
+      setPods(data)
+    } catch (error) {
+      console.error('Failed to fetch pods:', error)
+    }
+  }
 
   const tasksByStatus = {
     PENDING: tasks.filter((t) => t.status === 'PENDING').length,
@@ -158,6 +174,66 @@ export default function Dashboard() {
           onClick={() => navigate('/prs')}
         />
       </div>
+
+      {/* Pods Section */}
+      <section className="card p-6">
+        <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">
+          Executor Pods
+        </h2>
+        {pods.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {pods.map((pod) => (
+              <div
+                key={pod.id}
+                className={`p-4 rounded-lg border transition-colors ${
+                  pod.status === 'busy'
+                    ? 'bg-amber-900/20 border-amber-700/50'
+                    : 'bg-slate-700/30 border-slate-600/50'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-slate-200">{pod.id}</h3>
+                  <span
+                    className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      pod.status === 'busy'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-slate-600 text-slate-300'
+                    }`}
+                  >
+                    {pod.status}
+                  </span>
+                </div>
+
+                {pod.current_task && pod.task_title ? (
+                  <div className="mb-2">
+                    <p className="text-xs text-slate-400 mb-0.5">Current Task:</p>
+                    <p className="text-xs text-slate-200 truncate" title={pod.task_title}>
+                      {pod.task_title}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 italic mb-2">No active task</p>
+                )}
+
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span>Tasks: {pod.task_count}</span>
+                  <span title={`Started: ${new Date(pod.started_at).toLocaleString()}`}>
+                    Uptime:{' '}
+                    {Math.floor(
+                      (Date.now() - new Date(pod.started_at).getTime()) / 1000 / 60
+                    )}
+                    m
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-slate-500 italic text-sm py-4 text-center">
+            No pods active
+          </p>
+        )}
+      </section>
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
