@@ -25,7 +25,7 @@ func TriageTask(ctx context.Context, runner *ClaudeCodeRunner, task *models.Task
 
 	prompt := buildTriagePrompt(task)
 
-	triageCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	triageCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	result, err := runner.Run(triageCtx, ClaudeCodeOpts{
