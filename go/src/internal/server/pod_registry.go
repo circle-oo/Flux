@@ -8,7 +8,8 @@ import (
 // PodInfo represents the runtime status of an executor pod.
 type PodInfo struct {
 	ID          string    `json:"id"`
-	Status      string    `json:"status"` // "idle" or "busy"
+	PodType     string    `json:"pod_type"` // "executor" or "researcher"
+	Status      string    `json:"status"`   // "idle" or "busy"
 	CurrentTask string    `json:"current_task"`
 	TaskTitle   string    `json:"task_title"`
 	StartedAt   time.Time `json:"started_at"`
@@ -30,13 +31,18 @@ func NewPodRegistry() *PodRegistry {
 }
 
 // Register adds or updates a pod's registration.
-func (pr *PodRegistry) Register(id string, startedAt time.Time) {
+func (pr *PodRegistry) Register(id string, startedAt time.Time, podType string) {
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
+
+	if podType == "" {
+		podType = "executor"
+	}
 
 	if _, exists := pr.pods[id]; !exists {
 		pr.pods[id] = &PodInfo{
 			ID:        id,
+			PodType:   podType,
 			Status:    "idle",
 			StartedAt: startedAt,
 			LastSeen:  time.Now(),
@@ -44,6 +50,7 @@ func (pr *PodRegistry) Register(id string, startedAt time.Time) {
 		}
 	} else {
 		pr.pods[id].LastSeen = time.Now()
+		pr.pods[id].PodType = podType
 	}
 }
 

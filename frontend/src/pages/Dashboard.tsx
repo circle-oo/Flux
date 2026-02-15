@@ -6,6 +6,17 @@ import { useProjectStore } from '../stores/projectStore'
 import { useWSStore } from '../stores/wsStore'
 import { api, Pod } from '../lib/api'
 
+function formatUptime(ms: number): string {
+  const totalMinutes = Math.floor(ms / 1000 / 60)
+  if (totalMinutes < 60) return `${totalMinutes}m`
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours < 24) return `${hours}h ${minutes}m`
+  const days = Math.floor(hours / 24)
+  const remainingHours = hours % 24
+  return `${days}d ${remainingHours}h`
+}
+
 function StatCard({
   label,
   value,
@@ -178,7 +189,7 @@ export default function Dashboard() {
       {/* Pods Section */}
       <section className="card p-4 sm:p-6">
         <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">
-          Executor Pods
+          Pods
         </h2>
         {pods.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -192,7 +203,16 @@ export default function Dashboard() {
                 }`}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-slate-200">{pod.id}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-slate-200">{pod.id}</h3>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                      pod.pod_type === 'researcher'
+                        ? 'bg-purple-600/30 text-purple-300 border border-purple-600/50'
+                        : 'bg-blue-600/30 text-blue-300 border border-blue-600/50'
+                    }`}>
+                      {pod.pod_type || 'executor'}
+                    </span>
+                  </div>
                   <span
                     className={`px-2 py-0.5 rounded text-xs font-medium ${
                       pod.status === 'busy'
@@ -219,10 +239,7 @@ export default function Dashboard() {
                   <span>Tasks: {pod.task_count}</span>
                   <span title={`Started: ${new Date(pod.started_at).toLocaleString()}`}>
                     Uptime:{' '}
-                    {Math.floor(
-                      (Date.now() - new Date(pod.started_at).getTime()) / 1000 / 60
-                    )}
-                    m
+                    {formatUptime(Date.now() - new Date(pod.started_at).getTime())}
                   </span>
                 </div>
               </div>
