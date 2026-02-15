@@ -227,3 +227,40 @@ func TestStartStop(t *testing.T) {
 		t.Fatal("Start did not return after Stop within 5 seconds")
 	}
 }
+
+func TestFetchRemoteCommit_DisabledAutoUpdater(t *testing.T) {
+	work := initTestRepo(t)
+
+	// Create updater with auto-update disabled
+	cfg := config.AutoUpdateConfig{
+		Enabled: false,
+		Branch:  "main",
+	}
+	u := New(cfg, work)
+
+	ctx := context.Background()
+
+	// FetchRemoteCommit should work even when auto-updater is disabled
+	err := u.FetchRemoteCommit(ctx)
+	if err != nil {
+		t.Fatalf("FetchRemoteCommit with disabled auto-updater: %v", err)
+	}
+
+	// Verify status reflects disabled state but has commit info
+	status := u.Status()
+	if status.Enabled {
+		t.Error("expected Enabled=false, got true")
+	}
+	if status.Running {
+		t.Error("expected Running=false, got true")
+	}
+	if status.LocalCommit == "" {
+		t.Error("expected LocalCommit to be populated")
+	}
+	if status.RemoteCommit == "" {
+		t.Error("expected RemoteCommit to be populated")
+	}
+	if status.LastCheckAt == nil {
+		t.Error("expected LastCheckAt to be set")
+	}
+}
