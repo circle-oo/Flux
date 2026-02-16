@@ -1,17 +1,7 @@
 import { useState } from 'react'
-import { Task, Project, Goal } from '../lib/api'
+import { Project, Goal } from '../lib/api'
 
 const MAX_DESCRIPTION_LENGTH = 51200 // Must match backend maxDescriptionLength
-
-const typeDescriptions: Record<string, string> = {
-  CODING: 'Implementation, features, refactoring',
-  BUGFIX: 'Fix a bug or regression',
-  RESEARCH: 'Investigation, analysis, no code changes',
-  DOCUMENT: 'Documentation, README, comments',
-  MAINTENANCE: 'Deps, cleanup, CI/CD, infra',
-  DEPLOY: 'Deployment, release, rollback',
-  PLANNING: 'Architecture, design, strategy',
-}
 
 const priorityPresets = [
   { value: 10, label: 'Critical', color: 'text-red-400' },
@@ -27,7 +17,6 @@ interface TaskCreateFormProps {
   onSubmit: (task: {
     title: string
     description: string
-    type: Task['type']
     priority: number
     project_id: string
     goal_id?: string
@@ -40,7 +29,6 @@ export default function TaskCreateForm({ projects, currentGoal, onSubmit, onCanc
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    type: 'CODING' as Task['type'],
     priority: 40,
     project_id: '',
     goal_id: '',
@@ -65,7 +53,6 @@ export default function TaskCreateForm({ projects, currentGoal, onSubmit, onCanc
       await onSubmit({
         title: formData.title,
         description: formData.description,
-        type: formData.type,
         priority: formData.priority,
         project_id: formData.project_id,
         goal_id: formData.goal_id || undefined,
@@ -77,7 +64,6 @@ export default function TaskCreateForm({ projects, currentGoal, onSubmit, onCanc
       setFormData({
         title: '',
         description: '',
-        type: 'CODING',
         priority: 40,
         project_id: '',
         goal_id: '',
@@ -132,44 +118,27 @@ export default function TaskCreateForm({ projects, currentGoal, onSubmit, onCanc
           </div>
         </div>
 
-        {/* Type + Priority row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="label">Type</label>
-            <select
-              value={formData.type}
-              onChange={(e) => setFormData({ ...formData, type: e.target.value as Task['type'] })}
-              className="input"
-            >
-              {Object.entries(typeDescriptions).map(([value, desc]) => (
-                <option key={value} value={value}>
-                  {value.charAt(0) + value.slice(1).toLowerCase()} — {desc}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="label">
-              Priority
-              <span className="text-slate-500 font-normal ml-1">({formData.priority})</span>
-            </label>
-            <div className="flex flex-wrap sm:flex-nowrap gap-2">
-              {priorityPresets.map((preset) => (
-                <button
-                  key={preset.value}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, priority: preset.value })}
-                  className={`flex-1 px-2 py-2.5 rounded-lg text-xs sm:text-sm font-medium border transition-colors touch-manipulation min-w-[80px] ${
-                    formData.priority === preset.value
-                      ? 'bg-slate-600 border-blue-500 text-white'
-                      : 'bg-slate-700 border-slate-600 text-slate-400 hover:border-slate-500'
-                  }`}
-                >
-                  <span className={preset.color}>{preset.label}</span>
-                </button>
-              ))}
-            </div>
+        {/* Priority */}
+        <div>
+          <label className="label">
+            Priority
+            <span className="text-slate-500 font-normal ml-1">({formData.priority})</span>
+          </label>
+          <div className="flex flex-wrap sm:flex-nowrap gap-2">
+            {priorityPresets.map((preset) => (
+              <button
+                key={preset.value}
+                type="button"
+                onClick={() => setFormData({ ...formData, priority: preset.value })}
+                className={`flex-1 px-2 py-2.5 rounded-lg text-xs sm:text-sm font-medium border transition-colors touch-manipulation min-w-[80px] ${
+                  formData.priority === preset.value
+                    ? 'bg-slate-600 border-blue-500 text-white'
+                    : 'bg-slate-700 border-slate-600 text-slate-400 hover:border-slate-500'
+                }`}
+              >
+                <span className={preset.color}>{preset.label}</span>
+              </button>
+            ))}
           </div>
         </div>
 

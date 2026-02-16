@@ -16,7 +16,6 @@ interface TaskState {
   createTask: (task: {
     title: string
     description: string
-    type: Task['type']
     priority: number
     project_id: string
     goal_id?: string
