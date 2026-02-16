@@ -70,7 +70,9 @@ func (s *Server) legacyRestart() {
 	gitCmd.Dir = projectRoot
 	if output, err := gitCmd.CombinedOutput(); err != nil {
 		slog.Error("git pull failed", "error", err, "output", string(output))
-		s.notifier.Send("error", "Restart failed: git pull error")
+		if s.notifier != nil {
+			s.notifier.Send("error", "Restart failed: git pull error")
+		}
 		// Continue anyway - the update might not be necessary
 	} else {
 		slog.Info("git pull completed", "output", string(output))
@@ -82,13 +84,17 @@ func (s *Server) legacyRestart() {
 	buildCmd.Dir = projectRoot
 	if output, err := buildCmd.CombinedOutput(); err != nil {
 		slog.Error("build failed", "error", err, "output", string(output))
-		s.notifier.Send("error", "Restart failed: build error")
+		if s.notifier != nil {
+			s.notifier.Send("error", "Restart failed: build error")
+		}
 		return
 	}
 	slog.Info("build completed successfully")
 
 	// Send notification
-	s.notifier.Send("info", "Flux updated successfully, restarting...")
+	if s.notifier != nil {
+		s.notifier.Send("info", "Flux updated successfully, restarting...")
+	}
 
 	// Restart the process
 	slog.Info("restarting process", "pid", os.Getpid())
