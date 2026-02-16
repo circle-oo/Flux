@@ -205,7 +205,7 @@ export default function Dashboard() {
         </h2>
         {pods.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {pods.map((pod) => (
+            {[...pods].sort((a, b) => a.id.localeCompare(b.id)).map((pod) => (
               <div
                 key={pod.id}
                 className={`p-4 rounded-lg border transition-colors ${
