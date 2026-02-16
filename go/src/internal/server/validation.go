@@ -2,12 +2,13 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
 const (
 	maxTitleLength       = 500
-	maxDescriptionLength = 10240 // 10KB
+	maxDescriptionLength = 51200 // 50KB — task descriptions can be lengthy
 	maxPromptLength      = 10240 // 10KB
 )
 
@@ -30,12 +31,12 @@ func ValidateTaskInput(title, description string) error {
 		return errors.New("title is required")
 	}
 	if len(title) > maxTitleLength {
-		return errors.New("title exceeds maximum length of 500 characters")
+		return fmt.Errorf("title exceeds maximum length of %d characters", maxTitleLength)
 	}
 
 	// Description validation
 	if len(description) > maxDescriptionLength {
-		return errors.New("description exceeds maximum length of 10KB")
+		return fmt.Errorf("description exceeds maximum length of %d characters (%d provided)", maxDescriptionLength, len(description))
 	}
 
 	return nil
