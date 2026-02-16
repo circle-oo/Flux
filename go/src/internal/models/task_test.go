@@ -298,6 +298,77 @@ func TestTaskStore_CancelChildren(t *testing.T) {
 	}
 }
 
+func TestTaskStore_ArchiveChildren(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create subtasks in various states
+	store.Create(&Task{Title: "Child Pending", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Status: TaskPending})
+	store.Create(&Task{Title: "Child Ready", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Status: TaskReady})
+	store.Create(&Task{Title: "Child Running", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Status: TaskRunning})
+	store.Create(&Task{Title: "Child Completed", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Status: TaskCompleted})
+	store.Create(&Task{Title: "Child Failed", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Status: TaskFailed})
+	store.Create(&Task{Title: "Child Cancelled", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Status: TaskCancelled})
+
+	archived, err := store.ArchiveChildren(parent.ID)
+	if err != nil {
+		t.Fatalf("ArchiveChildren: %v", err)
+	}
+	// All 6 subtasks should be archived
+	if archived != 6 {
+		t.Errorf("expected 6 archived, got %d", archived)
+	}
+
+	// Verify all subtasks are now archived
+	subtasks, _ := store.ListByParent(parent.ID)
+	for _, sub := range subtasks {
+		if sub.Status != TaskArchived {
+			t.Errorf("expected ARCHIVED for %s, got %s", sub.Title, sub.Status)
+		}
+	}
+}
+
+func TestTaskStore_ArchiveChildren_AlreadyArchived(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create a subtask that's already archived
+	store.Create(&Task{Title: "Child Archived", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Status: TaskArchived})
+	store.Create(&Task{Title: "Child Ready", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Status: TaskReady})
+
+	archived, err := store.ArchiveChildren(parent.ID)
+	if err != nil {
+		t.Fatalf("ArchiveChildren: %v", err)
+	}
+	// Only the READY child should be archived (the ARCHIVED one is skipped)
+	if archived != 1 {
+		t.Errorf("expected 1 archived, got %d", archived)
+	}
+}
+
+func TestTaskStore_ArchiveChildren_NoChildren(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// No children, should return 0
+	archived, err := store.ArchiveChildren(parent.ID)
+	if err != nil {
+		t.Fatalf("ArchiveChildren: %v", err)
+	}
+	if archived != 0 {
+		t.Errorf("expected 0 archived, got %d", archived)
+	}
+}
+
 func TestTaskStore_DecomposedStatus(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	store := NewTaskStore(db)
