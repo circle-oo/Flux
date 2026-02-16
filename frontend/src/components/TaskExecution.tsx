@@ -9,7 +9,7 @@ export default function TaskExecution({ task }: TaskExecutionProps) {
   return (
     <>
       <div className="card p-5">
-        <h2 className="text-sm font-semibold text-white/80 mb-3">Execution</h2>
+        <h2 className="text-sm font-semibold text-content mb-3">Execution</h2>
         <InfoRow label="Executor"><span className="font-mono text-xs">{task.executor_id || '--'}</span></InfoRow>
         <InfoRow label="Model">{task.model || '--'}</InfoRow>
         <InfoRow label="Branch"><span className="font-mono text-xs">{task.branch_name || '--'}</span></InfoRow>
@@ -22,12 +22,12 @@ export default function TaskExecution({ task }: TaskExecutionProps) {
       </div>
       {(task.pr_url || task.pr_status) && (
         <div className="card p-5">
-          <h2 className="text-sm font-semibold text-white/80 mb-3">Pull Request</h2>
-          <InfoRow label="Status"><span className={prStatusTextColor[task.pr_status || ''] || 'text-white/40'}>{task.pr_status || '--'}</span></InfoRow>
-          <InfoRow label="URL">{task.pr_url ? <a href={task.pr_url} target="_blank" rel="noopener noreferrer" className="text-accent-400 hover:text-accent-300 break-all transition-colors text-xs">{task.pr_url}</a> : '--'}</InfoRow>
+          <h2 className="text-sm font-semibold text-content mb-3">Pull Request</h2>
+          <InfoRow label="Status"><span className={prStatusTextColor[task.pr_status || ''] || 'text-content-muted'}>{task.pr_status || '--'}</span></InfoRow>
+          <InfoRow label="URL">{task.pr_url ? <a href={task.pr_url} target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:text-primary-300 break-all transition-colors text-xs">{task.pr_url}</a> : '--'}</InfoRow>
         </div>
       )}
-      {task.plan && <div className="card p-5"><h2 className="text-sm font-semibold text-white/80 mb-3">Plan</h2><ContentRenderer content={task.plan} /></div>}
+      {task.plan && <div className="card p-5"><h2 className="text-sm font-semibold text-content mb-3">Plan</h2><ContentRenderer content={task.plan} /></div>}
     </>
   )
 }

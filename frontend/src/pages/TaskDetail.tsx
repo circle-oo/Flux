@@ -102,8 +102,8 @@ export default function TaskDetail() {
   if (error || !task) {
     return (
       <div className="p-5 sm:p-6 lg:p-8 animate-fade-in">
-        <div className="text-rose-400 text-sm" role="alert">Error: {error || 'Task not found'}</div>
-        <button onClick={() => navigate('/tasks')} className="mt-4 text-accent-400 hover:text-accent-300 text-sm transition-colors">
+        <div className="text-rose-600 text-sm" role="alert">Error: {error || 'Task not found'}</div>
+        <button onClick={() => navigate('/tasks')} className="mt-4 text-primary-400 hover:text-primary-300 text-sm transition-colors">
           Back to Tasks
         </button>
       </div>
@@ -124,12 +124,12 @@ export default function TaskDetail() {
 
       {/* Triage Analysis */}
       {task.triage_analysis && (
-        <div className="card p-5 ring-1 ring-cyan-500/20 animate-slide-up">
+        <div className="card p-5 ring-1 ring-cyan-200/60 animate-slide-up">
           <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-sm font-semibold text-cyan-400">Triage Analysis</h2>
+            <h2 className="text-sm font-semibold text-cyan-600">Triage Analysis</h2>
             <span className="badge-info">AI</span>
           </div>
-          <div className="text-sm text-white/60 leading-relaxed">
+          <div className="text-sm text-content-secondary leading-relaxed">
             <MarkdownRenderer content={task.triage_analysis} />
           </div>
         </div>
@@ -144,15 +144,15 @@ export default function TaskDetail() {
       />
 
       {/* Tab Navigation */}
-      <div className="flex gap-0.5 border-b border-white/[0.06]">
+      <div className="flex gap-0.5 border-b border-line">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`px-4 py-2.5 text-xs font-medium tracking-wide uppercase transition-all border-b-2 -mb-px ${
               activeTab === tab.id
-                ? 'text-accent-400 border-accent-400'
-                : 'text-white/30 border-transparent hover:text-white/60 hover:border-white/[0.1]'
+                ? 'text-primary-400 border-primary-400'
+                : 'text-content-faint border-transparent hover:text-content-secondary hover:border-line-hover'
             }`}
           >
             {tab.label}

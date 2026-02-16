@@ -2,396 +2,337 @@
 
 ## Goal
 
-Flux becomes a fully autonomous system that researches technologies, accumulates knowledge in Obsidian, proposes new projects, and improves its own code. The Operator only sets strategic direction (Goals), approves new projects, and reviews complex PRs.
+Flux becomes a fully autonomous system: researcher agents (via Python Agent SDK) explore technologies, accumulate knowledge in Obsidian (via obsidian-cli), propose new projects, and improve Flux's own code. The Operator only sets strategic direction (Goals), approves new projects, and reviews complex PRs.
 
 ## Deliverable
 
-Researcher Pods running autonomous research, systematic Obsidian knowledge base, project proposals with Operator approval, Flux self-improvement with safety mechanisms.
+Researcher agents running autonomous research via Agent SDK, systematic Obsidian knowledge base accessible to all agents, project proposals with Operator approval, Flux self-improvement with safety mechanisms, Research UI.
 
 ## Prerequisites
 
-- Phase 3 complete (autonomous Pod scaling, usage tracking, daily summaries)
-- Obsidian Vault structure established (Phase 1)
-- Vault Writer working (Phase 2B)
+- Phase 3 complete (autonomous scaling, insights analytics, usage tracking, Knowledge API + UI)
+- Obsidian CLI working and accessible to agents (Phase 2C)
+- Python Agent SDK running with dev/qa/devops/rnd agent types (Phase 2C)
+- Obsidian Go CLI Client + VaultFacade (Phase 3 Knowledge backend)
 
 ---
 
-## Revision Notes (from Phase 3/4 Plan Refinement)
+## Architecture Context (Post-Phase 2C)
 
-This plan was refined after auditing the Phase 2B codebase and the revised Phase 3 plan. Key changes:
-
-1. **Task 4.1 (Researcher Pod)**: Restructured. The original plan assumed a `researcher/` package parallel to `executor/`. After reviewing the executor implementation (`executor/executor.go:38-71`), the Researcher should share the same Pod lifecycle patterns (Run loop, Stop channel, PodRegistry integration). The revised plan reuses executor infrastructure where possible instead of building parallel systems. Workspace paths corrected: actual workspace base is `./workspaces/` (`config.Orchestrator.WorkspaceBase`), not hardcoded.
-
-2. **Task 4.2 (Autonomous Research)**: Simplified. The original weighted-priority system is over-engineered for an initial implementation. Revised to use a simple ordered-priority list. Claude Code itself can make intelligent research decisions given good context — we don't need complex Go-side logic.
-
-3. **Task 4.3 (Vault Writer Upgrade)**: Reduced scope. The existing `vault/writer.go:28-83` and `vault/templates.go` handle async writes and task completion templates. The upgrade adds research and proposal templates only — not a full rewrite. Decision records and learning records deferred to post-Phase 4 (premature without usage data).
-
-4. **Task 4.4 (Project Proposals)**: The project approval flow already exists in `server/api_projects.go`. Revised to clarify this task adds the Researcher-to-PROPOSED-project pipeline, not the approval UI (already built).
-
-5. **Task 4.5 (Deployment Automation)**: The auto-updater (`internal/updater/`) already handles build and restart via `launchctl kickstart`. Revised to narrow scope: add `make deploy` target and enhance the existing updater, not build a parallel deploy system. The `deploy/` directory already has a launchd plist.
-
-6. **Task 4.6 (Self-Improvement)**: Safety protocol enhanced with additional checks. File paths for excluded files updated to match actual codebase structure (Go packages are under `go/src/internal/`, not `internal/`). Added `gosec` installation as a prerequisite step.
-
-7. **Task 4.7 (Research UI)**: File paths corrected from `web/src/` to `frontend/src/`. API design simplified — research data is already in the tasks table (type=RESEARCH), so a separate research API is unnecessary. Reuse task filtering.
-
-8. **New Task 4.0 added**: ScaleManager Executor:Researcher Ratio — Phase 3 deferred Researcher ratio to Phase 4. This task upgrades the ScaleManager to manage both Executor and Researcher pods.
-
-9. **Task ordering revised**: The original plan had loose dependencies. Revised with explicit dependency chain and a clear critical path.
-
-10. **New Task 4.8 added**: Obsidian CLI Integration for Pods — From Obsidian integration plan Phase 3d. Executor and Researcher pods use Obsidian CLI for reading project context and recording learnings. This task adds prompt templates and integration patterns for pods to use the Obsidian CLI effectively.
-
-11. **Insight features**: The comprehensive analytics and observability features from `docs/insight-plan.md` are implemented as Phase 3 features (Task 3.17-3.21) and do not require Phase 4 changes. They provide operational intelligence through the existing task/usage data and are independent of the research and autonomy features in Phase 4.
+```
+Operator → Frontend (Connect-RPC) → Go Backend → gRPC → Python Agent Manager
+                                                           ├── dev agent   (coding)
+                                                           ├── qa agent    (testing)
+                                                           ├── devops agent(deploy)
+                                                           └── rnd agent   (research) ← Phase 4 focus
+                                                                 │
+                                                                 ├── Bash("obsidian-cli search ...")
+                                                                 ├── Bash("obsidian-cli read ...")
+                                                                 └── Bash("obsidian-cli write ...")
+```
 
 ---
 
 ## Task Breakdown
 
-### Task 4.0: ScaleManager Executor:Researcher Ratio
+### Task 4.1: Researcher Agent Enhancement — Specialized Research Types
 
-**Description**: Upgrade the Phase 3 ScaleManager (Executor-only) to manage both Executor and Researcher Pods with dynamic ratio based on workload.
+**Description**: Enhance the `rnd` agent type in the Python Agent Manager with specialized research type configurations, structured output formats, and deep Obsidian knowledge integration.
 
-**Files to modify**:
+**Files to create/modify**:
 ```
-internal/orchestrator/scale_manager.go
+agent_manager/research_types.py         (new)
+agent_manager/config.py                 (modify)
 ```
 
 **Implementation details**:
-- Phase 3 ScaleManager only scales Executor count (0 to maxPods)
-- Add Researcher Pod management:
-  - Track researchers []*researcher.Researcher alongside executors
-  - Ratio determination (from spec Section 15.2):
-    - Urgent tasks (P1-5) → 9:1 Executor:Researcher
-    - Operator tasks → 8:2
-    - System tasks (moderate queue) → 7:3
-    - Queue nearly empty → 3:7
-    - Queue empty → 0:10 (pure research)
-    - Service incident → 10:0
-  - R&D protection: minimum `config.Orchestrator.MinResearchRatio` (0.2) except during incidents
-- Pod lifecycle for Researchers mirrors Executors: goroutine + Stop() + PodRegistry
-- Cooldown (15 min) applies to ratio changes, not just count changes
+
+**research_types.py** — Research type definitions:
+- Research types: `github-scan`, `dependency-check`, `industry-research`, `project-ideas`, `opensource-scan`, `self-improve`, `library-audit`, `service-review`, `goal-research`
+- Each type has:
+  - Description
+  - Prompt template (injected into agent system prompt)
+  - Output format instructions (structured markdown)
+  - Vault destination path (e.g., `Research/Industry/`, `Research/Tools/`)
+- Structured output instruction appended to rnd system prompt:
+  ```
+  After completing research, write findings to Obsidian using:
+  $ obsidian-cli write "Research/{category}/{topic}.md" --content "..." --vault {vault_path}
+  $ obsidian-cli daily:append content="- 🔬 Research: {topic}" --vault {vault_path}
+
+  Use this format for findings:
+  # {Topic}
+  **Date**: {date}
+  **Type**: {research_type}
+  ## Summary
+  {key findings}
+  ## Details
+  {detailed analysis}
+  ## Recommendations
+  {actionable items}
+  ## Sources
+  {references}
+  ```
+
+**Enhanced rnd config in config.py**:
+- System prompt includes: research methodology, obsidian-cli usage patterns, structured output format
+- max_turns=200 (research requires more exploration)
+- allowed_tools includes WebSearch if MCP available
+- Research type is passed via `metadata["research_type"]` in ExecuteTaskRequest
 
 **Acceptance criteria**:
-- [ ] Executor:Researcher ratio follows spec
-- [ ] R&D protection (min 20%) enforced
-- [ ] Researchers start/stop cleanly (no leaked goroutines)
-- [ ] PodRegistry shows Researcher pods
-- [ ] Unit tests for ratio logic
+- [ ] All 9 research types defined with templates
+- [ ] rnd agents produce structured Obsidian-compatible output
+- [ ] Research findings written to correct Vault paths via obsidian-cli
+- [ ] Research type selection works based on task metadata
+- [ ] System prompt properly assembled from type template + base config
 
 **Complexity**: Medium
-
-**Depends on**: Phase 3 Task 3.2, Task 4.1
-
----
-
-### Task 4.1: Researcher Pod + Workspace
-
-**Description**: Implement the Researcher Pod with independent per-Pod workspaces for parallel research without conflicts.
-
-**Files to create**:
-```
-internal/researcher/researcher.go
-internal/researcher/types.go
-internal/researcher/workspace.go
-```
-
-**Implementation details**:
-
-**researcher.go**:
-- `Researcher` struct mirrors Executor patterns (`executor/executor.go:38-71`):
-  - id (e.g., "researcher-01"), config, claude (ClaudeCodeRunner), workspace, manager, vault, notifier, stopCh
-- `Run(ctx)`: main loop
-  1. Register with PodRegistry (same pattern as `executor/executor.go:76-81`)
-  2. Request research task from Manager (`pod_type="researcher"`)
-  3. If no task: autonomous research decision (Task 4.2)
-  4. Execute Claude Code in per-Pod workspace
-  5. Write findings to Vault
-  6. Report completion to Manager
-  7. Sleep 5s, loop
-- `Stop()`: close stopCh, deregister from PodRegistry
-- Reuses existing `claudecli` package for Claude Code execution
-- Reuses existing `apiclient` package for Manager API calls
-
-**types.go**:
-- Research type constants: `github-scan`, `dependency-check`, `industry-research`, `project-ideas`, `opensource-scan`, `library-audit`, `service-review`, `goal-research`
-- Each type has: description, prompt template, Vault destination path
-- Map research types to Vault paths:
-  - `github-scan`, `opensource-scan` → `Research/Tools/`
-  - `industry-research` → `Research/Industry/`
-  - `project-ideas` → `Research/Ideas/`
-  - `dependency-check`, `library-audit` → `Research/Tools/`
-  - `goal-research` → `Research/Goals/`
-
-**workspace.go**:
-- Per-Pod workspace at `{config.Orchestrator.WorkspaceBase}/research/{pod-id}/`
-  ```
-  workspaces/research/researcher-01/
-  ├── workspace/     # CLAUDE.md, .claude/settings.json
-  └── output/        # Temporary → moved to Obsidian
-  ```
-- `SetupWorkspace(podID string) (string, error)`: create directories, write CLAUDE.md with research context, write `.claude/settings.json` with allowed tools
-- Workspace is created once at Pod startup, reused across research sessions
-- Cleanup: remove workspace when Pod stops permanently (not between tasks)
-- CLAUDE.md template includes Obsidian CLI usage patterns (see Task 4.8 for details)
-
-**Acceptance criteria**:
-- [ ] Researcher Pod runs independently with own workspace
-- [ ] Per-Pod workspace isolation (no conflicts between Researchers)
-- [ ] Research tasks fetched from Manager (type=RESEARCH filter)
-- [ ] Claude Code execution in workspace
-- [ ] Findings written to Vault via existing VaultWriter
-- [ ] Stop signal honored cleanly
-- [ ] PodRegistry integration working
-- [ ] Unit tests for workspace setup and research type routing
-
-**Complexity**: High
 
 ---
 
 ### Task 4.2: Autonomous Research Scheduling
 
-**Description**: When no research tasks are in the queue, Researchers autonomously decide what to research based on current system state.
+**Description**: When no research tasks are in the queue, the Go Orchestrator creates self-assigned research tasks and dispatches them to the Python Agent Manager.
 
-**Files to modify**:
+**Files to create**:
 ```
-internal/researcher/researcher.go
+go/src/internal/orchestrator/research_scheduler.go
 ```
 
 **Implementation details**:
-- When `manager.NextTask(podID, "researcher")` returns nil:
-  1. Query active Goal from Manager
-  2. Select research type based on simple priority:
-     - If active Goal exists → `goal-research` (research aligned with Goal)
-     - If active projects have outdated dependencies → `dependency-check`
-     - Otherwise → rotate through: `industry-research`, `opensource-scan`, `project-ideas`
-  3. Create self-assigned task: type=RESEARCH, source=SELF, priority=70 (low, won't compete with real work)
-  4. Build research prompt including Goal context and research history hint
-- Research history: append one-line summary to `Research/_history.md` in Vault after each research session
-- Avoid duplicates: use Obsidian CLI to search existing research (`obsidian search query="{topic}"`) before starting new research. Fallback to checking `_history.md` if CLI unavailable (simple string match on topic)
-- **Design principle**: Keep Go-side logic simple. Let Claude Code make the intelligent decisions about *what* to research within the selected type. The Go code just picks the category and provides context.
+- `ResearchScheduler` struct: config, manager, db, notifier
+- `ScheduleIfIdle()`: Called by Orchestrator when rnd agents have no tasks
+- Decision logic when rnd queue empty:
+  1. Check current Goal → research topics aligned with Goal (`goal-research`)
+  2. Check active projects → `dependency-check`, `library-audit`
+  3. Check recent research tasks in DB (avoid duplicates in last 7 days)
+  4. Select research type based on simple priority order:
+     - Goal-aligned research (highest, when Goal active)
+     - Dependency checks for active projects
+     - Industry trends
+     - Tool evaluations
+     - Project ideas (lowest)
+- Create self-assigned task:
+  - source=SYSTEM, type=RESEARCH, priority=70
+  - metadata: `agent_type=rnd`, `research_type={selected_type}`
+  - Prompt includes Goal context and type-specific instructions
+- Minimum 30-min gap between autonomous research sessions
+- Log research scheduling decisions in DB
+- **Design principle**: Keep Go-side logic simple. Let the Python Agent (via Claude) make intelligent decisions about *what* to research within the selected category.
 
 **Acceptance criteria**:
-- [ ] Autonomous research triggered when no tasks available
+- [ ] Autonomous research triggered when rnd queue empty
 - [ ] Research type selected based on system state
 - [ ] Goal alignment considered when Goal is active
-- [ ] Research history logged in Vault
-- [ ] Self-created tasks have correct priority (70)
-- [ ] No rapid-fire research (minimum 5-min gap between autonomous sessions)
-- [ ] Unit tests for type selection logic
+- [ ] Recent research checked to avoid duplicates
+- [ ] Self-created tasks have correct priority (P:70)
+- [ ] Minimum 30-min gap enforced between autonomous sessions
+- [ ] Unit tests for scheduling logic
 
-**Complexity**: Medium
+**Complexity**: Medium-High
 
 **Depends on**: Task 4.1
 
 ---
 
-### Task 4.3: Vault Writer Upgrade
+### Task 4.3: Knowledge Context Injection for All Agents
 
-**Description**: Add research-specific templates and path routing to the Vault Writer.
+**Description**: Inject relevant Obsidian knowledge context into all agent system prompts, not just rnd agents. Dev agents should read project docs before coding, qa agents should check known issues, etc.
 
 **Files to modify**:
 ```
-internal/vault/writer.go
-internal/vault/templates.go
+agent_manager/config.py                 (modify — knowledge patterns per type)
+agent_manager/knowledge.py              (new)
+go/src/internal/handler/flux_service.go (modify — enrich system prompt)
 ```
 
 **Implementation details**:
 
-**New templates in templates.go**:
-- Research finding template:
-  ```markdown
-  # {title}
-  Date: {date}
-  Type: {research_type}
-  Researcher: {pod_id}
+**knowledge.py** — Knowledge context builder:
+- `build_knowledge_prompt(agent_type, task_metadata, vault_path) → str`:
+  - Returns obsidian-cli usage patterns specific to the agent type
+  - Dev: "Read project docs before starting, save learnings after"
+  - QA: "Check known issues, read test patterns"
+  - R&D: "Check existing research, write structured findings"
+  - DevOps: "Read deployment docs, check service configs"
 
-  ## Key Findings
-  {findings}
+**Agent-specific obsidian-cli patterns**:
+```
+# Dev agents:
+Before starting work:
+  $ obsidian-cli search "{project_name} architecture" --vault {vault_path}
+  $ obsidian-cli read "Projects/{project}/_index.md" --vault {vault_path}
+After completing work:
+  $ obsidian-cli write "Projects/{project}/learnings/{slug}.md" --content "..." --vault {vault_path}
 
-  ## Recommendations
-  {recommendations}
+# QA agents:
+  $ obsidian-cli search "known issues {project}" --vault {vault_path}
 
-  ## Sources
-  {sources}
-  ```
-- Project proposal template:
-  ```markdown
-  # Project Proposal: {name}
-  Date: {date}
-  Proposed by: {pod_id}
-  Goal alignment: {goal_title}
+# R&D agents:
+  $ obsidian-cli search "{topic}" --vault {vault_path}   # check existing research
+  $ obsidian-cli write "Research/{category}/{topic}.md" --content "..." --vault {vault_path}
+```
 
-  ## Description
-  {description}
-
-  ## Tech Stack
-  {tech_stack}
-
-  ## Estimated Effort
-  {effort}
-
-  ## Inspiration
-  {inspiration}
-  ```
-
-**Path routing in writer.go**:
-- Add `WriteResearch(podID, researchType string, content string)` convenience method
-- Add `WriteProposal(podID string, content string)` convenience method
-- Route to Vault paths based on research type (from types.go mapping)
-- Existing `Write()` method unchanged — new methods are additive
-- Note: If Phase 3 Obsidian integration is complete, these methods should use VaultFacade (CLI-first, Writer fallback) instead of Writer directly. If Phase 3 is not complete, use Writer directly as a temporary measure.
+**Go-side enhancement**:
+- When building `ExecuteTaskRequest` in `flux_service.go`, append knowledge context to system_prompt
+- Use VaultFacade (Phase 3) to pre-fetch relevant vault snippets:
+  - Search vault for notes related to task title (top 3 results)
+  - Include snippets in system_prompt (max 2000 chars of context)
+  - This gives the agent a head start before it needs to use obsidian-cli
 
 **Acceptance criteria**:
-- [ ] Research finding template produces well-formatted Obsidian markdown
-- [ ] Project proposal template renders correctly
-- [ ] Path routing places files in correct Vault directories
-- [ ] Existing task completion templates unchanged
-- [ ] Sequential write ordering preserved (existing channel-based writer)
-- [ ] Unit tests for new templates
+- [ ] All agent types receive obsidian-cli usage instructions
+- [ ] Dev agents get project-specific context
+- [ ] Pre-fetched vault context included in system prompt
+- [ ] Context size limited to prevent prompt overflow
+- [ ] No regression in existing agent behavior
 
-**Complexity**: Low-Medium
+**Complexity**: Medium
 
-**Depends on**: Phase 2B Vault Writer (complete)
+**Depends on**: Phase 3 Knowledge backend (VaultFacade)
 
 ---
 
 ### Task 4.4: New Project Proposals
 
-**Description**: Researchers can propose new projects based on discoveries. Projects require Operator approval before creation.
+**Description**: Researcher agents can propose new projects based on discoveries. Proposals are detected by the Orchestrator and require Operator approval.
 
 **Files to modify**:
 ```
-internal/researcher/researcher.go
-internal/server/api_projects.go (minor)
+go/src/internal/orchestrator/research_scheduler.go  (add proposal detection)
+agent_manager/config.py                             (rnd prompt includes proposal format)
 ```
 
 **Implementation details**:
-- During research execution, if Claude Code output contains a project proposal (JSON marker):
-  ```json
-  {"proposal": true, "name": "...", "type": "REPO", "description": "...", "tech_stack": [...], "inspiration": "..."}
+- rnd agent system prompt includes project proposal format:
   ```
-- Researcher parses proposal and:
-  1. Creates project via Manager API with status=PROPOSED
-  2. Links to current Goal if relevant (goal_id)
-  3. Writes proposal to Vault (`Research/Ideas/{name}.md`)
-  4. Discord notification: "New project proposed: {name}. Review in Web UI."
-- Existing approval flow in `api_projects.go` handles:
-  - `POST /api/projects/{id}/approve` → ACTIVE, creates GitHub repo via `github/client.go`
-  - `POST /api/projects/{id}/reject` → REJECTED
-- Minor change to `api_projects.go`: ensure PROPOSED projects appear in project list (verify existing filter doesn't exclude them)
+  If you discover a valuable project opportunity, create a proposal:
+  $ obsidian-cli write "Goals/proposals/{project-name}.md" --content "..." --vault {vault_path}
+
+  Proposal format:
+  # Project Proposal: {name}
+  **Type**: REPO|SERVICE|LIBRARY|TOOL
+  **Tech Stack**: [list]
+  **Inspiration**: {what research led to this}
+  **Description**: {what and why}
+  ```
+- Go-side: ResearchScheduler periodically scans Vault `Goals/proposals/` for new files (via VaultFacade)
+- When proposal found:
+  1. Parse markdown for project metadata
+  2. Create Project in DB with status=PROPOSED
+  3. Discord notification: "New project proposed: {name}. Review in Web UI."
+- Existing approval flow handles the rest:
+  - Approve → ACTIVE, create GitHub repo
+  - Reject → REJECTED
 
 **Acceptance criteria**:
-- [ ] Researchers detect and parse project proposals from Claude Code output
-- [ ] PROPOSED project created in DB with correct fields
+- [ ] rnd agents create proposals in Vault via obsidian-cli
+- [ ] Orchestrator detects new proposals
+- [ ] PROPOSED projects created in DB
 - [ ] Discord notification sent
-- [ ] Existing approval/rejection flow works for PROPOSED projects
-- [ ] Proposal written to Vault
+- [ ] Existing approval/rejection flow works
 - [ ] Unit tests for proposal parsing
 
 **Complexity**: Medium
 
-**Depends on**: Tasks 4.1, 4.2, 4.3
+**Depends on**: Tasks 4.1, 4.2
 
 ---
 
-### Task 4.5: Deployment Automation Enhancement
+### Task 4.5: Deployment Automation
 
-**Description**: Enhance the existing auto-updater and add `make deploy` target for manual deployments.
+**Description**: Automate Flux deployment for both Go backend and Python Agent Manager after self-improvement builds pass.
 
-**Files to modify**:
+**Files to create/modify**:
 ```
-Makefile
-```
-
-**Files to create**:
-```
-deploy/deploy.sh (if not already handled by updater)
+deploy/deploy.sh                        (new or update)
+Makefile                                (add deploy target)
 ```
 
 **Implementation details**:
-- The auto-updater (`internal/updater/`) already:
-  - Polls git remote for changes
-  - Rebuilds via `make build`
-  - Restarts via `launchctl kickstart -k`
-  - Reports status via WebSocket
-- Add Makefile targets:
-  - `make deploy`: `make build && deploy/deploy.sh`
-  - `deploy/deploy.sh`:
-    1. Copy binary to deployment location
-    2. Restart via `launchctl kickstart -k gui/$(id -u)/com.circle-oo.flux`
-    3. Verify restart successful (health check)
-  - Safety: refuse to deploy if tasks are RUNNING (query `/api/pods`)
-- This is primarily a convenience wrapper — the auto-updater handles the common case
+- `deploy.sh`:
+  1. Regenerate proto: `buf generate proto`
+  2. Build Go: `go build -o flux ./cmd/flux`
+  3. Build Frontend: `cd frontend && npm run build`
+  4. Run Go tests: `go test ./...`
+  5. Run Python tests: `pytest agent_manager/`
+  6. Copy Go binary to deployment location
+  7. Install Python dependencies if changed: `pip install -r agent_manager/requirements.txt`
+  8. Restart Go via launchd: `launchctl kickstart -k gui/$(id -u)/com.circle-oo.flux`
+  9. Restart Python via launchd: `launchctl kickstart -k gui/$(id -u)/com.circle-oo.flux-agent`
+- Makefile targets:
+  - `make proto`: `buf generate proto`
+  - `make build`: proto + Go build + Frontend build
+  - `make test`: Go tests + Python tests
+  - `make deploy`: build + test + deploy.sh
+- Deploy only at idle (no running agent tasks)
+- Health check after restart (verify gRPC connectivity)
 
 **Acceptance criteria**:
-- [ ] `make deploy` builds and deploys
-- [ ] launchd restarts Flux
-- [ ] Deploy blocked if tasks running
-- [ ] Health check after restart
+- [ ] `make deploy` builds and deploys in one command
+- [ ] Proto regenerated before build
+- [ ] Both Go and Python services restarted
+- [ ] Deploy blocked if agent tasks running
+- [ ] Health check verifies both services after restart
 
-**Complexity**: Low
+**Complexity**: Low-Medium
 
 ---
 
 ### Task 4.6: Self-Improvement
 
-**Description**: Flux can modify its own code, test changes, and create PRs for self-improvement. Safety mechanisms prevent destructive changes.
+**Description**: Flux can modify its own code (both Go and Python), test changes, and create PRs for self-improvement. Safety mechanisms prevent destructive changes.
 
 **Files to create**:
 ```
-internal/executor/self_improve.go
+go/src/internal/executor/self_improve.go
 ```
 
 **Implementation details**:
 
 **Safety protocol (executed in order)**:
-1. Create worktree from flux repo using existing `executor/worktree.go`
+1. Create worktree from flux repo
 2. Create safety tag: `flux-safe-{unix_timestamp}`
-3. Execute Claude Code for modification
-4. Run full test suite: `go test ./... -v` (from `go/src/` directory)
-5. Run `gosec ./...` static security analysis (must be pre-installed: `go install github.com/securego/gosec/v2/cmd/gosec@latest`)
+3. Execute dev agent (via Python Agent Manager) for modification
+4. Run full Go test suite: `go test ./... -v`
+5. Run `gosec ./...` static security analysis
 6. Run `go mod verify` dependency integrity check
-7. Verify `go.mod` and `go.sum` unchanged (no dependency modifications without explicit approval)
-8. **Pass**: create PR → **NEVER auto-merge** (always require Operator review)
-9. **Fail**: `git checkout {safe_tag}` → revert → report FAILED
-10. Add audit log entry to Vault (`Tasks/self-improvement/{timestamp}.md`)
+7. Verify `go.mod` and `go.sum` unchanged
+8. Run Python tests: `pytest agent_manager/`
+9. Verify `requirements.txt` unchanged
+10. Verify `proto/flux/v1/flux.proto` unchanged (API contract immutable)
+11. **Pass**: create PR → **NEVER auto-merge** (always Operator review)
+12. **Fail**: `git checkout {safe_tag}` → revert → report FAILED
+13. Add audit log entry to Vault (`Tasks/self-improvement/{timestamp}.md`)
 
-**File restrictions** (immutable — cannot be modified by self-improvement):
+**Immutable files** (cannot be modified by self-improvement):
 - `go/src/internal/server/auth.go`
 - `go/src/internal/config/config.go`
 - `go/src/internal/shutdown/shutdown.go`
-- `go/src/internal/executor/self_improve.go` (the safety mechanism itself)
+- `go/src/internal/executor/self_improve.go`
 - `go/src/internal/orchestrator/rate_limit_handler.go`
-- `go/src/internal/db/schema.go` (DB schema changes require Operator task)
 - `go/src/cmd/flux/main.go`
-
-**Implementation in self_improve.go**:
-- `ExecuteSelfImprovement(task *models.Task) error`:
-  - Check task has source=SELF and appropriate tags
-  - Validate target files against allowlist (reject if touching immutable files)
-  - Execute safety protocol steps 1-10
-  - Post-execution: check git diff for immutable file modifications → revert if found
-- Called from Executor when task type is self-improvement (detected via tags or source)
-- Self-improvement tasks: source=SELF, always require PR review (never auto-merge)
+- `agent_manager/server.py` (core gRPC server)
+- `proto/flux/v1/flux.proto` (API contract)
+- DB schema files
 
 **Restart logic**:
-- After self-improvement PR is merged (detected by auto-updater or manual trigger):
-  - If all Pods are idle → trigger restart
-  - If Pods are busy → queue restart for next idle window
-  - Reuse existing auto-updater restart logic
+- After self-improvement PR merged: check if agents are idle
+- If idle: trigger `make deploy`
+- If busy: queue restart for next idle period
 
 **Acceptance criteria**:
-- [ ] Safety tag created before any changes
-- [ ] Full test suite runs after modification
-- [ ] gosec security analysis passes
-- [ ] Dependency integrity verified (go mod verify)
-- [ ] go.mod and go.sum changes detected and rejected
-- [ ] Immutable files protected (modification detected and reverted)
-- [ ] Revert on any test/security failure
-- [ ] PR created for passing changes
-- [ ] Self-improvement PRs NEVER auto-merged (ShouldAutoMerge returns false for source=SELF)
-- [ ] Audit log written to Vault
+- [ ] Safety tag created before changes
+- [ ] Full Go + Python test suites run
+- [ ] Security analysis passes
+- [ ] Dependency integrity verified
+- [ ] API contract (proto) unchanged
+- [ ] Revert on any failure
+- [ ] PR created (never auto-merged)
+- [ ] Immutable files protected
+- [ ] Audit trail in Vault
 - [ ] Restart only at idle
-- [ ] Unit tests for safety protocol (file allowlist, immutable check, revert logic)
 
 **Complexity**: High
 
@@ -401,177 +342,120 @@ internal/executor/self_improve.go
 
 ### Task 4.7: Research UI
 
-**Description**: Add Research page to Web UI for viewing research history and findings.
+**Description**: Add or enhance Research page in the frontend for viewing research history, findings, and researcher agent activity.
 
-**Files to create**:
+**Files to create/modify**:
 ```
-frontend/src/pages/Research.tsx
-frontend/src/stores/researchStore.ts
+frontend/src/pages/Research.tsx             (new or enhance from Phase 3 Knowledge)
+proto/flux/v1/flux.proto                    (add Research RPCs if needed)
+go/src/internal/handler/flux_service.go     (implement Research RPCs)
 ```
 
 **Implementation details**:
-- Research data lives in the existing `tasks` table (type=RESEARCH)
-- No new API endpoints needed — reuse `GET /api/tasks?type=RESEARCH` with existing filtering
-- If additional research-specific data is needed, add:
-  - `GET /api/research/stats` — research type distribution (simple GROUP BY query)
-- Create Zustand store (`researchStore.ts`) with filtered task fetching
-- Research.tsx page:
-  - Research history timeline (tasks with type=RESEARCH, sorted by date)
-  - Filter by research type tag
-  - Research findings preview (result field from task)
-  - Active Researcher Pods status (from `/api/pods` filtered by id prefix "researcher-")
-  - Simple type distribution summary
-- Add to App.tsx navigation
+
+If Phase 3 already has a Knowledge page with Research tab, this task enhances it. Otherwise, create standalone:
+
+**New RPCs** (if not covered by Phase 3 Knowledge API):
+```protobuf
+rpc ListResearch(ListResearchRequest) returns (ListResearchResponse);
+rpc GetResearchStats(GetResearchStatsRequest) returns (GetResearchStatsResponse);
+```
+
+**Research UI features**:
+- Research history timeline (completed rnd agent tasks, sorted by date)
+- Filter by research type (github-scan, industry-research, etc.)
+- Research findings preview (from Vault via Knowledge API)
+- Active researcher agent status (from `GetAgentStatus`)
+- Research type distribution chart (pie/donut)
+- Recent project proposals from researchers
+- Autonomous research scheduling status (next scheduled, current type weights)
 
 **Acceptance criteria**:
 - [ ] Research page shows research task history
 - [ ] Type filtering works
-- [ ] Active Researcher pod status displayed
-- [ ] Findings previewed from task result field
-- [ ] Responsive layout (Tailwind)
-- [ ] Unit tests for any new API endpoints
+- [ ] Findings preview from Vault
+- [ ] Agent status displayed
+- [ ] Statistics chart renders
+- [ ] Proposals section shows recent proposals
 
 **Complexity**: Medium
-
----
-
-### Task 4.8: Obsidian CLI Integration for Pods
-
-**Description**: Add Obsidian CLI usage patterns to Executor and Researcher pod prompts for reading project context and recording learnings. Pods use the CLI to access the knowledge base during execution.
-
-**Files to modify**:
-```
-internal/executor/executor.go (prompt template updates)
-internal/researcher/researcher.go (prompt template updates - if not already in 4.1)
-```
-
-**Implementation details**:
-- Executor pods should read project context before starting work:
-  - `obsidian read path="Projects/{project}/_index.md"` — get project overview
-  - `obsidian search query="{keyword}" folder="Projects/{project}" format=json matches` — find relevant prior work
-  - `obsidian backlinks path="Projects/{project}/_index.md"` — discover related notes
-- Executor pods should save learnings after task completion:
-  - `obsidian create name="Projects/{project}/learnings/{slug}" content="..." silent` — record new learnings
-  - `obsidian daily:append content="- ✅ {task}: {summary}"` — log to daily note
-  - `obsidian property:set name=status value=completed path="Tasks/{task}.md"` — update task properties
-- Researcher pods should check existing research before starting:
-  - `obsidian search query="{topic}" format=json matches` — avoid duplicate research
-  - `obsidian tags all counts` — understand knowledge base structure
-- Researcher pods should save research findings:
-  - `obsidian create name="Research/{category}/{slug}" content="..." silent` — store findings
-  - `obsidian daily:append content="- 🔬 Research: {topic}"` — log research activity
-- Add these patterns to the CLAUDE.md templates injected into pod workspaces
-- Include error handling guidance: if CLI fails, fall back to file-based operations
-- Emphasize `silent` flag usage to prevent Obsidian UI pop-ups during background operations
-- Note: This assumes Phase 3 Obsidian CLI integration (vault/client.go, vault/facade.go) is complete
-
-**Acceptance criteria**:
-- [ ] Executor CLAUDE.md template includes Obsidian CLI read/write patterns
-- [ ] Researcher CLAUDE.md template includes research-specific CLI patterns
-- [ ] Prompt includes examples of reading project context before work
-- [ ] Prompt includes examples of saving learnings after completion
-- [ ] Prompt includes fallback guidance when CLI unavailable
-- [ ] `silent` flag usage is emphasized for all create operations
-- [ ] Daily note logging patterns included
-- [ ] Property management patterns included for task status updates
-
-**Complexity**: Low-Medium (primarily prompt/template updates)
-
-**Depends on**: Phase 3 Obsidian CLI integration (vault/client.go and vault/facade.go must exist), Task 4.1 (Researcher Pod)
 
 ---
 
 ## Recommended Implementation Order
 
 ```
-Task 4.1  (Researcher Pod + Workspace)         — Foundation (must be first)
-  ├── Task 4.2  (Autonomous Research)           — Core research logic
-  │   └── Task 4.4  (Project Proposals)         — Research output
-  └── Task 4.0  (ScaleManager Ratio Upgrade)    — Integrates Researchers into scaling
+Task 4.1  (Researcher Agent Types)          — Foundation
+  ├── Task 4.2  (Autonomous Research)       — Core scheduling
+  │   └── Task 4.4  (Project Proposals)     — Research output
+  └── Task 4.3  (Knowledge Context)         — All agents benefit
 
-Task 4.3  (Vault Writer Upgrade)               — Independent (can parallel with 4.1)
+Task 4.5  (Deployment Automation)           — Independent
+  └── Task 4.6  (Self-Improvement)          — Requires deploy infra
 
-Task 4.5  (Deployment Automation)              — Independent
-  └── Task 4.6  (Self-Improvement)             — Requires deployment infra
-
-Task 4.7  (Research UI)                        — After 4.1 + 4.2 (needs data to display)
-
-Task 4.8  (Obsidian CLI Integration)           — After Phase 3 Obsidian CLI + 4.1 (Researcher Pod)
+Task 4.7  (Research UI)                     — After 4.1 + 4.2 (needs data)
 ```
 
-**Critical path**: 4.1 → 4.2 → 4.0 (gets Researchers running and auto-scaled)
-**Parallel track 1**: 4.3 (Vault templates) → 4.8 (Obsidian CLI integration for pods)
+**Critical path**: 4.1 → 4.2 → 4.4 (gets autonomous research and proposals working)
+**Parallel track 1**: 4.3 (knowledge context for all agents)
 **Parallel track 2**: 4.5 → 4.6 (self-improvement)
-**Parallel track 3**: 4.7 (UI)
+**Final**: 4.7 (Research UI, once data exists)
 
 ---
 
 ## Phase 4 Completion Checklist
 
-- [ ] Researcher Pods run with independent workspaces
-- [ ] Autonomous research when no tasks queued
-- [ ] Research types correctly categorized and routed to Vault
-- [ ] Vault Writer handles research findings and project proposals
-- [ ] ScaleManager manages Executor:Researcher ratio per spec
-- [ ] R&D protection (min 20% research) enforced
+- [ ] Researcher agents run with specialized research types via Agent SDK
+- [ ] Autonomous research scheduling when no rnd tasks queued
+- [ ] All agents have Obsidian knowledge access via obsidian-cli
+- [ ] Knowledge context pre-fetched and injected into system prompts
+- [ ] Research findings written to correct Vault paths
 - [ ] Project proposals → Operator approval → GitHub repo
-- [ ] Self-improvement: safety tag → modify → test → gosec → PR/revert
-- [ ] Immutable files protected from self-improvement
-- [ ] DB schema changes excluded from self-improvement
-- [ ] Deployment enhanced via Makefile
+- [ ] Self-improvement: safety tag → modify → test (Go + Python) → PR/revert
+- [ ] Proto file and immutable files protected
+- [ ] Deployment automated via Makefile (both Go + Python)
 - [ ] Restart at idle only
-- [ ] Research UI functional
+- [ ] Research UI functional with charts and filtering
 - [ ] Audit trail for all self-modifications
-- [ ] Executor pods use Obsidian CLI for context and recording
-- [ ] Researcher pods use Obsidian CLI for research history and findings storage
-- [ ] Pod CLAUDE.md templates include Obsidian CLI usage patterns
 
 ## File Count Summary
 
 | Category | New Files | Modified Files |
 |----------|-----------|----------------|
-| Go backend | ~5 files | ~4 files |
-| React frontend | ~2 files | ~1 file |
-| Deploy/Build | ~1 file | ~1 file |
-| Prompt templates | 0 files | ~2 files (executor, researcher) |
-| **Total** | **~8 files** | **~8 files** |
+| Go backend | ~2 files | ~2 files |
+| Python agent | ~2 files | ~1 file |
+| Frontend | ~1 file | ~1 file |
+| Proto | — | ~1 file (if needed) |
+| Deploy | ~1 file | ~1 file |
+| **Total** | **~6 files** | **~6 files** |
 
 ---
 
 ## Post-Phase 4: Future Work
 
-After Phase 4, Flux is fully autonomous. Future improvements are documented in the spec under "Future Work".
+After Phase 4, Flux is fully autonomous with the protobuf-unified architecture. Future improvements:
 
-### Related Plans
+### Architecture Extensions
+- Multi-agent collaboration (agents communicating via shared context)
+- MCP server integration for web search, external APIs
+- Session persistence / context sharing between agent runs
+- Agent-to-agent delegation (dev agent spawning qa agent for review)
 
-Phase 4 integrates with or depends on features from other plan documents:
-
-- **Obsidian Integration** (`docs/obsidian-integration-plan.md`): Phase 3a-3c (CLI Client, Knowledge API, Knowledge Frontend) are prerequisites. Phase 3d is integrated as Task 4.8. The Knowledge UI provides the interface for viewing research findings created by Researcher pods.
-
-- **Insight/Analytics** (`docs/insight-plan.md`): Comprehensive analytics and observability features (Tasks 1-5 from insight plan) are implemented as Phase 3 features and provide operational intelligence through existing task/usage data. They are independent of Phase 4 research features but complement them by showing research productivity metrics.
-
-### Original Design Deferrals
-- Service monitoring (HTTP healthchecks, incident reports) — upgrade `/api/services` stub
-- Multiple Goals + ranking
-- Issue system, limit learning
-- Log analysis monitoring, process/resource monitoring
-- Watchdog process
-- DB schema migration system
-- PR table separation (tasks table getting large)
-- Rate Limit 3rd-tier detection
-
-### Competitive Analysis Gaps
-- Execution environment isolation (deeper sandboxing)
-- Code review feedback learning (learn from PR review patterns)
+### Operational Extensions
+- Service monitoring (HTTP healthchecks via devops agents)
 - External event triggers (GitHub webhooks, Discord bot commands)
-- CI/CD integration
-- Multi-repo tasks (cross-repository changes)
-- Session persistence / context sharing between Pods
-- Mobile accessibility
+- CI/CD integration (agents triggered by PR events)
+- Multi-repo tasks (cross-project work)
+- Mobile-friendly dashboard
 
-### OMC-Inspired Ideas
-- Agent definition patterns (`.claude/agents/` per task type)
-- CLAUDE.md auto-refresh (3-tier notepad structure)
-- Native Agent Teams utilization (sub-agent parallel execution within single Executor)
+### Knowledge Extensions
+- Knowledge quality verification (agents review each other's research)
+- Automatic knowledge graph construction via Obsidian links
+- Research quality scoring and feedback loops
+- Obsidian dashboard auto-refresh
 
-**Note**: OMC is an interactive-session orchestrator and should NOT be used as a Flux plugin (dual orchestration conflict). Only ideas are borrowed.
+### Scale Extensions
+- Multiple Mac Minis (distributed agent pool)
+- PostgreSQL migration for larger datasets
+- Agent Teams utilization (sub-agent parallel execution)
+- Rate Limit 3rd-tier detection and response

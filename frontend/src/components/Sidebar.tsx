@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useWSStore } from '../stores/wsStore'
+import { useThemeStore, Theme } from '../stores/themeStore'
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { useConfirm } from '../hooks/useConfirm'
@@ -53,6 +54,7 @@ const navItems = [
 export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarProps) {
   const { logout, authEnabled } = useAuthStore()
   const wsConnected = useWSStore((s) => s.connected)
+  const { theme, setTheme } = useThemeStore()
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
   const { confirm, dialog } = useConfirm()
@@ -94,7 +96,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
       {/* Mobile overlay */}
       {mobileMenuOpen && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden"
           onClick={closeMobileMenu}
         />
       )}
@@ -102,7 +104,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
       {/* Sidebar */}
       <aside
         className={`
-          bg-surface-100/50 backdrop-blur-xl border-r border-white/[0.06] flex flex-col transition-all duration-300 ease-in-out
+          bg-sidebar/50 backdrop-blur-xl border-r border-line flex flex-col transition-all duration-300 ease-in-out
           ${isCollapsed ? 'w-[60px]' : 'w-56'}
           lg:relative lg:translate-x-0
           fixed inset-y-0 left-0 z-50
@@ -110,22 +112,22 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
         `}
       >
         {/* Header */}
-        <div className={`p-3 border-b border-white/[0.06] flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+        <div className={`p-3 border-b border-line flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
           {!isCollapsed && (
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-accent-500 to-violet-500 flex items-center justify-center shadow-lg shadow-accent-600/20">
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary-500 to-primary-300 flex items-center justify-center shadow-lg shadow-primary-600/20">
                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
                 </svg>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-white/90">Flux</span>
-                <div className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-rose-400 shadow-sm shadow-rose-400/50'}`} />
+                <span className="text-sm font-semibold text-content">Flux</span>
+                <div className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-emerald-400 shadow-sm shadow-emerald-500/30' : 'bg-rose-400 shadow-sm shadow-rose-500/30'}`} />
               </div>
             </div>
           )}
           {isCollapsed && (
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-accent-500 to-violet-500 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary-500 to-primary-300 flex items-center justify-center">
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
               </svg>
@@ -134,7 +136,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
           <div className="flex items-center gap-1">
             <button
               onClick={closeMobileMenu}
-              className="lg:hidden p-1.5 text-white/40 hover:text-white/70 transition-colors rounded-md hover:bg-white/[0.06]"
+              className="lg:hidden p-1.5 text-content-muted hover:text-content transition-colors rounded-md hover:bg-surface-active"
               aria-label="Close menu"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -144,7 +146,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
             {!isCollapsed && (
               <button
                 onClick={() => setIsCollapsed(!isCollapsed)}
-                className="hidden lg:flex p-1.5 text-white/30 hover:text-white/60 transition-colors rounded-md hover:bg-white/[0.06]"
+                className="hidden lg:flex p-1.5 text-content-faint hover:text-content-secondary transition-colors rounded-md hover:bg-surface-active"
                 title="Collapse"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
@@ -159,7 +161,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
         {isCollapsed && (
           <button
             onClick={() => setIsCollapsed(false)}
-            className="hidden lg:flex mx-auto mt-2 p-1.5 text-white/30 hover:text-white/60 transition-colors rounded-md hover:bg-white/[0.06]"
+            className="hidden lg:flex mx-auto mt-2 p-1.5 text-content-faint hover:text-content-secondary transition-colors rounded-md hover:bg-surface-active"
             title="Expand"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
@@ -178,8 +180,8 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
               className={({ isActive }) =>
                 `flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 touch-manipulation group ${
                   isActive
-                    ? 'bg-accent-600/15 text-accent-400'
-                    : 'text-white/40 hover:bg-white/[0.04] hover:text-white/70'
+                    ? 'bg-primary-50 text-primary-700 font-semibold'
+                    : 'text-content-muted hover:bg-surface-hover hover:text-content'
                 } ${isCollapsed ? 'justify-center' : ''}`
               }
               title={isCollapsed ? item.label : undefined}
@@ -190,12 +192,36 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
           ))}
         </nav>
 
+        {/* Theme Selector */}
+        <div className={`px-3 py-2 flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
+          {!isCollapsed && <span className="text-[10px] text-content-faint uppercase tracking-wider font-medium">Theme</span>}
+          <div className="flex gap-1.5">
+            {([
+              { id: 'blue' as Theme, color: 'bg-[#4B6EF5]', ring: 'ring-[#4B6EF5]' },
+              { id: 'green' as Theme, color: 'bg-[#1DB960]', ring: 'ring-[#1DB960]' },
+            ]).map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTheme(t.id)}
+                className={`w-5 h-5 rounded-full ${t.color} transition-all duration-200 ${
+                  theme === t.id
+                    ? `ring-2 ${t.ring} ring-offset-2 ring-offset-sidebar scale-110`
+                    : 'opacity-40 hover:opacity-80 hover:scale-105'
+                }`}
+                title={t.id.charAt(0).toUpperCase() + t.id.slice(1)}
+                aria-label={`Switch to ${t.id} theme`}
+                aria-pressed={theme === t.id}
+              />
+            ))}
+          </div>
+        </div>
+
         {/* Footer */}
-        <div className="p-2 border-t border-white/[0.06] space-y-0.5">
+        <div className="p-2 border-t border-line space-y-0.5">
           <button
             onClick={handleRestart}
             disabled={isRestarting}
-            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-white/40 hover:bg-white/[0.04] hover:text-white/70 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation ${isCollapsed ? 'justify-center' : ''}`}
+            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-content-muted hover:bg-surface-hover hover:text-content transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation ${isCollapsed ? 'justify-center' : ''}`}
             title={isCollapsed ? 'Restart' : undefined}
           >
             <span className="shrink-0">
@@ -214,7 +240,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
           {authEnabled && (
             <button
               onClick={logout}
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-white/40 hover:bg-white/[0.04] hover:text-white/70 transition-all duration-150 touch-manipulation ${isCollapsed ? 'justify-center' : ''}`}
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-content-muted hover:bg-surface-hover hover:text-content transition-all duration-150 touch-manipulation ${isCollapsed ? 'justify-center' : ''}`}
               title={isCollapsed ? 'Logout' : undefined}
             >
               <span className="shrink-0">

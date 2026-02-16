@@ -25,6 +25,7 @@ type Pod interface {
 // GracefulShutdown initiates a graceful shutdown of all pods.
 // It stops new task assignment, waits for pods to finish within the grace period,
 // and force-kills any remaining pods by moving their tasks to RETRY status.
+// The caller must pass a context with the desired timeout (e.g., context.WithTimeout).
 func GracefulShutdown(ctx context.Context, cfg *config.ShutdownConfig, pods []Pod, db *sql.DB, discord *notifier.Discord) error {
 	slog.Info("initiating graceful shutdown", "pods", len(pods), "grace_period", cfg.PodGracePeriod)
 
@@ -34,24 +35,14 @@ func GracefulShutdown(ctx context.Context, cfg *config.ShutdownConfig, pods []Po
 		pod.Stop()
 	}
 
-	// Wait for pods to finish within grace period
-	timer := time.NewTimer(cfg.PodGracePeriod)
-	defer timer.Stop()
-
+	// Wait for pods to finish, polling every 500ms until context deadline.
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Warn("shutdown context canceled, forcing immediate kill")
-			if err := killOrphanedClaudeProcesses(); err != nil {
-				slog.Error("failed to kill orphaned claude processes", "error", err)
-			}
-			return forceKillPods(pods, db, discord)
-
-		case <-timer.C:
-			slog.Warn("grace period expired, forcing pod kill")
+			slog.Warn("shutdown grace period expired, forcing pod kill")
 			if err := killOrphanedClaudeProcesses(); err != nil {
 				slog.Error("failed to kill orphaned claude processes", "error", err)
 			}

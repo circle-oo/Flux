@@ -13,10 +13,10 @@ export default function TaskHeader({ task, onRetry, onCancel }: TaskHeaderProps)
     <div className="flex items-start justify-between">
       <div>
         <BackButton to="/tasks" label="Back to Tasks" />
-        <h1 className="text-xl font-bold text-white/90 mb-2 tracking-tight">{task.title}</h1>
+        <h1 className="text-xl font-bold text-content mb-2 tracking-tight">{task.title}</h1>
         <div className="flex items-center gap-2">
           <StatusBadge status={task.status} />
-          <span className="text-xs text-white/20 font-mono">{task.id.slice(0, 8)}</span>
+          <span className="text-xs text-content-faint font-mono">{task.id.slice(0, 8)}</span>
         </div>
       </div>
       <div className="flex gap-2">

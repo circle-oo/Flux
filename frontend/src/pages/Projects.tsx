@@ -106,7 +106,7 @@ export default function Projects() {
 
       {showForm && (
         <div className="card p-5 sm:p-6 animate-slide-up">
-          <h2 className="text-base font-semibold text-white/90 mb-4">
+          <h2 className="text-base font-semibold text-content mb-4">
             Register New Project
           </h2>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -213,25 +213,25 @@ export default function Projects() {
 
       {proposedProjects.length > 0 && (
         <div className="space-y-3">
-          <div className="text-[11px] font-medium text-white/30 uppercase tracking-widest">Proposed</div>
+          <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest">Proposed</div>
           {proposedProjects.map((project) => (
             <div
               key={project.id}
-              className="card p-5 ring-1 ring-amber-500/20"
+              className="card p-5 ring-1 ring-amber-200/60"
             >
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <h3 className="text-base font-medium text-white/90">
+                    <h3 className="text-base font-medium text-content">
                       {project.name}
                     </h3>
                     <span className="badge-warning">Proposed</span>
                     <span className="badge-secondary">{project.type}</span>
                   </div>
-                  <p className="text-sm text-white/50 mb-2">
+                  <p className="text-sm text-content-muted mb-2">
                     {project.description}
                   </p>
-                  <div className="text-xs text-white/20 mb-2">
+                  <div className="text-xs text-content-faint mb-2">
                     Created: {new Date(project.created_at).toLocaleString()}
                   </div>
                   {project.repo_url && (
@@ -240,7 +240,7 @@ export default function Projects() {
                         href={project.repo_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-accent-400 hover:text-accent-300 text-xs transition-colors"
+                        className="text-primary-400 hover:text-primary-300 text-xs transition-colors"
                       >
                         {project.repo_url}
                       </a>
@@ -272,7 +272,7 @@ export default function Projects() {
                 </div>
               </div>
               {project.inspiration && (
-                <div className="mt-3 text-xs text-white/30 italic">
+                <div className="mt-3 text-xs text-content-faint italic">
                   Inspiration: {project.inspiration}
                 </div>
               )}
@@ -282,7 +282,7 @@ export default function Projects() {
       )}
 
       <div className="space-y-3">
-        <div className="text-[11px] font-medium text-white/30 uppercase tracking-widest">Active Projects</div>
+        <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest">Active Projects</div>
         {isLoading ? (
           <LoadingState message="Loading projects..." />
         ) : activeProjects.length === 0 ? (
@@ -297,13 +297,13 @@ export default function Projects() {
                 onClick={() => navigate(`/projects/${project.id}`)}
               >
                 <div className="flex items-center gap-2 mb-1.5">
-                  <h3 className="text-sm font-medium text-white/90 group-hover:text-accent-400 transition-colors truncate">
+                  <h3 className="text-sm font-medium text-content group-hover:text-primary-400 transition-colors truncate">
                     {project.name}
                   </h3>
                   <span className="badge-success">Active</span>
                   <span className="badge-secondary">{project.type}</span>
                 </div>
-                <p className="text-xs text-white/40 mb-3 line-clamp-2">
+                <p className="text-xs text-content-muted mb-3 line-clamp-2">
                   {project.description}
                 </p>
                 {project.tech_stack.length > 0 && (
@@ -323,7 +323,7 @@ export default function Projects() {
 
       {otherProjects.length > 0 && (
         <div className="space-y-3">
-          <div className="text-[11px] font-medium text-white/30 uppercase tracking-widest">Other Projects</div>
+          <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest">Other Projects</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {otherProjects.map((project) => (
               <button
@@ -333,7 +333,7 @@ export default function Projects() {
                 onClick={() => navigate(`/projects/${project.id}`)}
               >
                 <div className="flex items-center gap-2 mb-1.5">
-                  <h3 className="text-sm font-medium text-white/90 truncate">
+                  <h3 className="text-sm font-medium text-content truncate">
                     {project.name}
                   </h3>
                   <span
@@ -347,7 +347,7 @@ export default function Projects() {
                   </span>
                   <span className="badge-secondary">{project.type}</span>
                 </div>
-                <p className="text-xs text-white/40 line-clamp-2">
+                <p className="text-xs text-content-muted line-clamp-2">
                   {project.description}
                 </p>
               </button>

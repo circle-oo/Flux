@@ -214,9 +214,9 @@ export default function Tasks() {
 
       <div className="space-y-2.5">
         {isLoading ? (
-          <div className="text-white/30 text-sm py-8 text-center">Loading tasks...</div>
+          <div className="text-content-faint text-sm py-8 text-center">Loading tasks...</div>
         ) : tasks.length === 0 ? (
-          <div className="card p-8 text-center text-white/30 text-sm">
+          <div className="card p-8 text-center text-content-faint text-sm">
             No tasks found. Create one or adjust filters.
           </div>
         ) : (

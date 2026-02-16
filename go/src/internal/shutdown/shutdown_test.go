@@ -210,7 +210,9 @@ func TestGracefulShutdown_ForceKillAfterGracePeriod(t *testing.T) {
 		PodGracePeriod: 200 * time.Millisecond, // short grace period
 	}
 
-	ctx := context.Background()
+	// Context timeout controls grace period (matches main.go usage)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.PodGracePeriod)
+	defer cancel()
 	err := GracefulShutdown(ctx, cfg, pods, db, discord)
 	if err != nil {
 		t.Fatalf("GracefulShutdown failed: %v", err)
@@ -316,15 +318,17 @@ func TestGracefulShutdown_MixedPodTypes(t *testing.T) {
 	// Create mix of pods: some that stop gracefully, some that don't
 	pods := []Pod{
 		newMockPod(taskID1, 100*time.Millisecond), // stops quickly
-		newMockPod(taskID2, 50*time.Millisecond), // stops quickly
-		newMockPod(taskID3, 999*time.Hour),       // never stops
+		newMockPod(taskID2, 50*time.Millisecond),  // stops quickly
+		newMockPod(taskID3, 999*time.Hour),        // never stops
 	}
 
 	cfg := &config.ShutdownConfig{
 		PodGracePeriod: 500 * time.Millisecond,
 	}
 
-	ctx := context.Background()
+	// Context timeout controls grace period (matches main.go usage)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.PodGracePeriod)
+	defer cancel()
 	err := GracefulShutdown(ctx, cfg, pods, db, discord)
 	if err != nil {
 		t.Fatalf("GracefulShutdown failed: %v", err)

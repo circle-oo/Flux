@@ -51,5 +51,5 @@ export const prStatusBadgeClass: Record<string, { label: string; className: stri
 }
 
 export const prStatusTextColor: Record<string, string> = {
-  OPEN: 'text-emerald-400', MERGED: 'text-violet-400', CLOSED: 'text-rose-400', CHANGES_REQUESTED: 'text-amber-400',
+  OPEN: 'text-emerald-600', MERGED: 'text-violet-600', CLOSED: 'text-rose-600', CHANGES_REQUESTED: 'text-amber-600',
 }

@@ -40,36 +40,36 @@ export default function TaskFilterBar({ activeFilterGroup, statusFilter, project
           {statusFilterGroups.map((group) => (
             <button key={group.id} onClick={() => onFilterGroupChange(group.id)} className={activeFilterGroup === group.id ? 'btn-filter-active' : 'btn-filter-inactive'}>{group.label}</button>
           ))}
-          <button onClick={() => setShowDetailedFilters(!showDetailedFilters)} className="btn-filter-inactive text-white/20">{showDetailedFilters ? 'Less' : 'More'}</button>
+          <button onClick={() => setShowDetailedFilters(!showDetailedFilters)} className="btn-filter-inactive text-content-faint">{showDetailedFilters ? 'Less' : 'More'}</button>
           {showDetailedFilters && detailedStatusFilters.map((sf) => (
             <button key={sf.value} onClick={() => onDetailedStatusFilter(sf.value)} className={statusFilter === sf.value && !activeFilterGroup ? 'btn-filter-active' : 'btn-filter-inactive'}>{sf.label}</button>
           ))}
         </div>
 
-        <div className="hidden sm:block w-px h-5 bg-white/[0.06]" />
+        <div className="hidden sm:block w-px h-5 bg-surface-active" />
 
         <select value={projectFilter || ''} onChange={(e) => onProjectFilter(e.target.value || undefined)} className="input w-full sm:w-auto text-xs py-1.5 min-h-[36px]">
           <option value="">All Projects</option>
           {activeProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
 
-        <div className="hidden sm:block w-px h-5 bg-white/[0.06]" />
+        <div className="hidden sm:block w-px h-5 bg-surface-active" />
 
         <div className="flex items-center gap-1.5 w-full sm:w-auto">
-          <span className="text-[10px] text-white/20 whitespace-nowrap uppercase tracking-wider">Sort:</span>
+          <span className="text-[10px] text-content-faint whitespace-nowrap uppercase tracking-wider">Sort:</span>
           {sortOptions.map((opt) => <button key={opt.value} onClick={() => onSortChange(opt.value)} className={sortBy === opt.value ? 'btn-filter-active' : 'btn-filter-inactive'}>{opt.label}</button>)}
         </div>
 
-        <div className="hidden sm:block w-px h-5 bg-white/[0.06]" />
+        <div className="hidden sm:block w-px h-5 bg-surface-active" />
 
         <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
-          <input type="checkbox" checked={showSubtasksInList} onChange={onToggleSubtasks} className="w-3.5 h-3.5 rounded border-white/[0.1] bg-white/[0.04] text-accent-500 focus:ring-2 focus:ring-accent-500 focus:ring-offset-0 cursor-pointer" />
-          <span className="text-[10px] text-white/30 uppercase tracking-wider">Subtasks</span>
+          <input type="checkbox" checked={showSubtasksInList} onChange={onToggleSubtasks} className="w-3.5 h-3.5 rounded border-line-hover bg-surface-hover text-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-offset-0 cursor-pointer" />
+          <span className="text-[10px] text-content-faint uppercase tracking-wider">Subtasks</span>
         </label>
       </div>
 
       {!isLoading && taskCount > 0 && (
-        <p className="text-[10px] text-white/20">Showing {visibleCount} task{visibleCount !== 1 ? 's' : ''}</p>
+        <p className="text-[10px] text-content-faint">Showing {visibleCount} task{visibleCount !== 1 ? 's' : ''}</p>
       )}
     </div>
   )

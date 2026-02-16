@@ -21,23 +21,23 @@ export default function TaskListItem({ task, project, subtaskCount, isExpanded, 
 
   return (
     <div
-      className="card p-4 hover:border-white/[0.12] transition-all cursor-pointer touch-manipulation"
+      className="card p-4 hover:border-line-hover transition-all cursor-pointer touch-manipulation"
       onClick={() => navigate(`/tasks/${task.id}`)}
     >
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-sm font-medium text-white/90 hover:text-accent-400 transition-colors truncate">
+            <h3 className="text-sm font-medium text-content hover:text-primary-400 transition-colors truncate">
               {task.triage_title || task.title}
             </h3>
             <StatusBadge status={task.status} />
             {task.triage_analysis && (
-              <span className="bg-cyan-500/10 text-cyan-400 ring-1 ring-cyan-500/20 px-1.5 py-0.5 rounded-full text-[10px] font-medium shrink-0">Triaged</span>
+              <span className="bg-cyan-50 text-cyan-600 ring-1 ring-cyan-200/60 px-1.5 py-0.5 rounded-full text-[10px] font-medium shrink-0">Triaged</span>
             )}
             {subtaskCount && onToggleSubtasks && (
               <button
                 onClick={(e) => onToggleSubtasks(task.id, e)}
-                className="text-[10px] text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded-full shrink-0 hover:bg-violet-500/20 transition-colors flex items-center gap-1 ring-1 ring-violet-500/20"
+                className="text-[10px] text-violet-600 bg-violet-500/10 px-1.5 py-0.5 rounded-full shrink-0 hover:bg-violet-500/20 transition-colors flex items-center gap-1 ring-1 ring-violet-200/60"
               >
                 <span className="text-[9px]">{isExpanded ? '▼' : '▶'}</span>
                 {subtaskCount} subtask{subtaskCount !== 1 ? 's' : ''}
@@ -46,31 +46,31 @@ export default function TaskListItem({ task, project, subtaskCount, isExpanded, 
           </div>
 
           {task.triage_description && (
-            <p className="text-xs text-cyan-400/60 mb-1.5 line-clamp-2 border-l-2 border-cyan-500/20 pl-2">
+            <p className="text-xs text-cyan-600/60 mb-1.5 line-clamp-2 border-l-2 border-cyan-500/20 pl-2">
               {task.triage_description}
             </p>
           )}
 
-          <div className="flex flex-wrap items-center gap-2.5 text-[11px] text-white/25">
-            {project && <span className="text-white/40">{project.name}</span>}
+          <div className="flex flex-wrap items-center gap-2.5 text-[11px] text-content-faint">
+            {project && <span className="text-content-muted">{project.name}</span>}
             <span>P{task.priority}</span>
             <span>{task.source}</span>
-            {task.executor_id && task.status === 'RUNNING' && <span className="text-amber-400/70">{task.executor_id}</span>}
-            {task.model && <span className="text-white/15">{task.model}</span>}
+            {task.executor_id && task.status === 'RUNNING' && <span className="text-amber-600/70">{task.executor_id}</span>}
+            {task.model && <span className="text-content-faint">{task.model}</span>}
             {task.diff_lines ? <span>{task.diff_lines}L / {task.files_changed}F</span> : null}
             {task.pr_url && (
-              <a href={task.pr_url} target="_blank" rel="noopener noreferrer" className="text-accent-400 hover:text-accent-300 transition-colors" onClick={(e) => e.stopPropagation()}>
+              <a href={task.pr_url} target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:text-primary-300 transition-colors" onClick={(e) => e.stopPropagation()}>
                 PR {task.pr_status === 'MERGED' ? '(merged)' : ''}
               </a>
             )}
             {task.cost_usd ? <span>${task.cost_usd.toFixed(3)}</span> : null}
           </div>
 
-          <div className="flex items-center gap-2.5 text-[10px] text-white/15 mt-1">
+          <div className="flex items-center gap-2.5 text-[10px] text-content-faint mt-1">
             <span>Created {timeAgo(task.created_at)}</span>
             {task.started_at && <span>Started {timeAgo(task.started_at)}</span>}
             {task.completed_at && <span>Done {timeAgo(task.completed_at)}</span>}
-            {task.started_at && task.completed_at && <span className="text-white/20">({duration(task.started_at, task.completed_at)})</span>}
+            {task.started_at && task.completed_at && <span className="text-content-faint">({duration(task.started_at, task.completed_at)})</span>}
           </div>
 
           {task.tags.length > 0 && (
@@ -88,30 +88,30 @@ export default function TaskListItem({ task, project, subtaskCount, isExpanded, 
       </div>
 
       {task.error_log && (
-        <div className="mt-3 p-3 bg-rose-500/[0.06] border border-rose-500/15 rounded-lg text-xs text-rose-300 line-clamp-3" role="alert">
-          <strong className="text-rose-400">Error:</strong> {task.error_log}
+        <div className="mt-3 p-3 bg-rose-50 border border-rose-500/15 rounded-lg text-xs text-rose-300 line-clamp-3" role="alert">
+          <strong className="text-rose-600">Error:</strong> {task.error_log}
         </div>
       )}
 
       {isExpanded && (
         <div className="mt-3 pl-3 border-l-2 border-violet-500/20 space-y-1.5">
-          {isLoadingSubtasks ? <div className="text-[10px] text-white/20">Loading subtasks...</div> : subtasks && subtasks.length > 0 ? (
+          {isLoadingSubtasks ? <div className="text-[10px] text-content-faint">Loading subtasks...</div> : subtasks && subtasks.length > 0 ? (
             subtasks.map((subtask) => (
-              <button type="button" key={subtask.id} className="w-full text-left bg-white/[0.02] border border-white/[0.04] rounded-lg p-2.5 cursor-pointer hover:border-white/[0.08] hover:bg-white/[0.04] transition-all"
+              <button type="button" key={subtask.id} className="w-full text-left bg-surface-hover border border-line-subtle rounded-lg p-2.5 cursor-pointer hover:border-line hover:bg-surface-hover transition-all"
                 onClick={(e) => { e.stopPropagation(); navigate(`/tasks/${subtask.id}`) }}>
                 <div className="flex items-center gap-2 mb-0.5">
-                  <h4 className="text-xs font-medium text-white/70 truncate">{subtask.triage_title || subtask.title}</h4>
+                  <h4 className="text-xs font-medium text-content-secondary truncate">{subtask.triage_title || subtask.title}</h4>
                   <StatusBadge status={subtask.status} size="sm" />
                 </div>
-                <div className="flex items-center gap-2 text-[10px] text-white/20">
+                <div className="flex items-center gap-2 text-[10px] text-content-faint">
                   <span>P{subtask.priority}</span>
                   {subtask.started_at && <span>Started {timeAgo(subtask.started_at)}</span>}
                   {subtask.completed_at && <span>Done {timeAgo(subtask.completed_at)}</span>}
-                  {subtask.started_at && subtask.completed_at && <span className="text-white/25">({duration(subtask.started_at, subtask.completed_at)})</span>}
+                  {subtask.started_at && subtask.completed_at && <span className="text-content-faint">({duration(subtask.started_at, subtask.completed_at)})</span>}
                 </div>
               </button>
             ))
-          ) : <div className="text-[10px] text-white/20">No subtasks found</div>}
+          ) : <div className="text-[10px] text-content-faint">No subtasks found</div>}
         </div>
       )}
     </div>

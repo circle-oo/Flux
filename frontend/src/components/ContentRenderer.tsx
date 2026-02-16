@@ -19,7 +19,7 @@ export default function ContentRenderer({ content, className = '', maxHeight = '
   }
 
   return (
-    <div className={`bg-slate-900/50 rounded p-4 overflow-auto ${className}`} style={{ maxHeight }}>
+    <div className={`bg-gray-50 rounded p-4 overflow-auto ${className}`} style={{ maxHeight }}>
       <MarkdownRenderer content={content} />
     </div>
   )

@@ -36,10 +36,10 @@ export default function ConfirmDialog({ open, title, description, confirmLabel =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
-      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
-      <div ref={dialogRef} className="relative bg-surface-50 border border-white/[0.08] rounded-xl shadow-2xl max-w-md w-full p-6 animate-slide-up">
-        <h2 id="confirm-dialog-title" className="text-base font-semibold text-white/90 mb-1.5">{title}</h2>
-        {description && <p className="text-sm text-white/40 mb-6">{description}</p>}
+      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancel} />
+      <div ref={dialogRef} className="relative bg-surface-alt border border-line rounded-xl shadow-2xl max-w-md w-full p-6 animate-slide-up">
+        <h2 id="confirm-dialog-title" className="text-base font-semibold text-content mb-1.5">{title}</h2>
+        {description && <p className="text-sm text-content-muted mb-6">{description}</p>}
         <div className="flex justify-end gap-2">
           <button onClick={onCancel} className="btn-sm btn-secondary">{cancelLabel}</button>
           <button ref={confirmRef} onClick={onConfirm} className={`btn-sm ${variant === 'danger' ? 'btn-danger' : 'btn-primary'}`}>{confirmLabel}</button>

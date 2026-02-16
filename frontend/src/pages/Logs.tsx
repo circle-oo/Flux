@@ -3,25 +3,25 @@ import { useLogStore, LogEntry } from '../stores/logStore'
 import PageHeader from '../components/PageHeader'
 
 const levelColors: Record<string, string> = {
-  DEBUG: 'bg-white/[0.06] text-white/50',
-  INFO: 'bg-cyan-500/15 text-cyan-400',
-  WARN: 'bg-amber-500/15 text-amber-400',
-  ERROR: 'bg-rose-500/15 text-rose-400',
+  DEBUG: 'bg-surface-active text-content-muted',
+  INFO: 'bg-cyan-50 text-cyan-600',
+  WARN: 'bg-amber-50 text-amber-600',
+  ERROR: 'bg-rose-50 text-rose-600',
 }
 
 const componentColors: Record<string, string> = {
-  executor: 'text-violet-400',
-  triager: 'text-teal-400',
-  manager: 'text-emerald-400',
-  orchestrator: 'text-cyan-400',
-  server: 'text-amber-400',
-  main: 'text-white/40',
-  shutdown: 'text-orange-400',
-  github: 'text-pink-400',
+  executor: 'text-violet-600',
+  triager: 'text-teal-600',
+  manager: 'text-emerald-600',
+  orchestrator: 'text-cyan-600',
+  server: 'text-amber-600',
+  main: 'text-content-muted',
+  shutdown: 'text-orange-600',
+  github: 'text-pink-600',
 }
 
 function LevelBadge({ level }: { level: string }) {
-  const cls = levelColors[level] || 'bg-white/[0.06] text-white/50'
+  const cls = levelColors[level] || 'bg-surface-active text-content-muted'
   return (
     <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold ${cls}`}>
       {level}
@@ -45,7 +45,7 @@ function formatLogTime(iso: string): string {
 function AttrCell({ attrs }: { attrs: Record<string, unknown> }) {
   const [expanded, setExpanded] = useState(false)
   const keys = Object.keys(attrs)
-  if (keys.length === 0) return <span className="text-white/10">—</span>
+  if (keys.length === 0) return <span className="text-content-faint">—</span>
 
   const preview = keys
     .slice(0, 3)
@@ -57,7 +57,7 @@ function AttrCell({ attrs }: { attrs: Record<string, unknown> }) {
     return (
       <button
         onClick={() => setExpanded(true)}
-        className="text-left text-white/30 hover:text-white/50 font-mono text-[10px] truncate max-w-md transition-colors"
+        className="text-left text-content-faint hover:text-content-muted font-mono text-[10px] truncate max-w-md transition-colors"
         title="Click to expand"
         aria-expanded={false}
       >
@@ -70,7 +70,7 @@ function AttrCell({ attrs }: { attrs: Record<string, unknown> }) {
   return (
     <button
       onClick={() => setExpanded(false)}
-      className="text-left font-mono text-[10px] text-white/50 whitespace-pre-wrap"
+      className="text-left font-mono text-[10px] text-content-muted whitespace-pre-wrap"
       aria-expanded={true}
     >
       {JSON.stringify(attrs, null, 2)}
@@ -102,9 +102,9 @@ function LogToolbar({
             className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-all ${
               filter.level === lvl
                 ? lvl === ''
-                  ? 'bg-accent-600/20 text-accent-400 ring-1 ring-accent-500/20'
-                  : (levelColors[lvl] || 'bg-white/[0.06] text-white')
-                : 'bg-white/[0.03] text-white/30 hover:bg-white/[0.06] hover:text-white/50'
+                  ? 'bg-primary-600/20 text-primary-400 ring-1 ring-primary-500/20'
+                  : (levelColors[lvl] || 'bg-surface-active text-content')
+                : 'bg-surface-hover text-content-faint hover:bg-surface-active hover:text-content-muted'
             }`}
           >
             {lvl || 'ALL'}
@@ -122,12 +122,12 @@ function LogToolbar({
         className="input flex-1 text-xs min-h-[36px]"
       />
 
-      <label className="flex items-center gap-2 text-xs text-white/30 cursor-pointer select-none whitespace-nowrap">
+      <label className="flex items-center gap-2 text-xs text-content-faint cursor-pointer select-none whitespace-nowrap">
         <input
           type="checkbox"
           checked={autoScroll}
           onChange={(e) => onAutoScrollChange(e.target.checked)}
-          className="rounded border-white/[0.1] bg-white/[0.04]"
+          className="rounded border-line-hover bg-surface-hover"
         />
         Auto-scroll
       </label>
@@ -138,22 +138,22 @@ function LogToolbar({
 function LogRow({ entry }: { entry: LogEntry }) {
   return (
     <tr
-      className={`border-b border-white/[0.03] hover:bg-white/[0.02] ${
+      className={`border-b border-line-subtle hover:bg-surface-hover ${
         entry.level === 'ERROR'
-          ? 'bg-rose-500/[0.03]'
+          ? 'bg-rose-50/50'
           : entry.level === 'WARN'
-          ? 'bg-amber-500/[0.03]'
+          ? 'bg-amber-50/50'
           : ''
       }`}
     >
-      <td className="px-3 py-1.5 text-white/20 whitespace-nowrap font-mono text-[10px]">
+      <td className="px-3 py-1.5 text-content-faint whitespace-nowrap font-mono text-[10px]">
         {formatLogTime(entry.time)}
       </td>
       <td className="px-3 py-1.5"><LevelBadge level={entry.level} /></td>
-      <td className={`px-3 py-1.5 font-mono text-[10px] font-semibold ${componentColors[entry.attrs.component as string] || 'text-white/30'}`}>
+      <td className={`px-3 py-1.5 font-mono text-[10px] font-semibold ${componentColors[entry.attrs.component as string] || 'text-content-faint'}`}>
         {(entry.attrs.component as string) || '—'}
       </td>
-      <td className="px-3 py-1.5 text-white/70 text-xs">{entry.msg}</td>
+      <td className="px-3 py-1.5 text-content-secondary text-xs">{entry.msg}</td>
       <td className="px-3 py-1.5"><AttrCell attrs={entry.attrs} /></td>
     </tr>
   )
@@ -233,8 +233,8 @@ export default function Logs() {
 
       <div className="card flex-1 overflow-auto min-h-0">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-surface-100/95 backdrop-blur-sm z-10">
-            <tr className="text-left text-white/30 border-b border-white/[0.06]">
+          <thead className="sticky top-0 bg-sidebar/95 backdrop-blur-sm z-10">
+            <tr className="text-left text-content-faint border-b border-line">
               <th scope="col" className="px-3 py-2 w-24 font-medium text-[10px] uppercase tracking-wider">Time</th>
               <th scope="col" className="px-3 py-2 w-16 font-medium text-[10px] uppercase tracking-wider">Level</th>
               <th scope="col" className="px-3 py-2 w-20 font-medium text-[10px] uppercase tracking-wider">Component</th>
@@ -245,7 +245,7 @@ export default function Logs() {
           <tbody className="font-mono text-xs">
             {filteredLogs.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-white/20 text-sm">
+                <td colSpan={5} className="px-4 py-8 text-center text-content-faint text-sm">
                   {logs.length === 0
                     ? 'No log entries yet. Logs will appear here in real-time.'
                     : 'No entries match the current filters.'}

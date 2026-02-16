@@ -19,7 +19,7 @@ let nextId = 0
 const variantStyles: Record<ToastVariant, string> = {
   success: 'bg-emerald-500/90 border-emerald-400/30 text-white backdrop-blur-sm',
   error: 'bg-rose-500/90 border-rose-400/30 text-white backdrop-blur-sm',
-  info: 'bg-accent-500/90 border-accent-400/30 text-white backdrop-blur-sm',
+  info: 'bg-primary-500/90 border-primary-400/30 text-white backdrop-blur-sm',
 }
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {

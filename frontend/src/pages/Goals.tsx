@@ -75,7 +75,7 @@ export default function Goals() {
       {/* Create Form */}
       {showForm && (
         <div className="card p-5 sm:p-6 animate-slide-up">
-          <h2 className="text-base font-semibold text-white/90 mb-4">Create New Goal</h2>
+          <h2 className="text-base font-semibold text-content mb-4">Create New Goal</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="goal-title" className="label">Title</label>
@@ -130,18 +130,18 @@ export default function Goals() {
 
       {/* Current Goal */}
       {currentGoal && (
-        <div className="card p-5 sm:p-6 relative overflow-hidden ring-1 ring-accent-500/30">
-          <div className="absolute inset-0 bg-gradient-to-r from-accent-600/5 to-violet-600/5 pointer-events-none" />
+        <div className="card p-5 sm:p-6 relative overflow-hidden ring-1 ring-primary-500/30">
+          <div className="absolute inset-0 bg-gradient-to-r from-primary-600/5 to-primary-400/5 pointer-events-none" />
           <div className="relative">
             <div className="flex items-start justify-between mb-3">
-              <div className="text-[11px] font-medium text-white/30 uppercase tracking-widest">Active Goal</div>
+              <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest">Active Goal</div>
               <span className="badge-success">Active</span>
             </div>
-            <h3 className="text-lg font-semibold text-white/90 mb-2">{currentGoal.title}</h3>
-            <p className="text-sm text-white/50 mb-4">{currentGoal.description}</p>
+            <h3 className="text-lg font-semibold text-content mb-2">{currentGoal.title}</h3>
+            <p className="text-sm text-content-muted mb-4">{currentGoal.description}</p>
             {currentGoal.priorities.length > 0 && (
               <div className="mb-3">
-                <span className="text-[11px] font-medium text-white/30 uppercase tracking-wider">Priorities</span>
+                <span className="text-[11px] font-medium text-content-faint uppercase tracking-wider">Priorities</span>
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {currentGoal.priorities.map((p, i) => (
                     <span key={i} className="badge-info">{p}</span>
@@ -151,7 +151,7 @@ export default function Goals() {
             )}
             {currentGoal.metrics.length > 0 && (
               <div>
-                <span className="text-[11px] font-medium text-white/30 uppercase tracking-wider">Metrics</span>
+                <span className="text-[11px] font-medium text-content-faint uppercase tracking-wider">Metrics</span>
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {currentGoal.metrics.map((m, i) => (
                     <span key={i} className="badge-secondary">{m}</span>
@@ -165,7 +165,7 @@ export default function Goals() {
 
       {/* Goals List */}
       <div className="space-y-4">
-        <div className="text-[11px] font-medium text-white/30 uppercase tracking-widest">All Goals</div>
+        <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest">All Goals</div>
         {isLoading ? (
           <LoadingState message="Loading goals..." />
         ) : goals.length === 0 ? (
@@ -177,7 +177,7 @@ export default function Goals() {
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1.5">
-                      <h3 className="text-base font-medium text-white/90">{goal.title}</h3>
+                      <h3 className="text-base font-medium text-content">{goal.title}</h3>
                       <span
                         className={`badge ${
                           goal.status === 'ACTIVE'
@@ -192,8 +192,8 @@ export default function Goals() {
                         {goal.status}
                       </span>
                     </div>
-                    <p className="text-sm text-white/50 mb-2">{goal.description}</p>
-                    <div className="text-xs text-white/20">
+                    <p className="text-sm text-content-muted mb-2">{goal.description}</p>
+                    <div className="text-xs text-content-faint">
                       Created: {new Date(goal.created_at).toLocaleString()}
                       {goal.active_since && (
                         <> · Active: {new Date(goal.active_since).toLocaleString()}</>
@@ -210,7 +210,7 @@ export default function Goals() {
                   )}
                 </div>
                 {goal.priorities.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-white/[0.04]">
+                  <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-line-subtle">
                     {goal.priorities.map((p, i) => (
                       <span key={i} className="badge-info">{p}</span>
                     ))}

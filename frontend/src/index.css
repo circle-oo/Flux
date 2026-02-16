@@ -2,13 +2,91 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════
+   Theme Variables
+   ═══════════════════════════════════════════ */
+
+/* Blue Theme (iPhone 17 Blue — periwinkle cobalt) */
+:root, [data-theme="blue"] {
+  --c-page: #F7F9FE;
+  --c-surface: #FFFFFF;
+  --c-surface-hover: #F5F7FC;
+  --c-surface-active: #EDF0F8;
+  --c-surface-alt: #F0F4FB;
+  --c-surface-deep: #E8ECF5;
+  --c-sidebar: #F0F4FB;
+
+  --c-text: #1A1F36;
+  --c-text-secondary: #5B6382;
+  --c-text-muted: #8B93AB;
+  --c-text-faint: #B5BBCE;
+  --c-text-inverted: #FFFFFF;
+
+  --c-border: #E2E6F0;
+  --c-border-hover: #CDD3E2;
+  --c-border-subtle: #EDF0F7;
+
+  --c-p50: 239 244 255;
+  --c-p100: 219 230 254;
+  --c-p200: 191 207 253;
+  --c-p300: 147 177 252;
+  --c-p400: 107 140 248;
+  --c-p500: 75 110 245;
+  --c-p600: 54 84 227;
+  --c-p700: 44 67 201;
+
+  --c-selection: rgba(75, 110, 245, 0.15);
+  --c-scrollbar: rgba(0, 0, 0, 0.06);
+  --c-scrollbar-hover: rgba(0, 0, 0, 0.12);
+  --c-shadow: rgba(75, 110, 245, 0.08);
+}
+
+/* Green Theme (iPhone 17 Green — sage emerald) */
+[data-theme="green"] {
+  --c-page: #F5FAF6;
+  --c-surface: #FFFFFF;
+  --c-surface-hover: #F2F7F3;
+  --c-surface-active: #E8F0EA;
+  --c-surface-alt: #EDF5EF;
+  --c-surface-deep: #DFE9E1;
+  --c-sidebar: #EDF5EF;
+
+  --c-text: #1A2E1D;
+  --c-text-secondary: #506654;
+  --c-text-muted: #7F9683;
+  --c-text-faint: #ACCAB0;
+  --c-text-inverted: #FFFFFF;
+
+  --c-border: #D4E2D6;
+  --c-border-hover: #B8CEB9;
+  --c-border-subtle: #E5F0E7;
+
+  --c-p50: 239 253 244;
+  --c-p100: 212 247 226;
+  --c-p200: 171 240 200;
+  --c-p300: 115 226 163;
+  --c-p400: 62 207 128;
+  --c-p500: 29 185 96;
+  --c-p600: 18 150 77;
+  --c-p700: 15 120 63;
+
+  --c-selection: rgba(29, 185, 96, 0.15);
+  --c-scrollbar: rgba(0, 0, 0, 0.06);
+  --c-scrollbar-hover: rgba(0, 0, 0, 0.12);
+  --c-shadow: rgba(29, 185, 96, 0.08);
+}
+
+/* ═══════════════════════════════════════════
+   Base Layer
+   ═══════════════════════════════════════════ */
+
 @layer base {
   body {
     @apply antialiased font-sans;
-    background: #0f1117;
+    background: var(--c-page);
+    color: var(--c-text);
   }
 
-  /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -19,55 +97,67 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-white/10 rounded-full;
+    background: var(--c-scrollbar);
+    border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-white/20;
+    background: var(--c-scrollbar-hover);
   }
 
   ::selection {
-    @apply bg-accent-500/30;
+    background: var(--c-selection);
   }
 }
 
+/* ═══════════════════════════════════════════
+   Component Layer
+   ═══════════════════════════════════════════ */
+
 @layer components {
-  /* Glass card */
+  /* Glass card — light mode: white with subtle border + shadow */
   .card {
-    @apply bg-white/[0.03] backdrop-blur-sm rounded-xl border border-white/[0.06] transition-all duration-200;
+    @apply bg-surface rounded-xl border border-line transition-all duration-200;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
   }
 
   .card:hover {
-    @apply border-white/[0.1] bg-white/[0.04];
+    @apply border-line-hover;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
   }
 
-  /* Buttons */
+  /* ── Buttons ── */
   .btn {
-    @apply px-4 py-2.5 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface touch-manipulation min-h-[44px] text-sm inline-flex items-center justify-center gap-2;
+    @apply px-4 py-2.5 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-page touch-manipulation min-h-[44px] text-sm inline-flex items-center justify-center gap-2;
   }
 
   .btn-sm {
-    @apply px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface touch-manipulation inline-flex items-center justify-center gap-1.5;
+    @apply px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-page touch-manipulation inline-flex items-center justify-center gap-1.5;
   }
 
   .btn-primary {
-    @apply btn bg-accent-600 text-white hover:bg-accent-500 focus:ring-accent-500 shadow-lg shadow-accent-600/20 hover:shadow-accent-500/30;
+    @apply btn bg-primary-600 text-white hover:bg-primary-500 focus:ring-primary-500;
+    box-shadow: 0 2px 8px var(--c-shadow);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 4px 14px var(--c-shadow);
   }
 
   .btn-sm.btn-primary {
-    @apply bg-accent-600 text-white hover:bg-accent-500 focus:ring-accent-500;
+    @apply bg-primary-600 text-white hover:bg-primary-500 focus:ring-primary-500;
   }
 
   .btn-secondary {
-    @apply btn bg-white/[0.06] text-white/80 hover:bg-white/[0.1] hover:text-white focus:ring-white/20 border border-white/[0.08];
+    @apply btn bg-surface-hover text-content-secondary hover:bg-surface-active hover:text-content focus:ring-primary-200 border border-line;
   }
 
   .btn-sm.btn-secondary {
-    @apply bg-white/[0.06] text-white/80 hover:bg-white/[0.1] hover:text-white focus:ring-white/20 border border-white/[0.08];
+    @apply bg-surface-hover text-content-secondary hover:bg-surface-active hover:text-content focus:ring-primary-200 border border-line;
   }
 
   .btn-success {
-    @apply btn bg-emerald-600 text-white hover:bg-emerald-500 focus:ring-emerald-500 shadow-lg shadow-emerald-600/20;
+    @apply btn bg-emerald-600 text-white hover:bg-emerald-500 focus:ring-emerald-500;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
   }
 
   .btn-sm.btn-success {
@@ -75,7 +165,8 @@
   }
 
   .btn-danger {
-    @apply btn bg-rose-600 text-white hover:bg-rose-500 focus:ring-rose-500 shadow-lg shadow-rose-600/20;
+    @apply btn bg-rose-600 text-white hover:bg-rose-500 focus:ring-rose-500;
+    box-shadow: 0 2px 8px rgba(244, 63, 94, 0.15);
   }
 
   .btn-sm.btn-danger {
@@ -83,70 +174,74 @@
   }
 
   .btn-warning {
-    @apply btn bg-amber-600 text-white hover:bg-amber-500 focus:ring-amber-500 shadow-lg shadow-amber-600/20;
+    @apply btn bg-amber-600 text-white hover:bg-amber-500 focus:ring-amber-500;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
   }
 
   .btn-sm.btn-warning {
     @apply bg-amber-600 text-white hover:bg-amber-500 focus:ring-amber-500;
   }
 
-  /* Badges */
+  /* ── Badges ── */
   .badge {
     @apply px-2 py-0.5 text-[11px] font-semibold rounded-full tracking-wide uppercase inline-flex items-center gap-1;
   }
 
   .badge-success {
-    @apply badge bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/20;
+    @apply badge bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/60;
   }
 
   .badge-info {
-    @apply badge bg-cyan-500/15 text-cyan-400 ring-1 ring-cyan-500/20;
+    @apply badge bg-cyan-50 text-cyan-700 ring-1 ring-cyan-200/60;
   }
 
   .badge-warning {
-    @apply badge bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/20;
+    @apply badge bg-amber-50 text-amber-700 ring-1 ring-amber-200/60;
   }
 
   .badge-danger {
-    @apply badge bg-rose-500/15 text-rose-400 ring-1 ring-rose-500/20;
+    @apply badge bg-rose-50 text-rose-700 ring-1 ring-rose-200/60;
   }
 
   .badge-secondary {
-    @apply badge bg-white/[0.06] text-white/50 ring-1 ring-white/[0.08];
+    @apply badge bg-surface-hover text-content-muted ring-1 ring-line;
   }
 
   .badge-purple {
-    @apply badge bg-violet-500/15 text-violet-400 ring-1 ring-violet-500/20;
+    @apply badge bg-violet-50 text-violet-700 ring-1 ring-violet-200/60;
   }
 
   .badge-muted {
-    @apply badge bg-white/[0.04] text-white/30 ring-1 ring-white/[0.06];
+    @apply badge bg-surface-hover text-content-faint ring-1 ring-line-subtle;
   }
 
-  /* Inputs */
+  /* ── Inputs ── */
   .input {
-    @apply w-full px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-white/90 placeholder-white/25 focus:outline-none focus:ring-2 focus:ring-accent-500/40 focus:border-accent-500/50 touch-manipulation min-h-[44px] text-sm transition-all duration-200;
+    @apply w-full px-3.5 py-2.5 bg-surface border border-line rounded-lg text-content placeholder-content-faint focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500/50 touch-manipulation min-h-[44px] text-sm transition-all duration-200;
   }
 
   .label {
-    @apply block text-xs font-medium text-white/50 mb-1.5 uppercase tracking-wider;
+    @apply block text-xs font-medium text-content-muted mb-1.5 uppercase tracking-wider;
   }
 
-  /* Filter buttons */
+  /* ── Filter buttons ── */
   .btn-filter {
     @apply px-3 py-2 rounded-lg text-xs font-medium border transition-all duration-200 touch-manipulation min-h-[36px] flex items-center;
   }
 
   .btn-filter-active {
-    @apply btn-filter bg-accent-600/20 border-accent-500/40 text-accent-300 ring-1 ring-accent-500/20;
+    @apply btn-filter bg-primary-50 border-primary-200 text-primary-700 ring-1 ring-primary-200/50;
   }
 
   .btn-filter-inactive {
-    @apply btn-filter bg-white/[0.03] border-white/[0.06] text-white/40 hover:border-white/[0.12] hover:text-white/60 hover:bg-white/[0.05];
+    @apply btn-filter bg-surface border-line text-content-muted hover:border-line-hover hover:text-content-secondary hover:bg-surface-hover;
   }
 }
 
-/* Utilities */
+/* ═══════════════════════════════════════════
+   Utility Layer
+   ═══════════════════════════════════════════ */
+
 @layer utilities {
   .touch-manipulation {
     touch-action: manipulation;
@@ -163,47 +258,47 @@
   }
 
   .text-gradient {
-    @apply bg-gradient-to-r from-accent-400 to-violet-400 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-primary-500 to-primary-300 bg-clip-text text-transparent;
   }
 }
 
-/* Toast animation */
+/* ═══════════════════════════════════════════
+   Toast Animation
+   ═══════════════════════════════════════════ */
+
 @keyframes slide-in {
-  from {
-    opacity: 0;
-    transform: translateX(1rem);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(1rem); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 .animate-slide-in {
   animation: slide-in 0.2s ease-out;
 }
 
-/* Markdown prose styles */
+/* ═══════════════════════════════════════════
+   Markdown Prose
+   ═══════════════════════════════════════════ */
+
 .prose-markdown {
-  @apply text-sm text-white/70 leading-relaxed;
+  @apply text-sm text-content-secondary leading-relaxed;
 }
 
 .prose-markdown h1 {
-  @apply text-xl font-bold text-white/90 mt-4 mb-2 pb-1 border-b border-white/[0.06];
+  @apply text-xl font-bold text-content mt-4 mb-2 pb-1 border-b border-line;
 }
 
 .prose-markdown h2 {
-  @apply text-lg font-semibold text-white/90 mt-4 mb-2 pb-1 border-b border-white/[0.06];
+  @apply text-lg font-semibold text-content mt-4 mb-2 pb-1 border-b border-line;
 }
 
 .prose-markdown h3 {
-  @apply text-base font-semibold text-white/80 mt-3 mb-1;
+  @apply text-base font-semibold text-content mt-3 mb-1;
 }
 
 .prose-markdown h4,
 .prose-markdown h5,
 .prose-markdown h6 {
-  @apply text-sm font-semibold text-white/80 mt-3 mb-1;
+  @apply text-sm font-semibold text-content mt-3 mb-1;
 }
 
 .prose-markdown p {
@@ -219,7 +314,7 @@
 }
 
 .prose-markdown li {
-  @apply text-white/70;
+  @apply text-content-secondary;
 }
 
 .prose-markdown li > ul,
@@ -228,23 +323,23 @@
 }
 
 .prose-markdown a {
-  @apply text-accent-400 hover:text-accent-300 underline decoration-accent-400/30 hover:decoration-accent-400/60 transition-colors;
+  @apply text-primary-600 hover:text-primary-500 underline decoration-primary-300/40 hover:decoration-primary-400/60 transition-colors;
 }
 
 .prose-markdown code {
-  @apply bg-white/[0.06] text-accent-300 px-1.5 py-0.5 rounded text-xs font-mono;
+  @apply bg-primary-50 text-primary-700 px-1.5 py-0.5 rounded text-xs font-mono;
 }
 
 .prose-markdown pre {
-  @apply bg-surface-400/70 rounded-lg p-3 overflow-auto mb-2 border border-white/[0.04];
+  @apply bg-gray-900 rounded-lg p-3 overflow-auto mb-2 border border-gray-800;
 }
 
 .prose-markdown pre code {
-  @apply bg-transparent p-0 text-white/70;
+  @apply bg-transparent p-0 text-gray-300;
 }
 
 .prose-markdown blockquote {
-  @apply border-l-2 border-accent-500/30 pl-3 italic text-white/40 mb-2;
+  @apply border-l-2 border-primary-300/50 pl-3 italic text-content-muted mb-2;
 }
 
 .prose-markdown table {
@@ -252,27 +347,27 @@
 }
 
 .prose-markdown th {
-  @apply text-left text-white/60 font-semibold px-3 py-1.5 border-b border-white/[0.08] bg-white/[0.02] text-xs;
+  @apply text-left text-content-muted font-semibold px-3 py-1.5 border-b border-line bg-surface-hover text-xs;
 }
 
 .prose-markdown td {
-  @apply text-white/60 px-3 py-1.5 border-b border-white/[0.04] text-xs;
+  @apply text-content-secondary px-3 py-1.5 border-b border-line-subtle text-xs;
 }
 
 .prose-markdown tr:hover td {
-  @apply bg-white/[0.02];
+  @apply bg-surface-hover;
 }
 
 .prose-markdown hr {
-  @apply border-white/[0.06] my-3;
+  @apply border-line my-3;
 }
 
 .prose-markdown strong {
-  @apply text-white/90 font-semibold;
+  @apply text-content font-semibold;
 }
 
 .prose-markdown em {
-  @apply text-white/60 italic;
+  @apply text-content-muted italic;
 }
 
 .prose-markdown img {
@@ -283,38 +378,45 @@
   @apply mr-1.5;
 }
 
-/* JSON viewer syntax highlighting */
+/* ═══════════════════════════════════════════
+   JSON Viewer Syntax
+   ═══════════════════════════════════════════ */
+
 .json-viewer {
   @apply font-mono;
 }
 
 .json-key {
-  @apply text-accent-400;
+  @apply text-primary-600;
 }
 
 .json-string {
-  @apply text-emerald-400;
+  @apply text-emerald-600;
 }
 
 .json-number {
-  @apply text-amber-400;
+  @apply text-amber-600;
 }
 
 .json-boolean {
-  @apply text-violet-400;
+  @apply text-violet-600;
 }
 
 .json-null {
-  @apply text-white/30;
+  @apply text-content-faint;
 }
 
-/* ReactFlow overrides */
+/* ═══════════════════════════════════════════
+   ReactFlow Overrides
+   ═══════════════════════════════════════════ */
+
 .react-flow__controls {
-  @apply bg-white/[0.04] border border-white/[0.08] rounded-lg overflow-hidden;
+  @apply bg-surface border border-line rounded-lg overflow-hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
 .react-flow__controls-button {
-  @apply bg-transparent border-white/[0.06] text-white/60 hover:bg-white/[0.06];
+  @apply bg-transparent border-line text-content-muted hover:bg-surface-hover;
 }
 
 .react-flow__attribution {

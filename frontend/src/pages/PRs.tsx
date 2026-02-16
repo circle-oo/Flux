@@ -86,7 +86,7 @@ export default function PRs() {
       {/* Filters */}
       <div className="card p-4 space-y-3">
         <div>
-          <label className="text-[11px] text-white/30 mb-1.5 block uppercase tracking-widest font-medium" id="pr-status-filter-label">Status</label>
+          <label className="text-[11px] text-content-faint mb-1.5 block uppercase tracking-widest font-medium" id="pr-status-filter-label">Status</label>
           <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-labelledby="pr-status-filter-label">
             {statusFilters.map((sf) => (
               <button
@@ -103,7 +103,7 @@ export default function PRs() {
         </div>
 
         <div>
-          <label className="text-[11px] text-white/30 mb-1.5 block uppercase tracking-widest font-medium" id="pr-sort-label">Sort by</label>
+          <label className="text-[11px] text-content-faint mb-1.5 block uppercase tracking-widest font-medium" id="pr-sort-label">Sort by</label>
           <div className="flex items-center gap-2 flex-wrap" role="group" aria-labelledby="pr-sort-label">
             <button
               onClick={() => setSortBy('created_at')}

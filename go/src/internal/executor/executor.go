@@ -113,7 +113,17 @@ func (e *Executor) Run(ctx context.Context) {
 			return
 		default:
 			e.executeOnce(ctx)
-			time.Sleep(5 * time.Second)
+
+			// Interruptible wait — respond to stop signals immediately
+			select {
+			case <-ctx.Done():
+				slog.Info("executor stopping due to context cancellation", "id", e.id)
+				return
+			case <-e.stopCh:
+				slog.Info("executor stopping due to stop signal", "id", e.id)
+				return
+			case <-time.After(5 * time.Second):
+			}
 		}
 	}
 }
@@ -132,7 +142,12 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		return
 	}
 	if task == nil {
-		time.Sleep(30 * time.Second)
+		// Interruptible wait — respond to stop signals immediately
+		select {
+		case <-ctx.Done():
+		case <-e.stopCh:
+		case <-time.After(30 * time.Second):
+		}
 		return
 	}
 

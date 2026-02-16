@@ -37,10 +37,10 @@ const computeLayout = (tasks: Task[], dependencies: { dependent_id: string; depe
   layers.forEach((layer, layerIndex) => {
     layer.forEach((taskId, indexInLayer) => {
       const task = taskMap.get(taskId)!
-      nodes.push({ id: task.id, type: 'default', data: { label: (<div className="text-xs text-center"><div className="font-semibold text-white truncate max-w-[180px]">{task.title}</div><div className="text-[10px] mt-1 text-white/60">{task.status}</div></div>) }, position: { x: indexInLayer * nodeSpacingX + 100, y: layerIndex * nodeSpacingY + 50 }, style: { background: getNodeColor(task.status), border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '10px', padding: '12px', minWidth: '200px', color: 'white' } })
+      nodes.push({ id: task.id, type: 'default', data: { label: (<div className="text-xs text-center"><div className="font-semibold text-white truncate max-w-[180px]">{task.title}</div><div className="text-[10px] mt-1 text-white/70">{task.status}</div></div>) }, position: { x: indexInLayer * nodeSpacingX + 100, y: layerIndex * nodeSpacingY + 50 }, style: { background: getNodeColor(task.status), border: '1px solid rgba(0, 0, 0, 0.08)', borderRadius: '10px', padding: '12px', minWidth: '200px', color: 'white', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' } })
     })
   })
-  const edges: Edge[] = dependencies.map((dep) => ({ id: `${dep.dependency_id}-${dep.dependent_id}`, source: dep.dependency_id, target: dep.dependent_id, type: 'smoothstep', animated: taskMap.get(dep.dependent_id)?.status === 'RUNNING', style: { stroke: 'rgba(255,255,255,0.15)', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: 'rgba(255,255,255,0.15)' } }))
+  const edges: Edge[] = dependencies.map((dep) => ({ id: `${dep.dependency_id}-${dep.dependent_id}`, source: dep.dependency_id, target: dep.dependent_id, type: 'smoothstep', animated: taskMap.get(dep.dependent_id)?.status === 'RUNNING', style: { stroke: 'rgba(0,0,0,0.15)', strokeWidth: 2 }, markerEnd: { type: MarkerType.ArrowClosed, color: 'rgba(0,0,0,0.15)' } }))
   return { nodes, edges }
 }
 
@@ -51,10 +51,10 @@ export default function SubtaskDAGVisualization({ nodes: tasks, edges: dependenc
   useEffect(() => { setNodes(layout.nodes); setEdges(layout.edges) }, [layout, setNodes, setEdges])
 
   return (
-    <div style={{ width: '100%', height: '600px' }} className="bg-surface-400 rounded-xl border border-white/[0.06]">
+    <div style={{ width: '100%', height: '600px' }} className="bg-surface-deep rounded-xl border border-line">
       <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} fitView fitViewOptions={{ padding: 0.2, maxZoom: 1 }} minZoom={0.1} maxZoom={1.5} attributionPosition="bottom-left">
         <Controls />
-        <Background color="rgba(255,255,255,0.03)" gap={16} />
+        <Background color="rgba(0,0,0,0.04)" gap={16} />
       </ReactFlow>
     </div>
   )

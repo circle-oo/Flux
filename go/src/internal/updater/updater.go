@@ -182,11 +182,20 @@ func (u *Updater) Start(ctx context.Context) {
 }
 
 // Stop cancels the polling loop and waits for it to finish.
+// Safe to call even if Start() was never called.
 func (u *Updater) Stop() {
 	if u.cancel != nil {
 		u.cancel()
 	}
-	<-u.done
+
+	// Only wait if Start() was actually called (running == true).
+	// Otherwise u.done is never closed and we'd deadlock.
+	u.mu.RLock()
+	running := u.running
+	u.mu.RUnlock()
+	if running {
+		<-u.done
+	}
 }
 
 // TriggerUpdate manually triggers an update check and deploy.

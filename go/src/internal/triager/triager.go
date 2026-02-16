@@ -32,13 +32,15 @@ var triageTemplate = template.Must(template.ParseFS(triagePromptFS, "triage.txt"
 // Triage determines priority, analysis, rewritten description, and
 // the recommended model for task execution.
 type Triager struct {
-	id            string
-	config        *config.Config
-	claude        *claudecli.Runner
-	client        *apiclient.Client
-	notifier      *notifier.Discord
-	stopCh        chan struct{}
-	stopOnce      sync.Once
+	id       string
+	config   *config.Config
+	claude   *claudecli.Runner
+	client   *apiclient.Client
+	notifier *notifier.Discord
+	stopCh   chan struct{}
+	stopOnce sync.Once
+
+	mu            sync.Mutex // guards currentTaskID and running
 	currentTaskID string
 	running       bool
 }
@@ -60,9 +62,13 @@ func New(id string, cfg *config.Config, discord *notifier.Discord) *Triager {
 // Run is the main loop. It polls for PENDING tasks and triages them.
 func (t *Triager) Run(ctx context.Context) {
 	slog.Info("triager started", "id", t.id, "component", component)
+	t.mu.Lock()
 	t.running = true
+	t.mu.Unlock()
 	defer func() {
+		t.mu.Lock()
 		t.running = false
+		t.mu.Unlock()
 	}()
 
 	// Smoke test
@@ -84,7 +90,17 @@ func (t *Triager) Run(ctx context.Context) {
 			return
 		default:
 			t.processNext(ctx)
-			time.Sleep(10 * time.Second)
+
+			// Interruptible wait — respond to stop signals immediately
+			select {
+			case <-ctx.Done():
+				slog.Info("triager stopping (context cancelled)", "id", t.id, "component", component)
+				return
+			case <-t.stopCh:
+				slog.Info("triager stopping (stop signal)", "id", t.id, "component", component)
+				return
+			case <-time.After(10 * time.Second):
+			}
 		}
 	}
 }
@@ -105,9 +121,13 @@ func (t *Triager) processNext(ctx context.Context) {
 		return
 	}
 
+	t.mu.Lock()
 	t.currentTaskID = task.ID
+	t.mu.Unlock()
 	defer func() {
+		t.mu.Lock()
 		t.currentTaskID = ""
+		t.mu.Unlock()
 	}()
 
 	model := t.config.Triager.Model
@@ -460,6 +480,8 @@ func truncate(s string, maxLen int) string {
 // IsRunning returns whether the triager is currently running.
 // Implements the shutdown.Pod interface.
 func (t *Triager) IsRunning() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	return t.running
 }
 
@@ -467,5 +489,7 @@ func (t *Triager) IsRunning() bool {
 // Returns empty string if no task is active.
 // Implements the shutdown.Pod interface.
 func (t *Triager) CurrentTaskID() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	return t.currentTaskID
 }

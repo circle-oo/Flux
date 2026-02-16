@@ -38,7 +38,7 @@ export default function JsonViewer({ content, className = '', maxHeight = '24rem
   if (parsed === null) {
     // Not valid JSON, render as plain text
     return (
-      <pre className={`text-sm text-slate-300 bg-slate-900/50 rounded p-4 overflow-auto whitespace-pre-wrap ${className}`} style={{ maxHeight }}>
+      <pre className={`text-sm text-content-secondary bg-gray-50 rounded p-4 overflow-auto whitespace-pre-wrap ${className}`} style={{ maxHeight }}>
         {content}
       </pre>
     )
@@ -51,17 +51,17 @@ export default function JsonViewer({ content, className = '', maxHeight = '24rem
     <div className={`relative ${className}`}>
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="absolute top-2 right-2 text-xs text-slate-500 hover:text-slate-300 bg-slate-800 px-2 py-1 rounded z-10"
+        className="absolute top-2 right-2 text-xs text-content-muted hover:text-content-secondary bg-surface-active px-2 py-1 rounded z-10"
       >
         {collapsed ? 'Expand' : 'Collapse'}
       </button>
       {collapsed ? (
-        <pre className="text-sm text-slate-400 bg-slate-900/50 rounded p-4 overflow-auto">
+        <pre className="text-sm text-content-muted bg-gray-50 rounded p-4 overflow-auto">
           {Array.isArray(parsed) ? `[...] (${(parsed as unknown[]).length} items)` : `{...} (${Object.keys(parsed as object).length} keys)`}
         </pre>
       ) : (
         <pre
-          className="json-viewer text-sm bg-slate-900/50 rounded p-4 overflow-auto"
+          className="json-viewer text-sm bg-gray-50 rounded p-4 overflow-auto"
           style={{ maxHeight }}
           dangerouslySetInnerHTML={{ __html: highlighted }}
         />

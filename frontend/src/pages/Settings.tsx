@@ -45,7 +45,7 @@ export default function Settings() {
       {error && <ErrorBanner message={error} />}
 
       {isDeploying && (
-        <div className="p-3 bg-accent-500/10 border border-accent-500/20 rounded-lg text-sm text-accent-300" role="status">
+        <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-lg text-sm text-primary-300" role="status">
           Deploy in progress. Pulling latest code, rebuilding, and restarting...
         </div>
       )}
