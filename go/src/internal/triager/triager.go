@@ -164,19 +164,32 @@ func (t *Triager) processNext(ctx context.Context) {
 }
 
 // smokeTest verifies the Python Agent Manager is reachable via gRPC.
+// Retries up to 15 times (30s total) to allow the agent manager time to start.
 func (t *Triager) smokeTest(ctx context.Context) error {
 	if t.agentClient == nil {
 		return fmt.Errorf("agent client not available")
 	}
 
-	testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	_, err := t.agentClient.PodStatus(testCtx)
-	if err != nil {
-		return fmt.Errorf("agent manager health check failed: %w", err)
+	const maxAttempts = 15
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		testCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		_, lastErr = t.agentClient.PodStatus(testCtx)
+		cancel()
+		if lastErr == nil {
+			return nil
+		}
+		slog.Warn("triager waiting for agent manager",
+			"attempt", attempt, "max", maxAttempts, "error", lastErr, "component", component)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.stopCh:
+			return fmt.Errorf("triager stopped during smoke test")
+		case <-time.After(2 * time.Second):
+		}
 	}
-	return nil
+	return fmt.Errorf("agent manager health check failed after %d attempts: %w", maxAttempts, lastErr)
 }
 
 // --- Triage execution logic ---
