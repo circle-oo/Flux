@@ -655,7 +655,7 @@ export default function Tasks() {
                       {/* Title row */}
                       <div className="flex items-center gap-2 mb-1.5">
                         <h3 className="text-base font-medium text-slate-100 hover:text-blue-400 transition-colors truncate">
-                          {task.title}
+                          {task.triage_title || task.title}
                         </h3>
                         <span
                           className={`badge shrink-0 ${
@@ -697,11 +697,6 @@ export default function Tasks() {
                           {task.triage_description}
                         </p>
                       )}
-
-                      {/* User Description (clamped) */}
-                      <p className="text-sm text-slate-400 mb-2 line-clamp-2">
-                        {task.description}
-                      </p>
 
                       {/* Meta row */}
                       <div className="flex items-center gap-3 text-xs text-slate-500">
