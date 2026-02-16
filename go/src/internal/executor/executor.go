@@ -273,7 +273,10 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 
 	// Check subtask decomposition
 	parsed, parseErr := claudecli.ParseResponse(result.Stdout)
-	if parseErr == nil {
+	if parseErr != nil {
+		slog.Warn("failed to parse response for decomposition check", "task_id", task.ID, "error", parseErr)
+	} else {
+		slog.Debug("checking for decomposition", "task_id", task.ID, "result_text_length", len(parsed.ResultText))
 		if decomp := ParseDecomposition(parsed.ResultText); decomp != nil {
 			subtasks := ToSubtaskRequests(decomp)
 			slog.Info("task decomposed into subtasks", "task_id", task.ID, "subtask_count", len(subtasks))

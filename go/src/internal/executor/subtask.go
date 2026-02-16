@@ -27,68 +27,20 @@ func ParseDecomposition(resultText string) *Decomposition {
 	slog.Debug("parsing decomposition from result", "result_length", len(resultText))
 	// Look for the decompose JSON pattern
 	if !strings.Contains(resultText, `"decompose"`) {
-		slog.Debug("no decomposition found in result")
+		slog.Debug("no decomposition keyword found in result")
 		return nil
 	}
 
-	// Try to find and extract JSON block
-	var jsonStart, jsonEnd int
-	jsonStart = strings.Index(resultText, `{"decompose"`)
-	if jsonStart == -1 {
-		// Try with whitespace variations
-		jsonStart = strings.Index(resultText, `{ "decompose"`)
-		if jsonStart == -1 {
-			return nil
-		}
-	}
-
-	// Find the matching closing brace
-	braceCount := 0
-	inString := false
-	escaped := false
-
-	for i := jsonStart; i < len(resultText); i++ {
-		ch := resultText[i]
-
-		if escaped {
-			escaped = false
-			continue
-		}
-
-		if ch == '\\' {
-			escaped = true
-			continue
-		}
-
-		if ch == '"' {
-			inString = !inString
-			continue
-		}
-
-		if inString {
-			continue
-		}
-
-		if ch == '{' {
-			braceCount++
-		} else if ch == '}' {
-			braceCount--
-			if braceCount == 0 {
-				jsonEnd = i + 1
-				break
-			}
-		}
-	}
-
-	if jsonEnd == 0 {
+	jsonText := extractDecompositionJSON(resultText)
+	if jsonText == "" {
+		slog.Warn("decomposition keyword found but could not extract valid JSON from result")
 		return nil
 	}
-
-	jsonText := resultText[jsonStart:jsonEnd]
 
 	// Unmarshal the JSON
 	var decomp Decomposition
 	if err := json.Unmarshal([]byte(jsonText), &decomp); err != nil {
+		slog.Warn("failed to unmarshal decomposition JSON", "error", err, "json_length", len(jsonText))
 		return nil
 	}
 
@@ -127,6 +79,122 @@ func ParseDecomposition(resultText string) *Decomposition {
 
 	slog.Info("decomposition detected", "subtask_count", len(decomp.Subtasks))
 	return &decomp
+}
+
+// extractDecompositionJSON extracts the decomposition JSON from Claude's response text.
+// It handles two formats:
+//  1. JSON embedded in a markdown code block (```json\n{...}\n```) — Claude's typical output
+//  2. Inline JSON starting with {"decompose" or { "decompose"
+//
+// Returns empty string if no valid JSON block is found.
+func extractDecompositionJSON(resultText string) string {
+	// Strategy 1: Extract from markdown code blocks (most common case).
+	// Claude typically formats the decomposition inside ```json ... ``` blocks.
+	if jsonText := extractJSONFromCodeBlock(resultText); jsonText != "" {
+		return jsonText
+	}
+
+	// Strategy 2: Look for inline JSON starting with {"decompose" or { "decompose"
+	jsonStart := strings.Index(resultText, `{"decompose"`)
+	if jsonStart == -1 {
+		jsonStart = strings.Index(resultText, `{ "decompose"`)
+	}
+	if jsonStart == -1 {
+		return ""
+	}
+
+	jsonEnd := findMatchingBrace(resultText, jsonStart)
+	if jsonEnd == 0 {
+		return ""
+	}
+
+	return resultText[jsonStart:jsonEnd]
+}
+
+// extractJSONFromCodeBlock extracts JSON containing "decompose" from a markdown code block.
+// Looks for ```json\n...\n``` or ```\n...\n``` patterns.
+func extractJSONFromCodeBlock(text string) string {
+	// Try ```json first, then plain ```
+	for _, fence := range []string{"```json", "```"} {
+		startIdx := 0
+		for {
+			fencePos := strings.Index(text[startIdx:], fence)
+			if fencePos == -1 {
+				break
+			}
+			fencePos += startIdx
+
+			// Find end of fence opening line
+			contentStart := strings.Index(text[fencePos:], "\n")
+			if contentStart == -1 {
+				break
+			}
+			contentStart += fencePos + 1
+
+			// Find closing ```
+			closingFence := strings.Index(text[contentStart:], "```")
+			if closingFence == -1 {
+				break
+			}
+
+			content := strings.TrimSpace(text[contentStart : contentStart+closingFence])
+
+			// Check if this code block contains a decomposition
+			if strings.Contains(content, `"decompose"`) && strings.HasPrefix(content, "{") {
+				// Validate it's parseable JSON before returning
+				var test map[string]interface{}
+				if json.Unmarshal([]byte(content), &test) == nil {
+					return content
+				}
+				slog.Debug("code block contains decompose keyword but invalid JSON", "content_length", len(content))
+			}
+
+			// Move past this code block and keep searching
+			startIdx = contentStart + closingFence + 3
+		}
+	}
+	return ""
+}
+
+// findMatchingBrace finds the matching closing brace for a JSON object starting at jsonStart.
+// Returns the index after the closing brace, or 0 if not found.
+func findMatchingBrace(text string, jsonStart int) int {
+	braceCount := 0
+	inString := false
+	escaped := false
+
+	for i := jsonStart; i < len(text); i++ {
+		ch := text[i]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if ch == '{' {
+			braceCount++
+		} else if ch == '}' {
+			braceCount--
+			if braceCount == 0 {
+				return i + 1
+			}
+		}
+	}
+	return 0
 }
 
 // ValidateSubtasks checks that all subtasks meet quality criteria.
