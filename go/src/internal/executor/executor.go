@@ -339,9 +339,16 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 	}
 
 	// Parse and populate task result for PR description
-	parsed, parseErr := claudecli.ParseResponse(result.Stdout)
-	if parseErr == nil && parsed.ResultText != "" {
-		task.Result = parsed.ResultText
+	// First try to extract the structured "## Task Summary" section from the output
+	taskSummary := ExtractTaskSummary(result.Stdout)
+	if taskSummary != "" {
+		task.Result = taskSummary
+	} else {
+		// Fall back to the JSON result field if no structured summary found
+		parsed, parseErr := claudecli.ParseResponse(result.Stdout)
+		if parseErr == nil && parsed.ResultText != "" {
+			task.Result = parsed.ResultText
+		}
 	}
 
 	// Create PR
