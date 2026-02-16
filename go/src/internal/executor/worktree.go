@@ -21,11 +21,12 @@ type WorktreeManager struct {
 
 // WorktreeTask represents a task's worktree state for cleanup decisions
 type WorktreeTask struct {
-	ProjectName string
-	TaskID      string
-	Status      string
-	PRStatus    string
-	CompletedAt time.Time
+	ProjectName       string
+	TaskID            string
+	Status            string
+	PRStatus          string
+	CompletedAt       time.Time
+	ActiveSubtaskCount int // Number of active subtasks (PENDING, READY, RUNNING)
 }
 
 // NewWorktreeManager creates a new WorktreeManager.
@@ -352,6 +353,27 @@ func (wm *WorktreeManager) FindByBranch(projectName, branchName string) (string,
 	return worktreePath, nil
 }
 
+// FindWorktreeByTaskID finds a worktree by its task ID.
+// This is useful for locating parent worktrees when merging subtask branches.
+func (wm *WorktreeManager) FindWorktreeByTaskID(projectName, taskID string) (string, error) {
+	// Construct expected worktree path using task ID prefix
+	taskIDPrefix := taskID
+	if len(taskID) > 8 {
+		taskIDPrefix = taskID[:8]
+	}
+
+	taskBaseDir := filepath.Join(wm.workspaceBase, "trees", fmt.Sprintf("%s--task-%s", projectName, taskIDPrefix))
+	worktreePath := filepath.Join(taskBaseDir, "worktree")
+
+	// Verify it exists
+	if _, err := os.Stat(worktreePath); err != nil {
+		return "", fmt.Errorf("worktree not found for task %s: %w", taskID, err)
+	}
+
+	slog.Debug("worktree found by task ID", "task_id", taskID, "path", worktreePath)
+	return worktreePath, nil
+}
+
 // RebaseOnMain rebases the worktree's branch onto the default branch to resolve conflicts.
 func (wm *WorktreeManager) RebaseOnMain(worktreePath string) error {
 	// Detect the default branch from the worktree's remote
@@ -394,6 +416,79 @@ func (wm *WorktreeManager) RebaseOnMain(worktreePath string) error {
 	return nil
 }
 
+// MergeSubtaskIntoParent merges commits from a subtask branch into the parent task's branch.
+// This is used when subtasks need to contribute their changes to a parent task before PR creation.
+func (wm *WorktreeManager) MergeSubtaskIntoParent(projectName, parentTaskID, subtaskTaskID string) error {
+	// Locate parent worktree
+	parentWorktree, err := wm.FindWorktreeByTaskID(projectName, parentTaskID)
+	if err != nil {
+		return fmt.Errorf("failed to find parent worktree: %w", err)
+	}
+
+	// Locate subtask worktree
+	subtaskWorktree, err := wm.FindWorktreeByTaskID(projectName, subtaskTaskID)
+	if err != nil {
+		return fmt.Errorf("failed to find subtask worktree: %w", err)
+	}
+
+	// Construct subtask branch name
+	subtaskBranch := fmt.Sprintf("task/%s", subtaskTaskID[:8])
+
+	slog.Info("merging subtask into parent",
+		"parent_task_id", parentTaskID,
+		"subtask_task_id", subtaskTaskID,
+		"subtask_branch", subtaskBranch,
+		"parent_worktree", parentWorktree)
+
+	// Get the bare repo path for the subtask (to fetch from)
+	subtaskTaskBaseDir := filepath.Dir(subtaskWorktree)
+	subtaskBareDir := filepath.Join(subtaskTaskBaseDir, ".repo")
+
+	// Add subtask's bare repo as a temporary remote in parent worktree
+	remoteName := fmt.Sprintf("subtask-%s", subtaskTaskID[:8])
+	addRemoteCmd := exec.Command("git", "-C", parentWorktree, "remote", "add", remoteName, subtaskBareDir)
+	if output, err := addRemoteCmd.CombinedOutput(); err != nil {
+		// Remote might already exist, try to update URL instead
+		setURLCmd := exec.Command("git", "-C", parentWorktree, "remote", "set-url", remoteName, subtaskBareDir)
+		if setErr := setURLCmd.Run(); setErr != nil {
+			return fmt.Errorf("failed to add remote for subtask: %w: %s", err, output)
+		}
+	}
+
+	// Fetch subtask branch from the temporary remote
+	fetchCmd := exec.Command("git", "-C", parentWorktree, "fetch", remoteName, subtaskBranch)
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to fetch subtask branch: %w: %s", err, output)
+	}
+
+	// Merge the subtask commits into parent's current branch
+	mergeRef := fmt.Sprintf("%s/%s", remoteName, subtaskBranch)
+	mergeCmd := exec.Command("git", "-C", parentWorktree, "merge", mergeRef, "--no-edit",
+		"-m", fmt.Sprintf("Merge subtask %s into parent %s", subtaskTaskID[:8], parentTaskID[:8]))
+	output, err := mergeCmd.CombinedOutput()
+	if err != nil {
+		// Check if there are merge conflicts
+		if strings.Contains(string(output), "CONFLICT") {
+			// Abort the merge and return a clear error
+			abortCmd := exec.Command("git", "-C", parentWorktree, "merge", "--abort")
+			_ = abortCmd.Run()
+			return fmt.Errorf("merge conflict detected when merging subtask %s into parent %s: %s",
+				subtaskTaskID[:8], parentTaskID[:8], string(output))
+		}
+		return fmt.Errorf("failed to merge subtask branch: %w: %s", err, output)
+	}
+
+	// Remove temporary remote
+	removeRemoteCmd := exec.Command("git", "-C", parentWorktree, "remote", "remove", remoteName)
+	_ = removeRemoteCmd.Run() // Ignore errors - cleanup is best-effort
+
+	slog.Info("successfully merged subtask into parent",
+		"parent_task_id", parentTaskID,
+		"subtask_task_id", subtaskTaskID)
+
+	return nil
+}
+
 // CleanupWorktree removes the entire task directory (worktree + dedicated bare repo).
 func (wm *WorktreeManager) CleanupWorktree(projectName, worktreePath string) error {
 	// worktreePath is {base}/trees/{project}--task-{id}/worktree
@@ -417,8 +512,20 @@ func (wm *WorktreeManager) RunCleanup(tasks []WorktreeTask) error {
 	now := time.Now()
 
 	for _, task := range tasks {
-		slog.Debug("evaluating task for cleanup", "task_id", task.TaskID, "status", task.Status, "pr_status", task.PRStatus)
+		slog.Debug("evaluating task for cleanup",
+			"task_id", task.TaskID,
+			"status", task.Status,
+			"pr_status", task.PRStatus,
+			"active_subtasks", task.ActiveSubtaskCount)
 		shouldCleanup := false
+
+		// Never clean up parent tasks that still have active subtasks
+		if task.ActiveSubtaskCount > 0 {
+			slog.Debug("preserving parent task with active subtasks",
+				"task_id", task.TaskID,
+				"active_subtasks", task.ActiveSubtaskCount)
+			continue
+		}
 
 		switch task.Status {
 		case "COMPLETED":
