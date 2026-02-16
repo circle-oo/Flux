@@ -14,7 +14,6 @@ func TestRenderAutopilotPrompt(t *testing.T) {
 		ProjectName:        "test-project",
 		ProjectDescription: "Test project description",
 		ProjectTechStack:   "Go, React",
-		TaskType:           "CODING",
 	}
 
 	result, err := Render("autopilot.txt", data)
@@ -68,7 +67,6 @@ func TestRenderAutopilotPromptWithoutOptionalFields(t *testing.T) {
 	data := AutopilotData{
 		Title:       "Minimal Task",
 		Description: "Minimal description",
-		TaskType:    "CODING",
 	}
 
 	result, err := Render("autopilot.txt", data)
@@ -103,7 +101,6 @@ func TestRenderSystemPrompt(t *testing.T) {
 		GoalID:             "goal-123",
 		GoalTitle:          "Test Goal",
 		GoalDescription:    "Test goal description",
-		TaskType:           "CODING",
 		Priority:           50,
 	}
 
@@ -119,10 +116,6 @@ func TestRenderSystemPrompt(t *testing.T) {
 
 	if !strings.Contains(result, "test-project") {
 		t.Error("Expected system prompt to include project name")
-	}
-
-	if !strings.Contains(result, "Task Type: CODING") {
-		t.Error("Expected system prompt to include task type")
 	}
 
 	if !strings.Contains(result, "Task Priority: 50") {

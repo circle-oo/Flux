@@ -225,11 +225,11 @@ func detectSecondarySignals(task *models.Task, analysis *DecompositionAnalysis) 
 		})
 	}
 
-	// High-value coding tasks
-	if task.Type == models.TaskTypeCoding && task.Priority <= 25 {
+	// High-value tasks with high priority
+	if task.Priority <= 25 {
 		analysis.Signals = append(analysis.Signals, DecompositionSignal{
 			Name:        "High-Value Feature",
-			Description: "High-priority coding task may benefit from phased approach",
+			Description: "High-priority task may benefit from phased approach",
 			Strength:    1,
 		})
 	}
@@ -347,12 +347,8 @@ func ShouldSkipDecomposition(task *models.Task) bool {
 
 // isQuickWin checks if task is a trivial quick win.
 func isQuickWin(task *models.Task) bool {
-	if task.Type == models.TaskTypeDocument {
-		return true
-	}
-
 	combined := strings.ToLower(task.Title + " " + task.Description)
-	quickWinKeywords := []string{"typo", "fix readme", "update comment", "config change", "version bump"}
+	quickWinKeywords := []string{"typo", "fix readme", "update comment", "config change", "version bump", "documentation"}
 	return containsAnyKeyword(combined, quickWinKeywords)
 }
 

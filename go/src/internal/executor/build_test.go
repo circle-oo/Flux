@@ -31,9 +31,8 @@ func main() {}
 	}
 
 	e := &Executor{}
-	task := &models.Task{Type: models.TaskTypeCoding}
 
-	passed, output := e.runBuild(tmpDir, task)
+	passed, output := e.runBuild(tmpDir)
 	if !passed {
 		t.Errorf("expected build to pass, got failure: %s", output)
 	}
@@ -63,9 +62,8 @@ func main() {
 	}
 
 	e := &Executor{}
-	task := &models.Task{Type: models.TaskTypeCoding}
 
-	passed, output := e.runBuild(tmpDir, task)
+	passed, output := e.runBuild(tmpDir)
 	if passed {
 		t.Error("expected build to fail for invalid Go code")
 	}
@@ -79,9 +77,8 @@ func TestRunBuild_NoBuildSystem(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	e := &Executor{}
-	task := &models.Task{Type: models.TaskTypeCoding}
 
-	passed, output := e.runBuild(tmpDir, task)
+	passed, output := e.runBuild(tmpDir)
 	if !passed {
 		t.Errorf("expected pass when no build system detected, got failure: %s", output)
 	}
@@ -102,9 +99,8 @@ func TestRunBuild_MakefileProject(t *testing.T) {
 	}
 
 	e := &Executor{}
-	task := &models.Task{Type: models.TaskTypeCoding}
 
-	passed, output := e.runBuild(tmpDir, task)
+	passed, output := e.runBuild(tmpDir)
 	if !passed {
 		t.Errorf("expected Makefile build to pass, got failure: %s", output)
 	}
@@ -122,9 +118,8 @@ func TestRunBuild_MakefileProject_Failure(t *testing.T) {
 	}
 
 	e := &Executor{}
-	task := &models.Task{Type: models.TaskTypeCoding}
 
-	passed, _ := e.runBuild(tmpDir, task)
+	passed, _ := e.runBuild(tmpDir)
 	if passed {
 		t.Error("expected Makefile build to fail")
 	}
@@ -136,7 +131,6 @@ func TestRegisterBuildFailureTask_Fields(t *testing.T) {
 	failedTask := &models.Task{
 		ID:         "task-123",
 		Title:      "Original Task",
-		Type:       models.TaskTypeCoding,
 		Priority:   30,
 		Source:     models.TaskSourceOperator,
 		ProjectID:  "project-abc",
@@ -149,8 +143,16 @@ func TestRegisterBuildFailureTask_Fields(t *testing.T) {
 	// Test the task construction logic directly
 	bugfixTask := buildFailureTask(failedTask, buildOutput)
 
-	if bugfixTask.Type != models.TaskTypeBugfix {
-		t.Errorf("expected type BUGFIX, got %s", bugfixTask.Type)
+	// Check that bugfix tag is present
+	hasBugfixTag := false
+	for _, tag := range bugfixTask.Tags {
+		if tag == "bugfix" {
+			hasBugfixTag = true
+			break
+		}
+	}
+	if !hasBugfixTag {
+		t.Errorf("expected bugfix tag, got tags: %v", bugfixTask.Tags)
 	}
 	if bugfixTask.Priority != 10 {
 		t.Errorf("expected priority 10 (capped), got %d", bugfixTask.Priority)
@@ -167,8 +169,8 @@ func TestRegisterBuildFailureTask_Fields(t *testing.T) {
 	if bugfixTask.BranchName != failedTask.BranchName {
 		t.Errorf("expected branch_name %s, got %s", failedTask.BranchName, bugfixTask.BranchName)
 	}
-	if len(bugfixTask.Tags) != 2 {
-		t.Errorf("expected 2 tags, got %d", len(bugfixTask.Tags))
+	if len(bugfixTask.Tags) != 3 {
+		t.Errorf("expected 3 tags, got %d: %v", len(bugfixTask.Tags), bugfixTask.Tags)
 	}
 
 	// Check that build output is included in description

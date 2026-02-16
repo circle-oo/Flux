@@ -2,9 +2,6 @@
 {{- if .ProjectName}}
 **Project:** {{.ProjectName}}
 {{- end}}
-{{- if .TaskType}}
-**Type:** {{.TaskType}}
-{{- end}}
 
 ## Description
 {{- if .TriageDescription}}

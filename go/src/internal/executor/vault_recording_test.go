@@ -12,7 +12,6 @@ func TestBuildTaskSummaryData(t *testing.T) {
 	task := &models.Task{
 		ID:           "task-abc123",
 		Title:        "Implement feature X",
-		Type:         models.TaskTypeCoding,
 		Status:       models.TaskCompleted,
 		Priority:     5,
 		Model:        "sonnet",
@@ -36,9 +35,6 @@ func TestBuildTaskSummaryData(t *testing.T) {
 	}
 	if data.Title != task.Title {
 		t.Errorf("Title mismatch: got %s, want %s", data.Title, task.Title)
-	}
-	if data.Type != task.Type {
-		t.Errorf("Type mismatch: got %s, want %s", data.Type, task.Type)
 	}
 	if data.Status != task.Status {
 		t.Errorf("Status mismatch: got %s, want %s", data.Status, task.Status)
@@ -79,7 +75,6 @@ func TestBuildTaskSummaryDataWithDefaults(t *testing.T) {
 	task := &models.Task{
 		ID:       "task-def456",
 		Title:    "Task with defaults",
-		Type:     models.TaskTypeResearch,
 		Status:   models.TaskCompleted,
 		Priority: 10,
 		Model:    "opus",
@@ -107,7 +102,6 @@ func TestBuildTaskSummaryDataUsesResultStdout(t *testing.T) {
 	task := &models.Task{
 		ID:       "task-ghi789",
 		Title:    "Task with stdout",
-		Type:     models.TaskTypeCoding,
 		Status:   models.TaskCompleted,
 		Priority: 5,
 		Model:    "sonnet",

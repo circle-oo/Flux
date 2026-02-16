@@ -100,9 +100,17 @@ func (t *Task) NeedsOpus() bool {
 	return false
 }
 
-// RequiresTest returns true if this task type requires tests.
+// RequiresTest returns true if this task requires tests.
+// Tests are required by default unless the task has a "skip-tests" tag.
 func (t *Task) RequiresTest() bool {
-	return t.Type == TaskTypeCoding || t.Type == TaskTypeBugfix || t.Type == TaskTypeMaintenance
+	// Check for explicit skip-tests tag
+	for _, tag := range t.Tags {
+		if tag == "skip-tests" || tag == "no-tests" {
+			return false
+		}
+	}
+	// By default, require tests
+	return true
 }
 
 // IsRetryable returns true if this task can be retried (failed but within retry limits).
@@ -631,27 +639,6 @@ func (s *TaskStore) ValidateSubtaskDAGWithUpdate(parentID string, taskID string,
 	}
 
 	return nil
-}
-
-// hasCycle performs DFS to detect cycles in a directed graph.
-// Returns true if a cycle is detected starting from the given node.
-func hasCycle(node string, graph map[string][]string, visited, inStack map[string]bool) bool {
-	visited[node] = true
-	inStack[node] = true
-
-	for _, neighbor := range graph[node] {
-		if !visited[neighbor] {
-			if hasCycle(neighbor, graph, visited, inStack) {
-				return true
-			}
-		} else if inStack[neighbor] {
-			// Found a back edge (cycle)
-			return true
-		}
-	}
-
-	inStack[node] = false
-	return false
 }
 
 // GetTopologicalOrder returns subtasks of the given parent in topological order.
