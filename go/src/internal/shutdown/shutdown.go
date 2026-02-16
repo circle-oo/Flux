@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/circle-oo/flux/internal/config"
@@ -22,50 +23,50 @@ type Pod interface {
 	CurrentTaskID() string
 }
 
-// GracefulShutdown initiates a graceful shutdown of all pods.
-// It stops new task assignment, waits for pods to finish within the grace period,
-// and force-kills any remaining pods by moving their tasks to RETRY status.
-// The caller must pass a context with the desired timeout (e.g., context.WithTimeout).
-func GracefulShutdown(ctx context.Context, cfg *config.ShutdownConfig, pods []Pod, db *sql.DB, discord *notifier.Discord) error {
-	slog.Info("initiating graceful shutdown", "pods", len(pods), "grace_period", cfg.PodGracePeriod)
+// AgentCanceller can cancel running agent tasks.
+type AgentCanceller interface {
+	CancelTask(ctx context.Context, taskID string) error
+}
 
-	// Signal all pods to stop
+// GracefulShutdown initiates a two-stage graceful shutdown of all pods.
+//
+// Stage 1 (Grace Period): Signal all pods to stop and wait for them to finish
+// within cfg.PodGracePeriod (default 10min).
+//
+// Stage 2 (Force Kill): If pods still running after grace period, cancel tasks
+// via agentClient, SIGTERM the Python Agent Manager, wait cfg.ForceKillAfter
+// (default 2min), then SIGKILL if still running. Move all remaining tasks to RETRY.
+//
+// agentClient may be nil if no agent connection is available.
+func GracefulShutdown(ctx context.Context, cfg *config.ShutdownConfig, pods []Pod, db *sql.DB, discord *notifier.Discord, agentClient AgentCanceller) error {
+	gracePeriod := cfg.PodGracePeriod
+	if gracePeriod <= 0 {
+		gracePeriod = 10 * time.Minute
+	}
+
+	slog.Info("initiating graceful shutdown", "pods", len(pods), "grace_period", gracePeriod)
+
+	if discord != nil {
+		discord.Send(notifier.LevelInfo, fmt.Sprintf("Shutdown initiated: %d pods, grace period %s", len(pods), gracePeriod))
+	}
+
+	// Stage 1: Signal all pods to stop
 	for i, pod := range pods {
 		slog.Info("signaling pod to stop", "pod_index", i)
 		pod.Stop()
 	}
 
-	// Wait for pods to finish, polling every 500ms until context deadline.
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
+	// Wait for pods to finish within grace period
+	graceCtx, graceCancel := context.WithTimeout(ctx, gracePeriod)
+	defer graceCancel()
 
-	for {
-		select {
-		case <-ctx.Done():
-			slog.Warn("shutdown grace period expired, forcing pod kill")
-			if err := killOrphanedClaudeProcesses(); err != nil {
-				slog.Error("failed to kill orphaned claude processes", "error", err)
-			}
-			return forceKillPods(pods, db, discord)
-
-		case <-ticker.C:
-			allDone := true
-			runningCount := 0
-			for _, pod := range pods {
-				if pod.IsRunning() {
-					allDone = false
-					runningCount++
-				}
-			}
-
-			if allDone {
-				slog.Info("all pods stopped gracefully")
-				return nil
-			}
-
-			slog.Debug("shutdown: waiting for pods", "running", runningCount, "total", len(pods))
-		}
+	if waitForPods(graceCtx, pods) {
+		slog.Info("all pods stopped gracefully (stage 1)")
+		return nil
 	}
+
+	slog.Warn("shutdown grace period expired, entering stage 2 force kill")
+	return forceKillStage2(ctx, cfg, pods, db, discord, agentClient)
 }
 
 // forceKillPods moves all running pods' current tasks to RETRY status with crash_recovery=true.
@@ -170,6 +171,133 @@ func killOrphanedClaudeProcesses() error {
 
 	if killedCount > 0 {
 		slog.Warn("killed orphaned claude processes", "count", killedCount)
+	}
+
+	return nil
+}
+
+// forceKillStage2 implements the second stage of shutdown:
+// cancel tasks via agent, SIGTERM agent manager, wait, then SIGKILL.
+func forceKillStage2(ctx context.Context, cfg *config.ShutdownConfig, pods []Pod, db *sql.DB, discord *notifier.Discord, agentClient AgentCanceller) error {
+	forceTimeout := cfg.ForceKillAfter
+	if forceTimeout <= 0 {
+		forceTimeout = 2 * time.Minute
+	}
+
+	// Cancel running tasks via agent client
+	if agentClient != nil {
+		for _, pod := range pods {
+			if !pod.IsRunning() {
+				continue
+			}
+			taskID := pod.CurrentTaskID()
+			if taskID == "" {
+				continue
+			}
+			slog.Info("cancelling task via agent", "task_id", taskID)
+			cancelCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			if err := agentClient.CancelTask(cancelCtx, taskID); err != nil {
+				slog.Error("failed to cancel task via agent", "task_id", taskID, "error", err)
+			}
+			cancel()
+		}
+	}
+
+	// SIGTERM the Python Agent Manager process
+	if err := killAgentManager(); err != nil {
+		slog.Error("failed to kill agent manager", "error", err)
+	}
+
+	// Wait for force timeout
+	slog.Info("waiting for force kill timeout", "timeout", forceTimeout)
+	forceCtx, forceCancel := context.WithTimeout(ctx, forceTimeout)
+	defer forceCancel()
+
+	if waitForPods(forceCtx, pods) {
+		slog.Info("all pods stopped after stage 2 cancel")
+		return nil
+	}
+
+	// Time's up - SIGKILL any remaining processes
+	slog.Warn("force kill timeout expired, sending SIGKILL")
+	if err := killOrphanedClaudeProcesses(); err != nil {
+		slog.Error("failed to kill orphaned claude processes", "error", err)
+	}
+	return forceKillPods(pods, db, discord)
+}
+
+// waitForPods polls until all pods stop or context expires. Returns true if all stopped.
+func waitForPods(ctx context.Context, pods []Pod) bool {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			allDone := true
+			for _, pod := range pods {
+				if pod.IsRunning() {
+					allDone = false
+					break
+				}
+			}
+			if allDone {
+				return true
+			}
+		}
+	}
+}
+
+// killAgentManager finds and kills the Python Agent Manager process.
+// It sends SIGTERM first, waits 30s, then SIGKILL.
+func killAgentManager() error {
+	slog.Info("looking for agent_manager process")
+
+	cmd := exec.Command("pgrep", "-f", "agent_manager")
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			slog.Debug("no agent_manager process found")
+			return nil
+		}
+		return fmt.Errorf("pgrep agent_manager: %w", err)
+	}
+
+	pids := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, pidStr := range pids {
+		pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
+		if err != nil {
+			continue
+		}
+
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+
+		slog.Info("sending SIGTERM to agent_manager", "pid", pid)
+		if err := process.Signal(syscall.SIGTERM); err != nil {
+			slog.Warn("SIGTERM failed for agent_manager, sending SIGKILL", "pid", pid, "error", err)
+			_ = process.Kill()
+			continue
+		}
+
+		// Wait up to 30s for clean exit
+		done := make(chan struct{})
+		go func() {
+			process.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			slog.Info("agent_manager exited cleanly", "pid", pid)
+		case <-time.After(30 * time.Second):
+			slog.Warn("agent_manager did not exit in 30s, sending SIGKILL", "pid", pid)
+			_ = process.Kill()
+		}
 	}
 
 	return nil

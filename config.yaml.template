@@ -30,15 +30,23 @@ claude_code:
 
 ccusage:
   command: "npx ccusage@latest"
-  collection_interval: 1h
 
 orchestrator:
   check_interval: 5m
   scale_cooldown: 15m
-  max_total_pods: 5
-  min_research_ratio: 0.2
   workspace_base: "./workspaces"
   daily_summary_hour: 0
+
+  pods:
+    executor:
+      min: 0
+      max: 3
+    triager:
+      min: 0
+      max: 1
+    researcher:
+      min: 0
+      max: 0   # inactive until connected
 
   models:
     opus: "opus"
@@ -50,6 +58,11 @@ executor:
   max_turns: 30
   max_diff_lines: 2000
   max_files_changed: 20
+
+triager:
+  enabled: true
+  model: "haiku"
+  max_turns: 10
 
 subtask:
   max_depth: 1
@@ -80,7 +93,7 @@ projects:
   - name: "flux"
     type: "REPO"
     repo_url: "https://github.com/circle-oo/flux"
-    description: "Autonomous engineering system. Go backend (server, manager, orchestrator, executor) + React/TypeScript frontend. Executor runs Claude Code CLI in git worktrees to produce PRs autonomously."
+    description: "Autonomous engineering system. Go backend + React/TypeScript frontend. Executor runs Claude Code CLI in git worktrees to produce PRs autonomously."
     tech_stack: ["Go", "SQLite", "React", "TypeScript", "Tailwind CSS", "Claude Code CLI"]
 
 logging:

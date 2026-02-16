@@ -256,6 +256,10 @@ func (c *Client) GetModel(taskID string) (string, error) {
 // GetProject retrieves project information via the internal API.
 // GET /internal/projects/{id}
 func (c *Client) GetProject(projectID string) (*models.Project, error) {
+	if projectID == "" {
+		return nil, fmt.Errorf("project ID is empty")
+	}
+
 	slog.Debug("requesting project info", "project_id", projectID)
 
 	var project models.Project

@@ -19,16 +19,16 @@ import (
 
 	"github.com/circle-oo/flux/gen/flux/v1/fluxv1connect"
 	"github.com/circle-oo/flux/internal/agent"
+	"github.com/circle-oo/flux/internal/cleanup"
 	"github.com/circle-oo/flux/internal/config"
 	"github.com/circle-oo/flux/internal/db"
-	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/handler"
 	"github.com/circle-oo/flux/internal/manager"
 	"github.com/circle-oo/flux/internal/notesmd"
 	"github.com/circle-oo/flux/internal/notifier"
+	"github.com/circle-oo/flux/internal/orchestrator"
 	"github.com/circle-oo/flux/internal/server"
 	"github.com/circle-oo/flux/internal/shutdown"
-	"github.com/circle-oo/flux/internal/triager"
 	"github.com/circle-oo/flux/internal/updater"
 	"github.com/circle-oo/flux/internal/vault"
 	"github.com/circle-oo/flux/web"
@@ -95,10 +95,12 @@ func main() {
 		logger.Error("crash recovery failed", "error", err)
 	}
 
-	// 4c. Initialize Vault Writer (via notesmd-cli)
+	// 4c. Initialize Vault Writer (for executor) and Facade (for server knowledge API)
 	notesmdClient := notesmd.NewClient(cfg.Vault.Name)
 	vaultWriter := vault.NewWriter(notesmdClient)
 	defer vaultWriter.Close()
+	vaultFacade := vault.NewFacade(notesmdClient, cfg.Vault.Path)
+	defer vaultFacade.Close()
 
 	// 5. Initialize Manager
 	mgr := manager.NewManager(database, cfg)
@@ -116,6 +118,7 @@ func main() {
 		Discord: discord,
 		WebFS:   webFS,
 		Version: version,
+		Vault:   vaultFacade,
 	})
 
 	// 6a. Connect-RPC: Python Agent Manager client + FluxService handler
@@ -160,30 +163,9 @@ func main() {
 		}
 	}()
 
-	// 9. Start Executor pods
+	// 9. Create PodScaler for dynamic executor/triager management
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	executorCount := cfg.Orchestrator.MaxTotalPods
-	executors := make([]*executor.Executor, executorCount)
-	for i := 0; i < executorCount; i++ {
-		execID := fmt.Sprintf("executor-%02d", i+1)
-		executors[i] = executor.NewExecutor(execID, cfg, discord, vaultWriter, agentClient)
-		go func(e *executor.Executor, id string) {
-			logger.Info("executor pod started", "id", id)
-			e.Run(ctx)
-		}(executors[i], execID)
-	}
-
-	// 9b. Start Triager component (if enabled)
-	var triage *triager.Triager
-	if cfg.Triager.Enabled {
-		triage = triager.New("triager-01", cfg, discord, agentClient)
-		go func() {
-			logger.Info("triager pod started", "id", "triager-01", "component", "main")
-			triage.Run(ctx)
-		}()
-	} else {
-		logger.Info("triager disabled", "component", "main")
-	}
+	podScaler := orchestrator.NewPodScaler(cfg, discord, vaultWriter, agentClient)
 
 	// 10. Initialize updater (always create instance for manual checks)
 	var autoUpdater *updater.Updater
@@ -207,6 +189,41 @@ func main() {
 		srv.SetUpdater(autoUpdater)
 	}
 
+	// 10b. Initialize Orchestrator with sub-components
+	orch := orchestrator.NewOrchestrator(cfg, database, discord)
+
+	// Rate limit handler
+	rlh := orchestrator.NewRateLimitHandler(database, discord, cfg.CCUsage.Command)
+	orch.SetRateLimitHandler(rlh)
+
+	// Usage collector
+	usageCollector := orchestrator.NewUsageCollector(database, cfg.CCUsage.Command)
+	orch.Register(usageCollector)
+
+	// Daily summary
+	dailySummary := orchestrator.NewDailySummary(database, discord, cfg.Orchestrator.DailySummaryHour)
+	orch.Register(dailySummary)
+
+	// Goal advisor
+	goalAdvisor := orchestrator.NewGoalAdvisor(database, discord)
+	orch.Register(goalAdvisor)
+
+	// Scale manager (with PodScaler for dynamic pod management)
+	scaleMgr := orchestrator.NewScaleManager(database, &cfg.Orchestrator, discord, podScaler)
+	orch.Register(scaleMgr)
+
+	// Cleanup / Cleaner
+	cleaner := cleanup.NewCleaner(database, &cfg.Cleanup, &cfg.Database, cfg.Vault.Path, discord)
+	orch.Register(cleaner)
+
+	// Wire orchestrator into server for status API
+	srv.SetOrchestrator(orch)
+	srv.SetScaleManager(scaleMgr)
+	srv.SetCleaner(cleaner)
+
+	// Start orchestrator in background
+	go orch.Start(ctx)
+
 	logger.Info("flux ready", "port", cfg.Server.Port)
 
 	// 11. Block on SIGTERM/SIGINT for graceful shutdown
@@ -220,24 +237,22 @@ func main() {
 		autoUpdater.Stop()
 	}
 
-	// Build pod list for graceful shutdown
-	pods := make([]shutdown.Pod, 0, executorCount+1)
-	for _, exec := range executors {
-		pods = append(pods, exec)
-	}
-	if triage != nil {
-		pods = append(pods, triage)
-	}
+	// Build pod list for graceful shutdown from PodScaler
+	pods := podScaler.Pods()
 
 	// Initiate graceful shutdown with context and timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Shutdown.PodGracePeriod)
 	defer shutdownCancel()
 
-	// Cancel executor/triager context to signal them to stop accepting new work
+	// Cancel PodScaler context to signal pods to stop accepting new work
+	podScaler.Stop()
 	ctxCancel()
 
+	// Stop orchestrator
+	orch.Stop()
+
 	// Use GracefulShutdown to coordinate pod termination
-	if err := shutdown.GracefulShutdown(shutdownCtx, &cfg.Shutdown, pods, database, discord); err != nil {
+	if err := shutdown.GracefulShutdown(shutdownCtx, &cfg.Shutdown, pods, database, discord, agentClient); err != nil {
 		logger.Error("graceful shutdown error", "error", err)
 	}
 

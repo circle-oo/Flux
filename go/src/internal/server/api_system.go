@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // handleRestart handles the legacy restart endpoint.
@@ -243,4 +245,66 @@ func (s *Server) handleInsights(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+// handleOrchestratorStatus handles GET /api/orchestrator/status
+// Returns orchestrator health, sub-component status, and scale state.
+func (s *Server) handleOrchestratorStatus(w http.ResponseWriter, r *http.Request) {
+	resp := map[string]any{
+		"running":    false,
+		"uptime":     "",
+		"tick_count": 0,
+	}
+
+	if s.orch != nil {
+		status := s.orch.Status()
+		resp["running"] = status.Running
+		resp["tick_count"] = status.TickCount
+		resp["rate_limited"] = status.RateLimited
+
+		if !status.RateLimitUntil.IsZero() {
+			resp["rate_limit_until"] = status.RateLimitUntil.Format(time.RFC3339)
+		}
+
+		if !status.StartedAt.IsZero() {
+			resp["uptime"] = fmt.Sprintf("%s", time.Since(status.StartedAt).Round(time.Second))
+			resp["started_at"] = status.StartedAt.Format(time.RFC3339)
+		}
+
+		var components []map[string]any
+		for _, ch := range status.Components {
+			var lastTick string
+			if !ch.LastTick.IsZero() {
+				lastTick = ch.LastTick.Format(time.RFC3339)
+			}
+			components = append(components, map[string]any{
+				"name":       ch.Name,
+				"healthy":    ch.Healthy,
+				"last_tick":  lastTick,
+				"last_error": ch.LastError,
+			})
+		}
+		resp["sub_components"] = components
+	}
+
+	if s.scaleManager != nil {
+		scaleStatus := s.scaleManager.Status()
+		resp["scale_status"] = map[string]any{
+			"executor_pods":      scaleStatus.GetExecutorPods(),
+			"triager_pods":       scaleStatus.GetTriagerPods(),
+			"researcher_pods":    scaleStatus.GetResearcherPods(),
+			"max_executor_pods":  scaleStatus.GetMaxExecutorPods(),
+			"max_triager_pods":   scaleStatus.GetMaxTriagerPods(),
+			"max_researcher_pods": scaleStatus.GetMaxResearcherPods(),
+			"queue_state":        scaleStatus.GetQueueState(),
+			"last_scale_time":    scaleStatus.GetLastScaleTime(),
+		}
+	}
+
+	if s.cleaner != nil {
+		diskStatus := s.cleaner.CheckDiskSpace()
+		resp["disk_status"] = diskStatus
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,18 +75,61 @@ type ClaudeCodeConfig struct {
 }
 
 type CCUsageConfig struct {
-	Command            string        `yaml:"command"`
-	CollectionInterval time.Duration `yaml:"collection_interval"`
+	Command string `yaml:"command"`
+}
+
+type PodTypeConfig struct {
+	Min int `yaml:"min"`
+	Max int `yaml:"max"`
+}
+
+type PodsConfig struct {
+	Executor   PodTypeConfig `yaml:"executor"`
+	Triager    PodTypeConfig `yaml:"triager"`
+	Researcher PodTypeConfig `yaml:"researcher"`
 }
 
 type OrchestratorConfig struct {
 	CheckInterval    time.Duration `yaml:"check_interval"`
 	ScaleCooldown    time.Duration `yaml:"scale_cooldown"`
 	MaxTotalPods     int           `yaml:"max_total_pods"`
-	MinResearchRatio float64       `yaml:"min_research_ratio"`
+	MinTriagerRatio  float64       `yaml:"min_triager_ratio"`
+	Pods             PodsConfig    `yaml:"pods"`
 	WorkspaceBase    string        `yaml:"workspace_base"`
 	DailySummaryHour int           `yaml:"daily_summary_hour"`
 	Models           ModelsConfig  `yaml:"models"`
+}
+
+// ResolvePods returns a PodsConfig derived from the explicit Pods section if set,
+// or falls back to legacy MaxTotalPods/MinTriagerRatio fields.
+func (o *OrchestratorConfig) ResolvePods() PodsConfig {
+	// If Pods is explicitly configured (any Max > 0), use it directly.
+	if o.Pods.Executor.Max > 0 || o.Pods.Triager.Max > 0 || o.Pods.Researcher.Max > 0 {
+		return o.Pods
+	}
+
+	// Derive from legacy fields.
+	maxPods := o.MaxTotalPods
+	if maxPods < 1 {
+		maxPods = 2
+	}
+
+	minTriager := o.MinTriagerRatio
+	if minTriager <= 0 {
+		minTriager = 0.20
+	}
+
+	triagerMax := int(math.Ceil(float64(maxPods) * minTriager))
+	if triagerMax < 1 {
+		triagerMax = 1
+	}
+	executorMax := maxPods - triagerMax
+
+	return PodsConfig{
+		Executor:   PodTypeConfig{Min: 0, Max: executorMax},
+		Triager:    PodTypeConfig{Min: 0, Max: triagerMax},
+		Researcher: PodTypeConfig{Min: 0, Max: 0},
+	}
 }
 
 type ModelsConfig struct {
@@ -200,8 +244,24 @@ func (c *Config) Validate() error {
 	if c.Server.Auth.Enabled && c.Server.Auth.Password == "" {
 		return fmt.Errorf("server.auth.password_env must resolve to a non-empty value when auth is enabled")
 	}
-	if c.Orchestrator.MaxTotalPods < 1 {
-		return fmt.Errorf("orchestrator.max_total_pods must be >= 1")
+	pods := c.Orchestrator.ResolvePods()
+	for _, pt := range []struct {
+		name string
+		cfg  PodTypeConfig
+	}{
+		{"executor", pods.Executor},
+		{"triager", pods.Triager},
+		{"researcher", pods.Researcher},
+	} {
+		if pt.cfg.Min < 0 {
+			return fmt.Errorf("orchestrator.pods.%s.min must be >= 0", pt.name)
+		}
+		if pt.cfg.Max < pt.cfg.Min {
+			return fmt.Errorf("orchestrator.pods.%s.max must be >= min (%d)", pt.name, pt.cfg.Min)
+		}
+	}
+	if pods.Executor.Max+pods.Triager.Max+pods.Researcher.Max < 1 {
+		return fmt.Errorf("orchestrator.pods: at least one pod type must have max > 0")
 	}
 	if c.Executor.MaxTurns < 1 {
 		return fmt.Errorf("executor.max_turns must be >= 1")

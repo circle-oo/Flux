@@ -164,7 +164,7 @@ func TestGracefulShutdown_PodsStopGracefully(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := GracefulShutdown(ctx, cfg, pods, db, discord)
+	err := GracefulShutdown(ctx, cfg, pods, db, discord, nil)
 	if err != nil {
 		t.Fatalf("GracefulShutdown failed: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestGracefulShutdown_ForceKillAfterGracePeriod(t *testing.T) {
 	// Context timeout controls grace period (matches main.go usage)
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.PodGracePeriod)
 	defer cancel()
-	err := GracefulShutdown(ctx, cfg, pods, db, discord)
+	err := GracefulShutdown(ctx, cfg, pods, db, discord, nil)
 	if err != nil {
 		t.Fatalf("GracefulShutdown failed: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestGracefulShutdown_NoPodsNoError(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := GracefulShutdown(ctx, cfg, []Pod{}, db, discord)
+	err := GracefulShutdown(ctx, cfg, []Pod{}, db, discord, nil)
 	if err != nil {
 		t.Fatalf("GracefulShutdown with no pods failed: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestGracefulShutdown_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err = GracefulShutdown(ctx, cfg, pods, db, discord)
+	err = GracefulShutdown(ctx, cfg, pods, db, discord, nil)
 	if err != nil {
 		t.Fatalf("GracefulShutdown failed: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestGracefulShutdown_MixedPodTypes(t *testing.T) {
 	// Context timeout controls grace period (matches main.go usage)
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.PodGracePeriod)
 	defer cancel()
-	err := GracefulShutdown(ctx, cfg, pods, db, discord)
+	err := GracefulShutdown(ctx, cfg, pods, db, discord, nil)
 	if err != nil {
 		t.Fatalf("GracefulShutdown failed: %v", err)
 	}

@@ -5,12 +5,10 @@ import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useWSStore } from '../stores/wsStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { api, Pod, Insights, TaskStats, Goal } from '../lib/api'
+import { api, Pod, Insights, InsightsSummary, TaskStats, Goal } from '../lib/api'
 import { countByStatus } from '../lib/utils'
 import PageHeader from '../components/PageHeader'
 import StatCard from '../components/StatCard'
-import PodCard from '../components/PodCard'
-import InsightsPanel from '../components/InsightsPanel'
 import LoadingState from '../components/LoadingState'
 
 type HealthLevel = 'healthy' | 'warning' | 'critical'
@@ -51,6 +49,7 @@ export default function Dashboard() {
   const podRefreshInterval = useSettingsStore((s) => s.podRefreshInterval)
   const [pods, setPods] = useState<Pod[]>([])
   const [insights, setInsights] = useState<Insights | null>(null)
+  const [insightSummary, setInsightSummary] = useState<InsightsSummary | null>(null)
   const [taskStats, setTaskStats] = useState<TaskStats | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -73,7 +72,12 @@ export default function Dashboard() {
 
   async function fetchInsights() {
     try {
-      setInsights(await api.getInsights())
+      const [ins, sum] = await Promise.all([
+        api.getInsights(),
+        api.getInsightsSummary('24h').catch(() => null),
+      ])
+      setInsights(ins)
+      if (sum) setInsightSummary(sum)
     } catch (error) {
       console.error('Failed to fetch insights:', error)
     }
@@ -133,15 +137,10 @@ export default function Dashboard() {
           <StatCard label="PRs Open" value={pendingPRs} color="text-violet-600" onClick={() => navigate('/prs')} />
         </div>
 
-        {/* Pods */}
-        <PodsSection pods={pods} />
-
-        {/* Insights + System */}
+        {/* Token Usage + System */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <section className="card p-5 lg:col-span-2">
-            <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-4">Insights</div>
-            <InsightsPanel insights={insights} onProjectClick={(id) => navigate(`/projects/${id}`)} />
-          </section>
+          <TokenUsageCard insights={insights} insightSummary={insightSummary} navigate={navigate} />
+          <PodsQuickStat pods={pods} navigate={navigate} />
           <SystemSidebar
             wsConnected={wsConnected}
             taskCounts={taskCounts}
@@ -217,16 +216,13 @@ export default function Dashboard() {
           </div>
         </button>
 
-        {/* Pods — full width */}
-        <div className="lg:col-span-4">
-          <PodsSection pods={pods} />
+        {/* Token Usage — 2 cols */}
+        <div className="lg:col-span-2">
+          <TokenUsageCard insights={insights} insightSummary={insightSummary} navigate={navigate} />
         </div>
 
-        {/* Insights — 3 cols */}
-        <section className="card p-5 lg:col-span-3">
-          <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-4">Insights</div>
-          <InsightsPanel insights={insights} onProjectClick={(id) => navigate(`/projects/${id}`)} />
-        </section>
+        {/* Pods quick stat */}
+        <PodsQuickStat pods={pods} navigate={navigate} />
 
         {/* Activity card — side */}
         <div className="card p-5">
@@ -305,20 +301,63 @@ function GoalHero({ goal, health, onClick }: { goal: Goal | null; health: Health
   )
 }
 
-function PodsSection({ pods }: { pods: Pod[] }) {
+function TokenUsageCard({ insights, insightSummary, navigate }: {
+  insights: Insights | null
+  insightSummary: InsightsSummary | null
+  navigate: (path: string) => void
+}) {
   return (
-    <section className="card p-5">
-      <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-4">Pods</div>
-      {pods.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {[...pods].sort((a, b) => a.id.localeCompare(b.id)).map((pod) => (
-            <PodCard key={pod.id} pod={pod} />
-          ))}
+    <button
+      type="button"
+      className="card p-5 w-full text-left transition-all hover:border-line-hover"
+      onClick={() => navigate('/insights')}
+    >
+      <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-3">Token Usage</div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <div className="text-[10px] text-content-faint uppercase tracking-wider mb-0.5">Total Tokens</div>
+          <div className="text-lg font-bold text-cyan-500 tabular-nums">
+            {insights ? insights.total_tokens.toLocaleString() : '--'}
+          </div>
         </div>
-      ) : (
-        <p className="text-content-faint italic text-sm py-4 text-center">No pods active</p>
+        <div>
+          <div className="text-[10px] text-content-faint uppercase tracking-wider mb-0.5">Total Cost</div>
+          <div className="text-lg font-bold text-emerald-500 tabular-nums">
+            {insights ? `$${insights.total_cost.toFixed(2)}` : '--'}
+          </div>
+        </div>
+      </div>
+      {insightSummary && (
+        <div className="mt-3 pt-3 border-t border-line-subtle flex items-center justify-between">
+          <span className="text-[10px] text-content-faint uppercase tracking-wider">Success Rate</span>
+          <span className={`text-sm font-semibold ${
+            insightSummary.success_rate >= 80 ? 'text-emerald-500' :
+            insightSummary.success_rate >= 50 ? 'text-amber-500' : 'text-rose-500'
+          }`}>{insightSummary.success_rate.toFixed(1)}%</span>
+        </div>
       )}
-    </section>
+    </button>
+  )
+}
+
+function PodsQuickStat({ pods, navigate }: { pods: Pod[]; navigate: (path: string) => void }) {
+  const busy = pods.filter((p) => p.status === 'busy').length
+  return (
+    <button
+      type="button"
+      className="card p-5 w-full text-left transition-all hover:border-line-hover"
+      onClick={() => navigate('/pods')}
+    >
+      <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-3">Pods</div>
+      <div className="flex items-end gap-2">
+        <span className="text-2xl font-bold text-content tabular-nums">{busy}/{pods.length}</span>
+        <span className="text-xs text-content-faint mb-1">active</span>
+      </div>
+      <div className="mt-2 flex items-center gap-1.5">
+        <div className={`w-2 h-2 rounded-full ${busy > 0 ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+        <span className="text-xs text-content-muted">{busy > 0 ? 'Working' : 'Idle'}</span>
+      </div>
+    </button>
   )
 }
 

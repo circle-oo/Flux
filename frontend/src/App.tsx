@@ -9,6 +9,9 @@ import Goals from './pages/Goals'
 import Tasks from './pages/Tasks'
 import Projects from './pages/Projects'
 import PRs from './pages/PRs'
+import Pods from './pages/Pods'
+import Insights from './pages/Insights'
+import Knowledge from './pages/Knowledge'
 import Logs from './pages/Logs'
 import Settings from './pages/Settings'
 import TaskDetail from './pages/TaskDetail'
@@ -53,6 +56,10 @@ function App() {
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:id" element={<ProjectDetail />} />
         <Route path="prs" element={<PRs />} />
+        <Route path="pods" element={<Pods />} />
+        <Route path="insights" element={<Insights />} />
+        <Route path="knowledge" element={<Knowledge />} />
+        <Route path="knowledge/*" element={<Knowledge />} />
         <Route path="logs" element={<Logs />} />
         <Route path="settings" element={<Settings />} />
       </Route>

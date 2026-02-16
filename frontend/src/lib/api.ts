@@ -81,7 +81,7 @@ export interface Project {
 
 export interface Pod {
   id: string
-  pod_type: 'executor' | 'researcher'
+  pod_type: 'executor' | 'triager' // researcher will be added in future
   status: 'idle' | 'busy'
   current_task: string
   task_title: string
@@ -133,6 +133,94 @@ export interface TaskStatusCounts {
 export interface TaskStats {
   today: TaskStatusCounts
   yesterday: TaskStatusCounts
+}
+
+// Detailed insights types
+export interface InsightsSummary {
+  total_tasks: number
+  completed_tasks: number
+  failed_tasks: number
+  success_rate: number
+  total_tokens: number
+  total_cost: number
+  avg_latency_min: number
+  active_projects: number
+}
+
+export interface DailyMetric {
+  date: string
+  tasks_completed: number
+  tasks_failed: number
+  tasks_created: number
+  total_tokens: number
+  total_cost: number
+  avg_latency_minutes: number
+}
+
+export interface AgentPerformance {
+  executor_id: string
+  tasks_completed: number
+  tasks_failed: number
+  success_rate: number
+  avg_duration_min: number
+}
+
+export interface PipelineHealth {
+  status: string
+  count: number
+}
+
+export interface FailureAnalysis {
+  category: string
+  count: number
+  examples: string[]
+}
+
+export interface SubComponentStatus {
+  name: string
+  healthy: boolean
+  last_tick: string
+  last_error: string
+}
+
+export interface ScaleStatus {
+  executor_pods: number
+  triager_pods: number
+  researcher_pods: number
+  max_executor_pods: number
+  max_triager_pods: number
+  max_researcher_pods: number
+  queue_state: string
+  last_scale_time: string
+}
+
+export interface DiskStatus {
+  available_bytes: number
+  total_bytes: number
+  used_bytes: number
+  level: string
+}
+
+export interface OrchestratorStatus {
+  running: boolean
+  uptime: string
+  started_at?: string
+  tick_count: number
+  rate_limited: boolean
+  rate_limit_until?: string
+  sub_components: SubComponentStatus[]
+  scale_status?: ScaleStatus
+  disk_status?: DiskStatus
+}
+
+export interface DiskUsageResponse {
+  available_bytes: number
+  total_bytes: number
+  used_bytes: number
+  level: string
+  available_gb: number
+  total_gb: number
+  used_pct: number
 }
 
 class APIClient {
@@ -417,6 +505,110 @@ class APIClient {
   // Config
   async getConfig(): Promise<Record<string, unknown>> {
     return this.fetch('/api/config')
+  }
+
+  // Detailed Insights
+  async getInsightsSummary(period: string): Promise<InsightsSummary> {
+    return this.fetch(`/api/insights/summary?period=${period}`)
+  }
+
+  async getInsightsTimeseries(period: string): Promise<DailyMetric[]> {
+    return this.fetch(`/api/insights/timeseries?period=${period}`)
+  }
+
+  async getInsightsEfficiency(): Promise<AgentPerformance[]> {
+    return this.fetch('/api/insights/efficiency')
+  }
+
+  async getInsightsPipeline(): Promise<PipelineHealth[]> {
+    return this.fetch('/api/insights/pipeline')
+  }
+
+  async getInsightsFailures(period: string): Promise<FailureAnalysis[]> {
+    return this.fetch(`/api/insights/failures?period=${period}`)
+  }
+
+  // Knowledge
+  async listNotes(folder?: string): Promise<string[]> {
+    const params = folder ? `?folder=${encodeURIComponent(folder)}` : ''
+    const data = await this.fetch<{ notes: string[] }>(`/api/knowledge/notes${params}`)
+    return data.notes || []
+  }
+
+  async getNote(path: string): Promise<{ path: string; content: string }> {
+    return this.fetch(`/api/knowledge/notes/${path}`)
+  }
+
+  async createNote(path: string, content: string): Promise<{ path: string; content: string }> {
+    return this.fetch('/api/knowledge/notes', {
+      method: 'POST',
+      body: JSON.stringify({ path, content }),
+    })
+  }
+
+  async updateNote(path: string, content: string): Promise<{ path: string; content: string }> {
+    return this.fetch(`/api/knowledge/notes/${path}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    })
+  }
+
+  async deleteNote(path: string): Promise<void> {
+    await this.fetch(`/api/knowledge/notes/${path}`, { method: 'DELETE' })
+  }
+
+  async searchKnowledge(query: string): Promise<{ query: string; results: string[] }> {
+    return this.fetch(`/api/knowledge/search?q=${encodeURIComponent(query)}`)
+  }
+
+  async getDaily(): Promise<{ date: string; path: string; content: string }> {
+    return this.fetch('/api/knowledge/daily')
+  }
+
+  async appendDaily(content: string): Promise<{ status: string }> {
+    return this.fetch('/api/knowledge/daily/append', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    })
+  }
+
+  async getKnowledgeStats(): Promise<{
+    note_count: number
+    folder_count: number
+    total_size: number
+    mode: string
+    healthy: boolean
+  }> {
+    return this.fetch('/api/knowledge/stats')
+  }
+
+  async getKnowledgeHealth(): Promise<{ mode: string; healthy: boolean }> {
+    return this.fetch('/api/knowledge/health')
+  }
+
+  async listFolders(): Promise<string[]> {
+    const data = await this.fetch<{ folders: string[] }>('/api/knowledge/folders')
+    return data.folders || []
+  }
+
+  async getRecentNotes(): Promise<{ path: string; mod_time: string }[]> {
+    const data = await this.fetch<{ notes: { path: string; mod_time: string }[] }>('/api/knowledge/recent')
+    return data.notes || []
+  }
+
+  async getOrphans(): Promise<string[]> {
+    const data = await this.fetch<{ orphans: string[] }>('/api/knowledge/orphans')
+    return data.orphans || []
+  }
+
+  // Orchestrator
+  async getOrchestratorStatus(): Promise<OrchestratorStatus> {
+    return this.fetch('/api/orchestrator/status')
+  }
+
+  // Disk Usage
+  async getDiskUsage(): Promise<DiskUsageResponse> {
+    return this.fetch('/api/system/disk')
   }
 }
 

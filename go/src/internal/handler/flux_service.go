@@ -7,20 +7,25 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"time"
 
 	"connectrpc.com/connect"
 
 	fluxv1 "github.com/circle-oo/flux/gen/flux/v1"
 	"github.com/circle-oo/flux/internal/agent"
+	"github.com/circle-oo/flux/internal/orchestrator"
 	"github.com/circle-oo/flux/internal/store"
 )
 
 // FluxServiceHandler implements the Connect-RPC FluxService.
 type FluxServiceHandler struct {
-	agent  *agent.Client
-	store  *store.TaskStore
-	logger *slog.Logger
+	agent        *agent.Client
+	store        *store.TaskStore
+	logger       *slog.Logger
+	orchestrator *orchestrator.Orchestrator
+	scaleManager *orchestrator.ScaleManager
 }
 
 // NewFluxServiceHandler creates a new handler with the given agent client and logger.
@@ -33,6 +38,16 @@ func NewFluxServiceHandler(
 		store:  store.New(),
 		logger: logger,
 	}
+}
+
+// SetOrchestrator sets the orchestrator for status queries.
+func (h *FluxServiceHandler) SetOrchestrator(o *orchestrator.Orchestrator) {
+	h.orchestrator = o
+}
+
+// SetScaleManager sets the scale manager for status queries.
+func (h *FluxServiceHandler) SetScaleManager(sm *orchestrator.ScaleManager) {
+	h.scaleManager = sm
 }
 
 func (h *FluxServiceHandler) CreateTask(
@@ -154,6 +169,42 @@ func (h *FluxServiceHandler) GetAgentStatus(
 	return connect.NewResponse(&fluxv1.GetAgentStatusResponse{
 		Pods: status.GetPods(),
 	}), nil
+}
+
+func (h *FluxServiceHandler) GetOrchestratorStatus(
+	ctx context.Context,
+	req *connect.Request[fluxv1.GetOrchestratorStatusRequest],
+) (*connect.Response[fluxv1.GetOrchestratorStatusResponse], error) {
+	resp := &fluxv1.GetOrchestratorStatusResponse{}
+
+	if h.orchestrator != nil {
+		status := h.orchestrator.Status()
+		resp.Running = status.Running
+		resp.TickCount = int32(status.TickCount)
+
+		if !status.StartedAt.IsZero() {
+			resp.Uptime = fmt.Sprintf("%s", time.Since(status.StartedAt).Round(time.Second))
+		}
+
+		for _, ch := range status.Components {
+			var lastTick string
+			if !ch.LastTick.IsZero() {
+				lastTick = ch.LastTick.Format(time.RFC3339)
+			}
+			resp.SubComponents = append(resp.SubComponents, &fluxv1.SubComponentStatus{
+				Name:      ch.Name,
+				Healthy:   ch.Healthy,
+				LastTick:  lastTick,
+				LastError: ch.LastError,
+			})
+		}
+	}
+
+	if h.scaleManager != nil {
+		resp.ScaleStatus = h.scaleManager.Status()
+	}
+
+	return connect.NewResponse(resp), nil
 }
 
 func (h *FluxServiceHandler) executeInBackground(task *fluxv1.Task) {

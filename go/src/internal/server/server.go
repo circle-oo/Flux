@@ -10,12 +10,16 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/circle-oo/flux/internal/cleanup"
 	"github.com/circle-oo/flux/internal/config"
 	github_pkg "github.com/circle-oo/flux/internal/github"
+	"github.com/circle-oo/flux/internal/insights"
 	"github.com/circle-oo/flux/internal/manager"
 	"github.com/circle-oo/flux/internal/models"
 	"github.com/circle-oo/flux/internal/notifier"
+	"github.com/circle-oo/flux/internal/orchestrator"
 	"github.com/circle-oo/flux/internal/updater"
+	"github.com/circle-oo/flux/internal/vault"
 )
 
 // Server is the main HTTP server for Flux.
@@ -34,11 +38,19 @@ type Server struct {
 	ghClient   *github_pkg.Client
 	podRegistry *PodRegistry
 
+	vault       vault.VaultReader
+	vaultWriter vault.VaultWriter
+
 	goals    *models.GoalStore
 	tasks    *models.TaskStore
 	projects *models.ProjectStore
 	alerts   *models.AlertStore
 	usage    *models.UsageStore
+	insights *insights.Collector
+
+	orch         *orchestrator.Orchestrator
+	scaleManager *orchestrator.ScaleManager
+	cleaner      *cleanup.Cleaner
 }
 
 // ServerDeps bundles all dependencies required to create a Server.
@@ -49,6 +61,7 @@ type ServerDeps struct {
 	Discord  *notifier.Discord
 	WebFS    fs.FS
 	Version  string
+	Vault    vault.VaultWriter
 }
 
 // NewServer creates a new Server with the provided dependencies.
@@ -73,6 +86,13 @@ func NewServer(deps ServerDeps) *Server {
 
 	s.auth = NewAuthManager(deps.Config.Server.Auth)
 	s.ws = NewWebSocketHub()
+	s.initInsights()
+
+	// Initialize vault if provided
+	if deps.Vault != nil {
+		s.vault = deps.Vault
+		s.vaultWriter = deps.Vault
+	}
 
 	// Initialize GitHub client if configured
 	if deps.Config.GitHub.Token != "" {
@@ -165,6 +185,11 @@ func (s *Server) setupRoutes() {
 	// Config endpoint (requires auth)
 	s.mux.Handle("GET /api/config", s.authMiddleware(http.HandlerFunc(s.handleConfig)))
 
+	// Orchestrator & system status (requires auth)
+	s.mux.Handle("GET /api/orchestrator/status", s.authMiddleware(http.HandlerFunc(s.handleOrchestratorStatus)))
+	s.mux.Handle("GET /api/system/disk", s.authMiddleware(http.HandlerFunc(s.handleDiskUsage)))
+	s.mux.Handle("GET /api/system/health", s.authMiddleware(http.HandlerFunc(s.handleSystemHealth)))
+
 	// Deploy endpoints (requires auth)
 	s.mux.Handle("GET /api/system/deploy/status", s.authMiddleware(http.HandlerFunc(s.handleDeployStatus)))
 	s.mux.Handle("POST /api/system/deploy", s.authMiddleware(http.HandlerFunc(s.handleDeploy)))
@@ -188,6 +213,12 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle("GET /internal/model/{task_id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetModel)))
 	s.mux.Handle("GET /internal/tasks/{id}/status", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskStatus)))
 	s.mux.Handle("GET /internal/projects/{id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetProject)))
+
+	// Knowledge API (requires auth)
+	s.registerKnowledgeRoutes()
+
+	// Insights API (requires auth)
+	s.registerInsightsRoutes()
 
 	// PR Review API (requires auth)
 	s.RegisterPRRoutes()
@@ -305,6 +336,21 @@ func (s *Server) WrapHandler(wrap func(http.Handler) http.Handler) {
 // SetLogHandler sets the log broadcast handler so the server can serve recent logs.
 func (s *Server) SetLogHandler(h *LogBroadcastHandler) {
 	s.logHandler = h
+}
+
+// SetOrchestrator sets the orchestrator for status reporting.
+func (s *Server) SetOrchestrator(o *orchestrator.Orchestrator) {
+	s.orch = o
+}
+
+// SetScaleManager sets the scale manager for status reporting.
+func (s *Server) SetScaleManager(sm *orchestrator.ScaleManager) {
+	s.scaleManager = sm
+}
+
+// SetCleaner sets the cleaner for disk status reporting.
+func (s *Server) SetCleaner(c *cleanup.Cleaner) {
+	s.cleaner = c
 }
 
 // handleRecentLogs returns buffered log entries.

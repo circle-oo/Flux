@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useDeployStore } from '../stores/deployStore'
 import { useWSStore } from '../stores/wsStore'
 import { useSettingsStore, Theme, DashboardLayout } from '../stores/settingsStore'
-import { api } from '../lib/api'
+import { api, OrchestratorStatus } from '../lib/api'
 import PageHeader from '../components/PageHeader'
 import LoadingState from '../components/LoadingState'
 import ErrorBanner from '../components/ErrorBanner'
@@ -11,7 +11,7 @@ import DeployStatusCard from '../components/DeployStatusCard'
 import SystemInfoCard from '../components/SystemInfoCard'
 import { useConfirm } from '../hooks/useConfirm'
 
-type SettingsTab = 'appearance' | 'system' | 'configuration'
+type SettingsTab = 'appearance' | 'system' | 'configuration' | 'orchestrator'
 
 export default function Settings() {
   const { status, isLoading, isDeploying, isCheckingRemote, error, fetchStatus, triggerDeploy, checkRemoteCommit } = useDeployStore()
@@ -22,6 +22,9 @@ export default function Settings() {
   const [config, setConfig] = useState<Record<string, unknown> | null>(null)
   const [configLoading, setConfigLoading] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
+  const [orchStatus, setOrchStatus] = useState<OrchestratorStatus | null>(null)
+  const [orchLoading, setOrchLoading] = useState(false)
+  const [orchError, setOrchError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchStatus()
@@ -38,6 +41,20 @@ export default function Settings() {
         .finally(() => setConfigLoading(false))
     }
   }, [tab, config])
+
+  useEffect(() => {
+    if (tab !== 'orchestrator') return
+    const load = () => {
+      setOrchLoading(true)
+      api.getOrchestratorStatus()
+        .then(setOrchStatus)
+        .catch((e) => setOrchError(e.message))
+        .finally(() => setOrchLoading(false))
+    }
+    load()
+    const interval = setInterval(load, 10000)
+    return () => clearInterval(interval)
+  }, [tab])
 
   const handleDeploy = async () => {
     const confirmed = await confirm({
@@ -57,6 +74,7 @@ export default function Settings() {
     { id: 'appearance', label: 'Appearance' },
     { id: 'system', label: 'System' },
     { id: 'configuration', label: 'Configuration' },
+    { id: 'orchestrator', label: 'Orchestrator' },
   ]
 
   return (
@@ -198,6 +216,15 @@ export default function Settings() {
           {config && <ConfigView data={config} />}
         </div>
       )}
+
+      {/* Orchestrator Tab */}
+      {tab === 'orchestrator' && (
+        <div className="space-y-6">
+          {orchError && <ErrorBanner message={orchError} />}
+          {orchLoading && !orchStatus && <LoadingState message="Loading orchestrator status..." />}
+          {orchStatus && <OrchestratorView status={orchStatus} />}
+        </div>
+      )}
     </div>
   )
 }
@@ -232,6 +259,180 @@ function ConfigSection({ title, entries }: { title: string; entries: [string, un
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function OrchestratorView({ status }: { status: OrchestratorStatus }) {
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B'
+    const gb = bytes / (1024 * 1024 * 1024)
+    if (gb >= 1) return `${gb.toFixed(1)} GB`
+    const mb = bytes / (1024 * 1024)
+    return `${mb.toFixed(0)} MB`
+  }
+
+  const diskLevelColor = (level: string) => {
+    switch (level) {
+      case 'ok': return 'text-emerald-400'
+      case 'warning': return 'text-yellow-400'
+      case 'block': return 'text-orange-400'
+      case 'critical': return 'text-red-400'
+      case 'force': return 'text-red-500'
+      default: return 'text-content-muted'
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* System Health */}
+      <div className="card p-5">
+        <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-4">System Health</div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div>
+            <div className="text-xs text-content-muted mb-1">Status</div>
+            <div className={`text-sm font-medium ${status.running ? 'text-emerald-400' : 'text-red-400'}`}>
+              {status.running ? 'Running' : 'Stopped'}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-content-muted mb-1">Uptime</div>
+            <div className="text-sm font-medium text-content">{status.uptime || '--'}</div>
+          </div>
+          <div>
+            <div className="text-xs text-content-muted mb-1">Tick Count</div>
+            <div className="text-sm font-medium text-content">{status.tick_count}</div>
+          </div>
+          <div>
+            <div className="text-xs text-content-muted mb-1">Rate Limited</div>
+            <div className={`text-sm font-medium ${status.rate_limited ? 'text-red-400' : 'text-emerald-400'}`}>
+              {status.rate_limited ? 'Yes' : 'No'}
+            </div>
+            {status.rate_limited && status.rate_limit_until && (
+              <div className="text-[10px] text-red-400/70 mt-0.5">
+                Until {new Date(status.rate_limit_until).toLocaleTimeString()}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Sub-Components */}
+      {status.sub_components && status.sub_components.length > 0 && (
+        <div className="card p-5">
+          <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-4">Sub-Components</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-content-faint border-b border-line">
+                  <th className="text-left py-2 pr-4 font-medium">Name</th>
+                  <th className="text-left py-2 pr-4 font-medium">Status</th>
+                  <th className="text-left py-2 pr-4 font-medium">Last Tick</th>
+                  <th className="text-left py-2 font-medium">Last Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {status.sub_components.map((c) => (
+                  <tr key={c.name} className="border-b border-line/50">
+                    <td className="py-2 pr-4 font-mono text-content-secondary">{c.name}</td>
+                    <td className="py-2 pr-4">
+                      <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${c.healthy ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                      <span className={c.healthy ? 'text-emerald-400' : 'text-red-400'}>
+                        {c.healthy ? 'Healthy' : 'Error'}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-4 text-content-muted">
+                      {c.last_tick ? new Date(c.last_tick).toLocaleTimeString() : '--'}
+                    </td>
+                    <td className="py-2 text-red-400/80 max-w-[200px] truncate">{c.last_error || '--'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Scale Status */}
+      {status.scale_status && (
+        <div className="card p-5">
+          <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-4">Scale Status</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div>
+              <div className="text-xs text-content-muted mb-1">Executor Pods</div>
+              <div className="text-sm font-medium text-content tabular-nums">
+                {status.scale_status.executor_pods} <span className="text-content-faint">/ {status.scale_status.max_executor_pods}</span>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-content-muted mb-1">Triager Pods</div>
+              <div className="text-sm font-medium text-content tabular-nums">
+                {status.scale_status.triager_pods} <span className="text-content-faint">/ {status.scale_status.max_triager_pods}</span>
+              </div>
+            </div>
+            {status.scale_status.max_researcher_pods > 0 && (
+              <div>
+                <div className="text-xs text-content-muted mb-1">Researcher Pods</div>
+                <div className="text-sm font-medium text-content tabular-nums">
+                  {status.scale_status.researcher_pods} <span className="text-content-faint">/ {status.scale_status.max_researcher_pods}</span>
+                </div>
+              </div>
+            )}
+            <div>
+              <div className="text-xs text-content-muted mb-1">Queue State</div>
+              <div className="text-sm font-medium text-content capitalize">{status.scale_status.queue_state || '--'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-content-muted mb-1">Last Scale</div>
+              <div className="text-sm font-medium text-content-secondary">
+                {status.scale_status.last_scale_time
+                  ? new Date(status.scale_status.last_scale_time).toLocaleTimeString()
+                  : '--'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Disk Usage */}
+      {status.disk_status && (
+        <div className="card p-5">
+          <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-4">Disk Usage</div>
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <div className="text-xs text-content-muted mb-1">Available</div>
+              <div className="text-sm font-medium text-content">{formatBytes(status.disk_status.available_bytes)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-content-muted mb-1">Used</div>
+              <div className="text-sm font-medium text-content">{formatBytes(status.disk_status.used_bytes)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-content-muted mb-1">Total</div>
+              <div className="text-sm font-medium text-content">{formatBytes(status.disk_status.total_bytes)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-content-muted mb-1">Level</div>
+              <div className={`text-sm font-medium uppercase ${diskLevelColor(status.disk_status.level)}`}>
+                {status.disk_status.level}
+              </div>
+            </div>
+          </div>
+          {status.disk_status.total_bytes > 0 && (
+            <div className="mt-3">
+              <div className="w-full bg-surface-hover rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all ${
+                    status.disk_status.level === 'ok' ? 'bg-emerald-500' :
+                    status.disk_status.level === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
+                  }`}
+                  style={{ width: `${(status.disk_status.used_bytes / status.disk_status.total_bytes * 100).toFixed(1)}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

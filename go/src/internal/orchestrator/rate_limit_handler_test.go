@@ -12,7 +12,7 @@ import (
 func TestHandleRateLimit(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	discord := notifier.NewDiscord("") // Empty webhook for test
-	handler := NewRateLimitHandler(db, discord)
+	handler := NewRateLimitHandler(db, discord, "")
 
 	// Initially not limited
 	if handler.IsLimited() {
@@ -54,7 +54,7 @@ func TestHandleRateLimit(t *testing.T) {
 func TestIsLimited(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	discord := notifier.NewDiscord("")
-	handler := NewRateLimitHandler(db, discord)
+	handler := NewRateLimitHandler(db, discord, "")
 
 	// Initially not limited
 	if handler.IsLimited() {
@@ -86,7 +86,7 @@ func TestIsLimited(t *testing.T) {
 func TestCheckAndRecover(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	discord := notifier.NewDiscord("")
-	handler := NewRateLimitHandler(db, discord)
+	handler := NewRateLimitHandler(db, discord, "")
 
 	// Set rate limit that has expired
 	handler.mu.Lock()
@@ -115,7 +115,7 @@ func TestCheckAndRecover(t *testing.T) {
 func TestCheckAndRecover_NoRecoveryIfNotExpired(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	discord := notifier.NewDiscord("")
-	handler := NewRateLimitHandler(db, discord)
+	handler := NewRateLimitHandler(db, discord, "")
 
 	// Set rate limit that has not expired
 	handler.mu.Lock()
@@ -135,7 +135,7 @@ func TestCheckAndRecover_NoRecoveryIfNotExpired(t *testing.T) {
 func TestRecentlyLimited(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	discord := notifier.NewDiscord("")
-	handler := NewRateLimitHandler(db, discord)
+	handler := NewRateLimitHandler(db, discord, "")
 
 	// Initially not recently limited
 	if handler.RecentlyLimited() {
@@ -279,7 +279,7 @@ func TestDetectRateLimit(t *testing.T) {
 func TestConcurrentIsLimited(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	discord := notifier.NewDiscord("")
-	handler := NewRateLimitHandler(db, discord)
+	handler := NewRateLimitHandler(db, discord, "")
 
 	// Set rate limit
 	handler.mu.Lock()

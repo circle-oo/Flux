@@ -151,6 +151,17 @@ var schemaStatements = []string{
 	)`,
 
 	`CREATE INDEX IF NOT EXISTS idx_metrics_service_time ON service_metrics(service_name, recorded_at)`,
+
+	`CREATE TABLE IF NOT EXISTS insights_snapshots (
+		id          TEXT PRIMARY KEY,
+		type        TEXT NOT NULL,
+		period      TEXT NOT NULL DEFAULT 'daily',
+		data        TEXT NOT NULL DEFAULT '{}',
+		recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_insights_snapshots_type_time ON insights_snapshots(type, recorded_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_insights_snapshots_period ON insights_snapshots(period, recorded_at)`,
 }
 
 // migrations are ALTER TABLE statements that add columns to existing tables.
