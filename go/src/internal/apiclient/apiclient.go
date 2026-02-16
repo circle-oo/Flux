@@ -218,12 +218,12 @@ func (c *Client) NextPending(triagerID string) (*models.Task, error) {
 
 // ReportTriaged reports triage completion for a task, promoting it to READY.
 // POST /internal/tasks/{id}/triaged
-func (c *Client) ReportTriaged(taskID, analysis, description string, priority int) error {
-	slog.Info("reporting triage completion", "task_id", taskID)
+func (c *Client) ReportTriaged(taskID, analysis, description, title string, priority int) error {
+	slog.Info("reporting triage completion", "task_id", taskID, "has_title", title != "")
 
 	path := fmt.Sprintf("/internal/tasks/%s/triaged", taskID)
 	return c.postJSON(path, http.StatusOK,
-		map[string]interface{}{"analysis": analysis, "description": description, "priority": priority},
+		map[string]interface{}{"analysis": analysis, "description": description, "title": title, "priority": priority},
 		nil,
 	)
 }

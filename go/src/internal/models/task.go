@@ -69,6 +69,7 @@ type Task struct {
 	FilesChanged  int      `json:"files_changed"`
 	TriageAnalysis    string  `json:"triage_analysis"`
 	TriageDescription string  `json:"triage_description"`
+	TriageTitle       string  `json:"triage_title"`
 	Plan              string  `json:"plan"`
 	TestPassed    *bool    `json:"test_passed"`
 	RetryCount    int      `json:"retry_count"`
@@ -173,15 +174,15 @@ func (s *TaskStore) Create(t *Task) error {
 		`INSERT INTO tasks (id, title, description, type, status, priority, source,
 		 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 		 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-		 diff_lines, files_changed, triage_analysis, triage_description, plan, test_passed,
+		 diff_lines, files_changed, triage_analysis, triage_description, triage_title, plan, test_passed,
 		 retry_count, crash_recovery, tokens_used, cost_usd, started_at, completed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Title, t.Description, t.Type, t.Status, t.Priority, t.Source,
 		t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
 		dependsOnJSON, tagsJSON, t.Prompt,
 		t.Result, t.ErrorLog, t.ExecutorID, t.Model, t.BranchName,
 		t.PRUrl, t.PRStatus, t.DiffLines, t.FilesChanged,
-		t.TriageAnalysis, t.TriageDescription, t.Plan, t.TestPassed,
+		t.TriageAnalysis, t.TriageDescription, t.TriageTitle, t.Plan, t.TestPassed,
 		t.RetryCount, t.CrashRecovery, t.TokensUsed, t.CostUSD,
 		t.StartedAt, t.CompletedAt,
 	)
@@ -272,7 +273,7 @@ func (s *TaskStore) Update(t *Task) error {
 		 source = ?, project_id = ?, parent_id = ?, depth = ?, alert_id = ?, goal_id = ?,
 		 depends_on = ?, tags = ?, prompt = ?, result = ?, error_log = ?, executor_id = ?,
 		 model = ?, branch_name = ?, pr_url = ?, pr_status = ?, diff_lines = ?,
-		 files_changed = ?, triage_analysis = ?, triage_description = ?, plan = ?,
+		 files_changed = ?, triage_analysis = ?, triage_description = ?, triage_title = ?, plan = ?,
 		 test_passed = ?, retry_count = ?, crash_recovery = ?,
 		 tokens_used = ?, cost_usd = ?, updated_at = CURRENT_TIMESTAMP,
 		 started_at = ?, completed_at = ? WHERE id = ?`,
@@ -280,7 +281,7 @@ func (s *TaskStore) Update(t *Task) error {
 		t.Source, t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
 		dependsOnJSON, tagsJSON, t.Prompt, t.Result, t.ErrorLog,
 		t.ExecutorID, t.Model, t.BranchName, t.PRUrl, t.PRStatus, t.DiffLines,
-		t.FilesChanged, t.TriageAnalysis, t.TriageDescription, t.Plan,
+		t.FilesChanged, t.TriageAnalysis, t.TriageDescription, t.TriageTitle, t.Plan,
 		t.TestPassed, t.RetryCount, t.CrashRecovery,
 		t.TokensUsed, t.CostUSD, t.StartedAt, t.CompletedAt, t.ID,
 	)
@@ -483,7 +484,7 @@ func (s *TaskStore) ListByPRStatus(prStatus string) ([]*Task, error) {
 const TaskSelectSQL = `SELECT id, title, description, type, status, priority, source,
 	project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 	result, error_log, executor_id, model, branch_name, pr_url, pr_status,
-	diff_lines, files_changed, triage_analysis, triage_description, plan,
+	diff_lines, files_changed, triage_analysis, triage_description, triage_title, plan,
 	test_passed, retry_count, crash_recovery, tokens_used, cost_usd,
 	created_at, updated_at, started_at, completed_at
 	FROM tasks`
@@ -500,7 +501,7 @@ func ScanTask(scanner interface{ Scan(...interface{}) error }) (*Task, error) {
 		&dependsOnJSON, &tagsJSON, &t.Prompt,
 		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
 		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged,
-		&t.TriageAnalysis, &t.TriageDescription, &t.Plan,
+		&t.TriageAnalysis, &t.TriageDescription, &t.TriageTitle, &t.Plan,
 		&t.TestPassed, &t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
 		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
 	)
