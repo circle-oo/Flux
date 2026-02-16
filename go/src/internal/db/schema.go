@@ -75,6 +75,8 @@ var schemaStatements = []string{
 		executor_id     TEXT DEFAULT '',
 		model           TEXT DEFAULT 'sonnet',
 		branch_name     TEXT DEFAULT '',
+		parent_branch   TEXT DEFAULT '',
+		merge_status    TEXT DEFAULT 'PENDING',
 		pr_url          TEXT DEFAULT '',
 		pr_status       TEXT DEFAULT '',
 		diff_lines      INTEGER DEFAULT 0,
