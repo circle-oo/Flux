@@ -4,6 +4,8 @@
 
 This directory contains detailed implementation plans for the Flux Autonomous Engineering System. Each phase builds on the previous one, progressing from a basic skeleton to a fully autonomous system.
 
+**Note on Obsidian Integration**: The Obsidian CLI integration (documented in `docs/obsidian-integration-plan.md` and `docs/obsidian-plan.md`) is incorporated into Phase 4 (Knowledge & Autonomy). No intermediate phases are needed between Phase 2B and Phase 3. See `phase-structure-analysis.md` for detailed rationale.
+
 ## Phase Summary
 
 | Phase | Name | Goal | Key Deliverable |
@@ -86,6 +88,15 @@ The following adjustments were identified during code review and should be incor
 4. **Phase 3**: Missing API endpoints added (orchestrator status, pods, services, alerts)
 5. **Phase 1**: `hasComplexKeywords()` function defined in Task 1.3 (task complexity detection)
 6. **Phase 2A**: `ManagerClient` HTTP client defined in Task 2A.8 (Manager API interaction)
+
+## Obsidian Integration Analysis (2026-02-16)
+
+A comprehensive analysis was performed to determine if intermediate phases (2.c, 2.d) are needed to accommodate Obsidian CLI integration before Phase 3. **Conclusion**: No intermediate phases required. The existing phase structure optimally accommodates Obsidian integration:
+- **Phase 2B**: Optional basic CLI client (~3 files) can be added or deferred
+- **Phase 3**: Orchestration proceeds independently (no Obsidian dependencies)
+- **Phase 4**: Full Knowledge UI and Researcher Pod integration (~15 files)
+
+See `phase-structure-analysis.md` for detailed rationale and dependency analysis.
 
 ## Phase 3/4 Refinement (Post-Phase 2B Audit)
 
