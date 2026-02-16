@@ -70,7 +70,7 @@ export default function PRs() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+    <div className="p-5 sm:p-6 lg:p-8 space-y-5 animate-fade-in">
       {dialog}
       <PageHeader
         title="Pull Requests"
@@ -83,10 +83,10 @@ export default function PRs() {
         }
       />
 
-      {/* Filter and Sort Controls */}
+      {/* Filters */}
       <div className="card p-4 space-y-3">
         <div>
-          <label className="text-xs text-slate-400 mb-1.5 block" id="pr-status-filter-label">Status</label>
+          <label className="text-[11px] text-white/30 mb-1.5 block uppercase tracking-widest font-medium" id="pr-status-filter-label">Status</label>
           <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-labelledby="pr-status-filter-label">
             {statusFilters.map((sf) => (
               <button
@@ -103,7 +103,7 @@ export default function PRs() {
         </div>
 
         <div>
-          <label className="text-xs text-slate-400 mb-1.5 block" id="pr-sort-label">Sort by</label>
+          <label className="text-[11px] text-white/30 mb-1.5 block uppercase tracking-widest font-medium" id="pr-sort-label">Sort by</label>
           <div className="flex items-center gap-2 flex-wrap" role="group" aria-labelledby="pr-sort-label">
             <button
               onClick={() => setSortBy('created_at')}
@@ -112,7 +112,7 @@ export default function PRs() {
               aria-pressed={sortBy === 'created_at'}
             >
               Created
-              {sortBy === 'created_at' && <span className="text-xs">{sortOrder === 'desc' ? '↓' : '↑'}</span>}
+              {sortBy === 'created_at' && <span className="text-[10px]">{sortOrder === 'desc' ? '\u2193' : '\u2191'}</span>}
             </button>
             <button
               onClick={() => setSortBy('updated_at')}
@@ -121,7 +121,7 @@ export default function PRs() {
               aria-pressed={sortBy === 'updated_at'}
             >
               Updated
-              {sortBy === 'updated_at' && <span className="text-xs">{sortOrder === 'desc' ? '↓' : '↑'}</span>}
+              {sortBy === 'updated_at' && <span className="text-[10px]">{sortOrder === 'desc' ? '\u2193' : '\u2191'}</span>}
             </button>
           </div>
         </div>
@@ -129,14 +129,13 @@ export default function PRs() {
 
       {error && <ErrorBanner message={error} />}
 
-      {/* PRs List */}
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {loading && pendingPRs.length === 0 ? (
           <LoadingState message="Loading pull requests..." />
         ) : pendingPRs.length === 0 ? (
           <EmptyState icon="&#10003;" title="All caught up!" message="No PRs pending review" />
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {pendingPRs.map((pr) => (
               <PRListItem
                 key={pr.id}

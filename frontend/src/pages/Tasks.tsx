@@ -56,7 +56,6 @@ export default function Tasks() {
     toggleSubtasks,
   } = useSubtaskExpansion()
 
-  // Initialize filters from URL params on mount
   useEffect(() => {
     const statusParam = searchParams.get('status')
     if (statusParam) {
@@ -66,7 +65,7 @@ export default function Tasks() {
         setActiveFilterGroup('')
       }
     }
-  }, []) // Run only on mount
+  }, [])
 
   useEffect(() => {
     fetchTasks()
@@ -74,12 +73,10 @@ export default function Tasks() {
     fetchCurrentGoal()
   }, [fetchTasks, fetchProjects, fetchCurrentGoal])
 
-  // Fetch subtask counts for parent tasks (parallel)
   useEffect(() => {
     if (tasks.length > 0) fetchSubtaskCounts(tasks)
   }, [tasks, fetchSubtaskCounts])
 
-  // Filter tasks based on active group or individual status filter
   const visibleTasks = useMemo(() => {
     let filtered = tasks
     const group = statusFilterGroups.find((g) => g.id === activeFilterGroup)
@@ -176,7 +173,7 @@ export default function Tasks() {
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]))
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
+    <div className="p-5 sm:p-6 lg:p-8 space-y-5 animate-fade-in">
       {dialog}
       <PageHeader
         title="Tasks"
@@ -184,7 +181,7 @@ export default function Tasks() {
         count={tasks.length}
         action={
           <button onClick={() => setShowForm(!showForm)} className="btn-primary whitespace-nowrap">
-            {showForm ? 'Cancel' : '+ New Task'}
+            {showForm ? 'Cancel' : 'New Task'}
           </button>
         }
       />
@@ -215,16 +212,15 @@ export default function Tasks() {
         />
       )}
 
-      {/* Tasks List */}
-      <div className="space-y-3 sm:space-y-4">
+      <div className="space-y-2.5">
         {isLoading ? (
-          <div className="text-slate-400">Loading...</div>
+          <div className="text-white/30 text-sm py-8 text-center">Loading tasks...</div>
         ) : tasks.length === 0 ? (
-          <div className="card p-4 sm:p-6 text-center text-slate-400">
+          <div className="card p-8 text-center text-white/30 text-sm">
             No tasks found. Create one or adjust filters.
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {sortedTasks.map((task) => (
               <TaskListItem
                 key={task.id}

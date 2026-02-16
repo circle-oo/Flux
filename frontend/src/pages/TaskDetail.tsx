@@ -97,19 +97,13 @@ export default function TaskDetail() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="p-4 sm:p-6 lg:p-8">
-        <LoadingState message="Loading task..." />
-      </div>
-    )
-  }
+  if (loading) return <div className="p-5 sm:p-6 lg:p-8"><LoadingState message="Loading task..." /></div>
 
   if (error || !task) {
     return (
-      <div className="p-8">
-        <div className="text-red-400" role="alert">Error: {error || 'Task not found'}</div>
-        <button onClick={() => navigate('/tasks')} className="mt-4 text-blue-400 hover:underline">
+      <div className="p-5 sm:p-6 lg:p-8 animate-fade-in">
+        <div className="text-rose-400 text-sm" role="alert">Error: {error || 'Task not found'}</div>
+        <button onClick={() => navigate('/tasks')} className="mt-4 text-accent-400 hover:text-accent-300 text-sm transition-colors">
           Back to Tasks
         </button>
       </div>
@@ -123,19 +117,19 @@ export default function TaskDetail() {
   ]
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-4xl">
+    <div className="p-5 sm:p-6 lg:p-8 space-y-5 max-w-4xl animate-fade-in">
       {dialog}
 
       <TaskHeader task={task} onRetry={handleRetry} onCancel={handleCancel} />
 
       {/* Triage Analysis */}
       {task.triage_analysis && (
-        <div className="card p-6 border border-cyan-600/30">
+        <div className="card p-5 ring-1 ring-cyan-500/20 animate-slide-up">
           <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-lg font-semibold text-cyan-400">Triage Analysis</h2>
-            <span className="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-2 py-0.5 rounded text-xs font-medium">AI</span>
+            <h2 className="text-sm font-semibold text-cyan-400">Triage Analysis</h2>
+            <span className="badge-info">AI</span>
           </div>
-          <div className="text-sm text-slate-300 leading-relaxed">
+          <div className="text-sm text-white/60 leading-relaxed">
             <MarkdownRenderer content={task.triage_analysis} />
           </div>
         </div>
@@ -150,15 +144,15 @@ export default function TaskDetail() {
       />
 
       {/* Tab Navigation */}
-      <div className="flex gap-1 border-b border-slate-700">
+      <div className="flex gap-0.5 border-b border-white/[0.06]">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            className={`px-4 py-2.5 text-xs font-medium tracking-wide uppercase transition-all border-b-2 -mb-px ${
               activeTab === tab.id
-                ? 'text-blue-400 border-blue-400'
-                : 'text-slate-400 border-transparent hover:text-slate-200 hover:border-slate-600'
+                ? 'text-accent-400 border-accent-400'
+                : 'text-white/30 border-transparent hover:text-white/60 hover:border-white/[0.1]'
             }`}
           >
             {tab.label}
@@ -166,7 +160,6 @@ export default function TaskDetail() {
         ))}
       </div>
 
-      {/* Tab Content */}
       {activeTab === 'overview' && <TaskOverview task={task} />}
       {activeTab === 'execution' && <TaskExecution task={task} />}
       {activeTab === 'output' && <TaskOutput task={task} />}

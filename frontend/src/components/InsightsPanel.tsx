@@ -6,48 +6,32 @@ interface InsightsPanelProps {
 }
 
 export default function InsightsPanel({ insights, onProjectClick }: InsightsPanelProps) {
-  if (!insights) {
-    return <p className="text-slate-500 italic text-sm py-4 text-center">Loading insights...</p>
-  }
+  if (!insights) return <p className="text-white/20 italic text-sm py-4 text-center">Loading insights...</p>
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="p-4 rounded-lg bg-slate-700/30">
-          <div className="text-xs text-slate-400 mb-1">Total Token Usage</div>
-          <div className="text-2xl font-bold text-blue-400">{insights.total_tokens.toLocaleString()}</div>
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="p-4 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+          <div className="text-[10px] text-white/30 mb-1 uppercase tracking-wider">Total Tokens</div>
+          <div className="text-xl font-bold text-cyan-400">{insights.total_tokens.toLocaleString()}</div>
         </div>
-        <div className="p-4 rounded-lg bg-slate-700/30">
-          <div className="text-xs text-slate-400 mb-1">Total Cost</div>
-          <div className="text-2xl font-bold text-green-400">${insights.total_cost.toFixed(2)}</div>
+        <div className="p-4 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+          <div className="text-[10px] text-white/30 mb-1 uppercase tracking-wider">Total Cost</div>
+          <div className="text-xl font-bold text-emerald-400">${insights.total_cost.toFixed(2)}</div>
         </div>
       </div>
-
       <div>
-        <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">
-          Activities per Project
-        </h3>
+        <div className="text-[11px] font-medium text-white/30 uppercase tracking-widest mb-3">Activities per Project</div>
         {insights.project_activities.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {insights.project_activities.map((activity) => (
-              <button
-                key={activity.project_id}
-                type="button"
-                className="flex items-center justify-between w-full text-left p-3 rounded-lg bg-slate-700/30 hover:bg-slate-700/60 cursor-pointer transition-colors"
-                onClick={() => onProjectClick(activity.project_id)}
-              >
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-slate-100 font-medium truncate text-sm">{activity.project_name}</h4>
-                </div>
-                <div className="text-sm font-semibold text-slate-300">
-                  {activity.task_count} {activity.task_count === 1 ? 'task' : 'tasks'}
-                </div>
+              <button key={activity.project_id} type="button" className="flex items-center justify-between w-full text-left p-3 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] border border-transparent hover:border-white/[0.06] cursor-pointer transition-all" onClick={() => onProjectClick(activity.project_id)}>
+                <h4 className="text-white/70 font-medium truncate text-sm">{activity.project_name}</h4>
+                <span className="text-xs font-medium text-white/40 tabular-nums">{activity.task_count} {activity.task_count === 1 ? 'task' : 'tasks'}</span>
               </button>
             ))}
           </div>
-        ) : (
-          <p className="text-slate-500 italic text-sm py-4 text-center">No project activities yet</p>
-        )}
+        ) : <p className="text-white/20 italic text-sm py-4 text-center">No project activities yet</p>}
       </div>
     </div>
   )

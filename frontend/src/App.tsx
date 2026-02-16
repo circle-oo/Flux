@@ -16,21 +16,25 @@ import ProjectDetail from './pages/ProjectDetail'
 function App() {
   const { isAuthenticated, authEnabled, checkAuthConfig } = useAuthStore()
 
-  // Check auth config on mount
   useEffect(() => {
     checkAuthConfig()
   }, [checkAuthConfig])
 
-  // Show loading while checking auth config
   if (authEnabled === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900">
-        <div className="text-slate-400">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-surface">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent-500 to-violet-500 flex items-center justify-center animate-pulse">
+            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+            </svg>
+          </div>
+          <span className="text-white/30 text-sm">Loading...</span>
+        </div>
       </div>
     )
   }
 
-  // Show login page only if auth is enabled and not authenticated
   if (authEnabled && !isAuthenticated) {
     return <Login />
   }

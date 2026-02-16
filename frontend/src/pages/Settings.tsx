@@ -35,7 +35,7 @@ export default function Settings() {
   const isAutoMode = updater?.enabled ?? false
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
+    <div className="p-5 sm:p-6 lg:p-8 space-y-6 animate-fade-in">
       {dialog}
       <PageHeader
         title="Settings"
@@ -45,9 +45,8 @@ export default function Settings() {
       {error && <ErrorBanner message={error} />}
 
       {isDeploying && (
-        <div className="p-3 bg-blue-900/30 border border-blue-600 rounded-lg text-sm text-blue-200" role="status">
+        <div className="p-3 bg-accent-500/10 border border-accent-500/20 rounded-lg text-sm text-accent-300" role="status">
           Deploy in progress. Pulling latest code, rebuilding, and restarting...
-          The page will reload automatically when the new version is ready.
         </div>
       )}
 

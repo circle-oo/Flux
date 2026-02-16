@@ -16,20 +16,24 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full">
+    <div className="min-h-screen flex items-center justify-center bg-surface px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+      {/* Background gradient orbs */}
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-accent-600/10 rounded-full blur-[128px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-violet-600/10 rounded-full blur-[128px] pointer-events-none" />
+
+      <div className="max-w-sm w-full relative z-10 animate-fade-in">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/30 mb-4">
-            <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-accent-500 to-violet-500 mb-5 shadow-xl shadow-accent-600/30">
+            <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-slate-100 mb-1">Flux</h1>
-          <p className="text-sm text-slate-400">Autonomous Engineering System</p>
+          <h1 className="text-2xl font-bold text-white/90 mb-1">Flux</h1>
+          <p className="text-sm text-white/30">Autonomous Engineering System</p>
         </div>
 
         <div className="card p-6 sm:p-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label htmlFor="password" className="label">
                 Password
@@ -47,7 +51,7 @@ export default function Login() {
             </div>
 
             {error && (
-              <div className="bg-red-900/30 border border-red-600/50 text-red-300 px-4 py-3 rounded-lg text-sm" role="alert">
+              <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 px-4 py-3 rounded-lg text-sm" role="alert">
                 {error}
               </div>
             )}
@@ -55,9 +59,9 @@ export default function Login() {
             <button
               type="submit"
               disabled={isLoading || !password}
-              className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3 rounded-lg font-medium text-sm text-white bg-gradient-to-r from-accent-600 to-violet-600 hover:from-accent-500 hover:to-violet-500 transition-all duration-200 shadow-lg shadow-accent-600/25 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 focus:ring-offset-surface"
             >
-              {isLoading ? 'Logging in...' : 'Login'}
+              {isLoading ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
         </div>

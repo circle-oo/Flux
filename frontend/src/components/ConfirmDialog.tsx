@@ -11,46 +11,21 @@ export interface ConfirmDialogProps {
   onCancel: () => void
 }
 
-export default function ConfirmDialog({
-  open,
-  title,
-  description,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
-  variant = 'default',
-  onConfirm,
-  onCancel,
-}: ConfirmDialogProps) {
+export default function ConfirmDialog({ open, title, description, confirmLabel = 'Confirm', cancelLabel = 'Cancel', variant = 'default', onConfirm, onCancel }: ConfirmDialogProps) {
   const confirmRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (open) {
-      confirmRef.current?.focus()
-    }
-  }, [open])
-
+  useEffect(() => { if (open) confirmRef.current?.focus() }, [open])
   useEffect(() => {
     if (!open) return
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCancel()
-        return
-      }
+      if (e.key === 'Escape') { onCancel(); return }
       if (e.key === 'Tab') {
-        const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button:not([disabled])'
-        )
+        const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])')
         if (!focusable || focusable.length === 0) return
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault()
-          last.focus()
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
+        const first = focusable[0]; const last = focusable[focusable.length - 1]
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
       }
     }
     document.addEventListener('keydown', handleKeyDown)
@@ -60,37 +35,14 @@ export default function ConfirmDialog({
   if (!open) return null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-dialog-title"
-    >
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
-      <div
-        ref={dialogRef}
-        className="relative bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-w-md w-full p-6"
-      >
-        <h2 id="confirm-dialog-title" className="text-lg font-semibold text-slate-100 mb-2">
-          {title}
-        </h2>
-        {description && (
-          <p className="text-sm text-slate-400 mb-6">{description}</p>
-        )}
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={onCancel}
-            className="btn-sm btn-secondary"
-          >
-            {cancelLabel}
-          </button>
-          <button
-            ref={confirmRef}
-            onClick={onConfirm}
-            className={`btn-sm ${variant === 'danger' ? 'btn-danger' : 'btn-primary'}`}
-          >
-            {confirmLabel}
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
+      <div ref={dialogRef} className="relative bg-surface-50 border border-white/[0.08] rounded-xl shadow-2xl max-w-md w-full p-6 animate-slide-up">
+        <h2 id="confirm-dialog-title" className="text-base font-semibold text-white/90 mb-1.5">{title}</h2>
+        {description && <p className="text-sm text-white/40 mb-6">{description}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="btn-sm btn-secondary">{cancelLabel}</button>
+          <button ref={confirmRef} onClick={onConfirm} className={`btn-sm ${variant === 'danger' ? 'btn-danger' : 'btn-primary'}`}>{confirmLabel}</button>
         </div>
       </div>
     </div>

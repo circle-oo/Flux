@@ -7,15 +7,14 @@ interface StatCardProps {
 
 export default function StatCard({ label, value, color, onClick }: StatCardProps) {
   const Wrapper = onClick ? 'button' : 'div'
-
   return (
     <Wrapper
-      className={`card p-4 sm:p-5 text-left w-full ${onClick ? 'cursor-pointer hover:bg-slate-700/50 transition-colors touch-manipulation' : ''}`}
+      className={`card p-4 text-left w-full ${onClick ? 'cursor-pointer hover:bg-white/[0.05] transition-all touch-manipulation group' : ''}`}
       onClick={onClick}
       {...(onClick ? { type: 'button' as const } : {})}
     >
-      <div className="text-xs font-medium text-slate-400 mb-1">{label}</div>
-      <div className={`text-2xl font-bold ${color}`}>{value}</div>
+      <div className="text-[11px] font-medium text-white/30 mb-1 uppercase tracking-wider">{label}</div>
+      <div className={`text-2xl font-bold tabular-nums ${color} ${onClick ? 'group-hover:scale-105 transition-transform origin-left' : ''}`}>{value}</div>
     </Wrapper>
   )
 }

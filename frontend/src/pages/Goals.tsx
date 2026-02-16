@@ -57,7 +57,7 @@ export default function Goals() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
+    <div className="p-5 sm:p-6 lg:p-8 space-y-6 animate-fade-in">
       {dialog}
       <PageHeader
         title="Goals"
@@ -67,17 +67,15 @@ export default function Goals() {
             onClick={() => setShowForm(!showForm)}
             className="btn-primary whitespace-nowrap"
           >
-            {showForm ? 'Cancel' : '+ New Goal'}
+            {showForm ? 'Cancel' : 'New Goal'}
           </button>
         }
       />
 
       {/* Create Form */}
       {showForm && (
-        <div className="card p-4 sm:p-6">
-          <h2 className="text-xl font-semibold text-slate-100 mb-4">
-            Create New Goal
-          </h2>
+        <div className="card p-5 sm:p-6 animate-slide-up">
+          <h2 className="text-base font-semibold text-white/90 mb-4">Create New Goal</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="goal-title" className="label">Title</label>
@@ -85,9 +83,7 @@ export default function Goals() {
                 id="goal-title"
                 type="text"
                 value={formData.title}
-                onChange={(e) =>
-                  setFormData({ ...formData, title: e.target.value })
-                }
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 className="input"
                 required
                 autoFocus
@@ -98,97 +94,78 @@ export default function Goals() {
               <textarea
                 id="goal-description"
                 value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 className="input h-24 resize-none"
                 required
               />
             </div>
-            <div>
-              <label htmlFor="goal-priorities" className="label">
-                Priorities (comma-separated)
-              </label>
-              <input
-                id="goal-priorities"
-                type="text"
-                value={formData.priorities}
-                onChange={(e) =>
-                  setFormData({ ...formData, priorities: e.target.value })
-                }
-                className="input"
-                placeholder="High priority, Medium priority"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="goal-priorities" className="label">Priorities (comma-separated)</label>
+                <input
+                  id="goal-priorities"
+                  type="text"
+                  value={formData.priorities}
+                  onChange={(e) => setFormData({ ...formData, priorities: e.target.value })}
+                  className="input"
+                  placeholder="High priority, Medium priority"
+                />
+              </div>
+              <div>
+                <label htmlFor="goal-metrics" className="label">Metrics (comma-separated)</label>
+                <input
+                  id="goal-metrics"
+                  type="text"
+                  value={formData.metrics}
+                  onChange={(e) => setFormData({ ...formData, metrics: e.target.value })}
+                  className="input"
+                  placeholder="Code coverage, Performance"
+                />
+              </div>
             </div>
-            <div>
-              <label htmlFor="goal-metrics" className="label">
-                Metrics (comma-separated)
-              </label>
-              <input
-                id="goal-metrics"
-                type="text"
-                value={formData.metrics}
-                onChange={(e) =>
-                  setFormData({ ...formData, metrics: e.target.value })
-                }
-                className="input"
-                placeholder="Code coverage, Performance"
-              />
-            </div>
-            <button type="submit" className="btn-primary">
-              Create Goal
-            </button>
+            <button type="submit" className="btn-primary">Create Goal</button>
           </form>
         </div>
       )}
 
       {/* Current Goal */}
       {currentGoal && (
-        <div className="card p-6 border-2 border-blue-500">
-          <div className="flex items-start justify-between mb-4">
-            <h2 className="text-xl font-semibold text-slate-100">
-              Active Goal
-            </h2>
-            <span className="badge-success">ACTIVE</span>
+        <div className="card p-5 sm:p-6 relative overflow-hidden ring-1 ring-accent-500/30">
+          <div className="absolute inset-0 bg-gradient-to-r from-accent-600/5 to-violet-600/5 pointer-events-none" />
+          <div className="relative">
+            <div className="flex items-start justify-between mb-3">
+              <div className="text-[11px] font-medium text-white/30 uppercase tracking-widest">Active Goal</div>
+              <span className="badge-success">Active</span>
+            </div>
+            <h3 className="text-lg font-semibold text-white/90 mb-2">{currentGoal.title}</h3>
+            <p className="text-sm text-white/50 mb-4">{currentGoal.description}</p>
+            {currentGoal.priorities.length > 0 && (
+              <div className="mb-3">
+                <span className="text-[11px] font-medium text-white/30 uppercase tracking-wider">Priorities</span>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {currentGoal.priorities.map((p, i) => (
+                    <span key={i} className="badge-info">{p}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {currentGoal.metrics.length > 0 && (
+              <div>
+                <span className="text-[11px] font-medium text-white/30 uppercase tracking-wider">Metrics</span>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {currentGoal.metrics.map((m, i) => (
+                    <span key={i} className="badge-secondary">{m}</span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-          <h3 className="text-lg font-medium text-blue-400 mb-2">
-            {currentGoal.title}
-          </h3>
-          <p className="text-slate-300 mb-4">{currentGoal.description}</p>
-          {currentGoal.priorities.length > 0 && (
-            <div className="mb-2">
-              <span className="text-sm font-medium text-slate-400">
-                Priorities:
-              </span>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {currentGoal.priorities.map((p, i) => (
-                  <span key={i} className="badge-info">
-                    {p}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          {currentGoal.metrics.length > 0 && (
-            <div className="mb-2">
-              <span className="text-sm font-medium text-slate-400">
-                Metrics:
-              </span>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {currentGoal.metrics.map((m, i) => (
-                  <span key={i} className="badge-secondary">
-                    {m}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
       {/* Goals List */}
       <div className="space-y-4">
-        <h2 className="text-xl font-semibold text-slate-100">All Goals</h2>
+        <div className="text-[11px] font-medium text-white/30 uppercase tracking-widest">All Goals</div>
         {isLoading ? (
           <LoadingState message="Loading goals..." />
         ) : goals.length === 0 ? (
@@ -196,13 +173,11 @@ export default function Goals() {
         ) : (
           <div className="space-y-3">
             {goals.map((goal) => (
-              <div key={goal.id} className="card p-6">
+              <div key={goal.id} className="card p-5 animate-slide-up">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      <h3 className="text-lg font-medium text-slate-100">
-                        {goal.title}
-                      </h3>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <h3 className="text-base font-medium text-white/90">{goal.title}</h3>
                       <span
                         className={`badge ${
                           goal.status === 'ACTIVE'
@@ -217,29 +192,27 @@ export default function Goals() {
                         {goal.status}
                       </span>
                     </div>
-                    <p className="text-slate-300 mb-3">{goal.description}</p>
-                    <div className="text-sm text-slate-500">
+                    <p className="text-sm text-white/50 mb-2">{goal.description}</p>
+                    <div className="text-xs text-white/20">
                       Created: {new Date(goal.created_at).toLocaleString()}
                       {goal.active_since && (
-                        <> • Active: {new Date(goal.active_since).toLocaleString()}</>
+                        <> · Active: {new Date(goal.active_since).toLocaleString()}</>
                       )}
                     </div>
                   </div>
                   {goal.status !== 'ACTIVE' && (
                     <button
                       onClick={() => handleActivate(goal.id)}
-                      className="btn-primary ml-4"
+                      className="btn-sm btn-primary ml-4"
                     >
                       Activate
                     </button>
                   )}
                 </div>
                 {goal.priorities.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-3">
+                  <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-white/[0.04]">
                     {goal.priorities.map((p, i) => (
-                      <span key={i} className="badge-info">
-                        {p}
-                      </span>
+                      <span key={i} className="badge-info">{p}</span>
                     ))}
                   </div>
                 )}
