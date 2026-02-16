@@ -310,8 +310,9 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 	var req struct {
 		ParentID string `json:"parent_id"`
 		Subtasks []struct {
-			Title       string `json:"title"`
-			Description string `json:"description"`
+			Title       string   `json:"title"`
+			Description string   `json:"description"`
+			DependsOn   []string `json:"depends_on"`
 		} `json:"subtasks"`
 		SubtaskDependencies []models.SubtaskDependency `json:"subtask_dependencies"`
 	}
@@ -366,6 +367,7 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 			ParentID:    parent.ID,
 			Depth:       parent.Depth + 1,
 			GoalID:      parent.GoalID,
+			DependsOn:   sub.DependsOn,
 		}
 		if err := s.tasks.Create(task); err != nil {
 			serverError(w, "failed to create subtask", "parent_id", parent.ID, "error", err)

@@ -1698,3 +1698,372 @@ func TestCheckParentCompletion_RevalidateAfterRetry(t *testing.T) {
 		t.Errorf("expected parent to be COMPLETED, got %s", updated.Status)
 	}
 }
+
+func TestPopNextTask_SubtaskDependencies(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create parent task
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Create subtask 1 (no dependencies)
+	sub1 := &models.Task{
+		Title:    "Subtask 1",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		ParentID: parent.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(sub1); err != nil {
+		t.Fatalf("create subtask 1: %v", err)
+	}
+
+	// Create subtask 2 (depends on subtask 1)
+	sub2 := &models.Task{
+		Title:     "Subtask 2",
+		Type:      models.TaskTypeCoding,
+		Status:    models.TaskReady,
+		Priority:  50,
+		ParentID:  parent.ID,
+		Depth:     1,
+		DependsOn: []string{sub1.ID},
+	}
+	if err := mgr.CreateTask(sub2); err != nil {
+		t.Fatalf("create subtask 2: %v", err)
+	}
+
+	// Create subtask 3 (depends on subtask 2)
+	sub3 := &models.Task{
+		Title:     "Subtask 3",
+		Type:      models.TaskTypeCoding,
+		Status:    models.TaskReady,
+		Priority:  50,
+		ParentID:  parent.ID,
+		Depth:     1,
+		DependsOn: []string{sub2.ID},
+	}
+	if err := mgr.CreateTask(sub3); err != nil {
+		t.Fatalf("create subtask 3: %v", err)
+	}
+
+	// Pop task - should get subtask 1 (no dependencies)
+	next, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 1: %v", err)
+	}
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+	if next.ID != sub1.ID {
+		t.Errorf("expected subtask 1, got %s", next.Title)
+	}
+
+	// Try to pop again - should get nothing (subtask 2 blocked by subtask 1)
+	next, err = mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 2: %v", err)
+	}
+	if next != nil {
+		t.Errorf("expected no task (sub2 blocked), got %s", next.Title)
+	}
+
+	// Complete subtask 1
+	mgr.TransitionTask(sub1.ID, models.TaskCompleted)
+
+	// Pop task - should now get subtask 2
+	next, err = mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 3: %v", err)
+	}
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+	if next.ID != sub2.ID {
+		t.Errorf("expected subtask 2, got %s", next.Title)
+	}
+
+	// Try to pop again - should get nothing (subtask 3 blocked by subtask 2)
+	next, err = mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 4: %v", err)
+	}
+	if next != nil {
+		t.Errorf("expected no task (sub3 blocked), got %s", next.Title)
+	}
+
+	// Complete subtask 2
+	mgr.TransitionTask(sub2.ID, models.TaskCompleted)
+
+	// Pop task - should now get subtask 3
+	next, err = mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 5: %v", err)
+	}
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+	if next.ID != sub3.ID {
+		t.Errorf("expected subtask 3, got %s", next.Title)
+	}
+}
+
+func TestPopNextTask_SubtaskDependencies_TopologicalOrder(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create parent task
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Create subtask A (no dependencies, priority 50)
+	subA := &models.Task{
+		Title:    "Subtask A",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		ParentID: parent.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(subA); err != nil {
+		t.Fatalf("create subtask A: %v", err)
+	}
+
+	// Small delay to ensure different created_at timestamps
+	time.Sleep(10 * time.Millisecond)
+
+	// Create subtask B (no dependencies, priority 50, created later)
+	subB := &models.Task{
+		Title:    "Subtask B",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		ParentID: parent.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(subB); err != nil {
+		t.Fatalf("create subtask B: %v", err)
+	}
+
+	// Pop task - should get subtask A (created first, same priority)
+	next, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 1: %v", err)
+	}
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+	if next.ID != subA.ID {
+		t.Errorf("expected subtask A (topological order), got %s", next.Title)
+	}
+
+	// Pop task - should get subtask B
+	next, err = mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 2: %v", err)
+	}
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+	if next.ID != subB.ID {
+		t.Errorf("expected subtask B, got %s", next.Title)
+	}
+}
+
+func TestPopNextTask_SubtaskDependencies_BackwardCompatibility(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create parent task
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Create subtasks without dependencies (backward compatibility)
+	sub1 := &models.Task{
+		Title:    "Subtask 1",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		ParentID: parent.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(sub1); err != nil {
+		t.Fatalf("create subtask 1: %v", err)
+	}
+
+	sub2 := &models.Task{
+		Title:    "Subtask 2",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		ParentID: parent.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(sub2); err != nil {
+		t.Fatalf("create subtask 2: %v", err)
+	}
+
+	// Both subtasks should be pickable (no dependencies)
+	next1, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 1: %v", err)
+	}
+	if next1 == nil {
+		t.Fatal("expected task 1, got nil")
+	}
+
+	next2, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 2: %v", err)
+	}
+	if next2 == nil {
+		t.Fatal("expected task 2, got nil")
+	}
+
+	// Verify both subtasks were picked up
+	pickedIDs := map[string]bool{next1.ID: true, next2.ID: true}
+	if !pickedIDs[sub1.ID] || !pickedIDs[sub2.ID] {
+		t.Error("expected both subtasks to be picked up without dependencies")
+	}
+}
+
+func TestPopNextTask_SubtaskDependencies_MixedParents(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create parent 1
+	parent1 := &models.Task{
+		Title:    "Parent 1",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent1); err != nil {
+		t.Fatalf("create parent 1: %v", err)
+	}
+
+	// Create parent 2
+	parent2 := &models.Task{
+		Title:    "Parent 2",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent2); err != nil {
+		t.Fatalf("create parent 2: %v", err)
+	}
+
+	// Create subtask 1 for parent 1 (no dependencies)
+	sub1p1 := &models.Task{
+		Title:    "P1 Subtask 1",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		ParentID: parent1.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(sub1p1); err != nil {
+		t.Fatalf("create p1 subtask 1: %v", err)
+	}
+
+	// Create subtask 2 for parent 1 (depends on sub1p1)
+	sub2p1 := &models.Task{
+		Title:     "P1 Subtask 2",
+		Type:      models.TaskTypeCoding,
+		Status:    models.TaskReady,
+		Priority:  50,
+		ParentID:  parent1.ID,
+		Depth:     1,
+		DependsOn: []string{sub1p1.ID},
+	}
+	if err := mgr.CreateTask(sub2p1); err != nil {
+		t.Fatalf("create p1 subtask 2: %v", err)
+	}
+
+	// Create subtask 1 for parent 2 (no dependencies)
+	sub1p2 := &models.Task{
+		Title:    "P2 Subtask 1",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+		ParentID: parent2.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(sub1p2); err != nil {
+		t.Fatalf("create p2 subtask 1: %v", err)
+	}
+
+	// Pop tasks - should get sub1p1 and sub1p2 (no dependencies)
+	// Order depends on created_at, but both should be available
+	next1, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 1: %v", err)
+	}
+	if next1 == nil {
+		t.Fatal("expected task 1, got nil")
+	}
+
+	next2, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 2: %v", err)
+	}
+	if next2 == nil {
+		t.Fatal("expected task 2, got nil")
+	}
+
+	// Verify we got the two independent subtasks
+	pickedIDs := map[string]bool{next1.ID: true, next2.ID: true}
+	if !pickedIDs[sub1p1.ID] || !pickedIDs[sub1p2.ID] {
+		t.Error("expected to pick both independent subtasks from different parents")
+	}
+
+	// Try to pop again - should get nothing (sub2p1 blocked)
+	next3, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 3: %v", err)
+	}
+	if next3 != nil {
+		t.Errorf("expected no task (sub2p1 still blocked), got %s", next3.Title)
+	}
+
+	// Complete sub1p1
+	mgr.TransitionTask(sub1p1.ID, models.TaskCompleted)
+
+	// Pop task - should now get sub2p1
+	next4, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop task 4: %v", err)
+	}
+	if next4 == nil {
+		t.Fatal("expected task 4, got nil")
+	}
+	if next4.ID != sub2p1.ID {
+		t.Errorf("expected sub2p1 after dependency resolved, got %s", next4.Title)
+	}
+}
