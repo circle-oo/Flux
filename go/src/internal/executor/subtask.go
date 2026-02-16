@@ -17,8 +17,9 @@ type Decomposition struct {
 
 // DecomposedTask represents a single subtask in a decomposition plan.
 type DecomposedTask struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	DependsOn   []string `json:"depends_on,omitempty"`
 }
 
 // ParseDecomposition attempts to extract a decomposition plan from Claude's response.
@@ -257,6 +258,7 @@ func ToSubtaskRequests(d *Decomposition) []apiclient.SubtaskRequest {
 		requests[i] = apiclient.SubtaskRequest{
 			Title:       task.Title,
 			Description: task.Description,
+			DependsOn:   task.DependsOn,
 		}
 	}
 	return requests

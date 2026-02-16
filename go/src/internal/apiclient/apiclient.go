@@ -164,8 +164,9 @@ func (c *Client) GetTaskStatus(taskID string) (string, error) {
 
 // SubtaskRequest represents a subtask creation request.
 type SubtaskRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	DependsOn   []string `json:"depends_on,omitempty"`
 }
 
 // SubtaskDependency represents a dependency edge between two subtasks.

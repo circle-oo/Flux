@@ -211,6 +211,9 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 }
 
 // areDependenciesMet checks if all dependencies of a task are COMPLETED or ARCHIVED.
+// For subtasks (tasks with parent_id), this checks both:
+// 1. Task-level dependencies (depends_on field) - existing behavior
+// 2. Subtask dependencies within the same parent - if depends_on references sibling subtasks
 func (m *Manager) areDependenciesMet(tx *sql.Tx, task *models.Task) (bool, error) {
 	if len(task.DependsOn) == 0 {
 		return true, nil
@@ -218,7 +221,8 @@ func (m *Manager) areDependenciesMet(tx *sql.Tx, task *models.Task) (bool, error
 
 	for _, depID := range task.DependsOn {
 		var status string
-		err := tx.QueryRow(`SELECT status FROM tasks WHERE id = ?`, depID).Scan(&status)
+		var parentID string
+		err := tx.QueryRow(`SELECT status, parent_id FROM tasks WHERE id = ?`, depID).Scan(&status, &parentID)
 		if err == sql.ErrNoRows {
 			slog.Debug("dependency not found", "dep_id", depID, "task_id", task.ID)
 			return false, fmt.Errorf("dependency not found: %s", depID)
@@ -227,7 +231,12 @@ func (m *Manager) areDependenciesMet(tx *sql.Tx, task *models.Task) (bool, error
 			return false, fmt.Errorf("query dependency %s: %w", depID, err)
 		}
 
-		slog.Debug("checking dependency", "dep_id", depID, "status", status, "task_id", task.ID)
+		// Log whether this is a sibling subtask dependency or a regular task dependency
+		if task.ParentID != "" && parentID == task.ParentID {
+			slog.Debug("checking subtask dependency (sibling)", "dep_id", depID, "status", status, "task_id", task.ID, "parent_id", task.ParentID)
+		} else {
+			slog.Debug("checking task dependency", "dep_id", depID, "status", status, "task_id", task.ID)
+		}
 
 		if status != models.TaskCompleted && status != models.TaskArchived {
 			return false, nil
