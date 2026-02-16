@@ -311,6 +311,68 @@ func (s *Server) handleGetSubtaskDependencies(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// handleTaskStats handles GET /api/tasks/stats
+// Returns task counts for today and yesterday for delta indicators.
+func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
+	type StatusCounts struct {
+		Completed int `json:"completed"`
+		Failed    int `json:"failed"`
+		Running   int `json:"running"`
+		Ready     int `json:"ready"`
+		Pending   int `json:"pending"`
+	}
+
+	scanCounts := func(dateFilter string) (StatusCounts, error) {
+		var c StatusCounts
+		rows, err := s.db.Query(fmt.Sprintf(`
+			SELECT status, COUNT(*) FROM tasks
+			WHERE %s
+			GROUP BY status
+		`, dateFilter))
+		if err != nil {
+			return c, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var status string
+			var count int
+			if err := rows.Scan(&status, &count); err != nil {
+				return c, err
+			}
+			switch status {
+			case "COMPLETED":
+				c.Completed = count
+			case "FAILED":
+				c.Failed = count
+			case "RUNNING":
+				c.Running = count
+			case "READY":
+				c.Ready = count
+			case "PENDING":
+				c.Pending = count
+			}
+		}
+		return c, rows.Err()
+	}
+
+	today, err := scanCounts("date(completed_at) = date('now') OR (status IN ('RUNNING','READY','PENDING') AND date(created_at) = date('now'))")
+	if err != nil {
+		serverError(w, "failed to get today stats", "error", err)
+		return
+	}
+
+	yesterday, err := scanCounts("date(completed_at) = date('now', '-1 day') OR (date(created_at) = date('now', '-1 day') AND status NOT IN ('RUNNING','READY','PENDING'))")
+	if err != nil {
+		serverError(w, "failed to get yesterday stats", "error", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"today":     today,
+		"yesterday": yesterday,
+	})
+}
+
 // promoteToReady moves a PENDING task to READY status.
 // Takes taskID and re-reads from DB to avoid stale state.
 func (s *Server) promoteToReady(taskID string) {

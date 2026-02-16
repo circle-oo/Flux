@@ -1,8 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useWSStore } from '../stores/wsStore'
-import { useThemeStore, Theme } from '../stores/themeStore'
-import { useState, useEffect } from 'react'
+import { useSettingsStore, Theme } from '../stores/settingsStore'
+import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { useConfirm } from '../hooks/useConfirm'
 import { useToast } from './Toast'
@@ -54,8 +54,7 @@ const navItems = [
 export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarProps) {
   const { logout, authEnabled } = useAuthStore()
   const wsConnected = useWSStore((s) => s.connected)
-  const { theme, setTheme } = useThemeStore()
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  const { theme, setTheme, sidebarCollapsed, setSidebarCollapsed } = useSettingsStore()
   const [isRestarting, setIsRestarting] = useState(false)
   const { confirm, dialog } = useConfirm()
   const { toast } = useToast()
@@ -105,15 +104,15 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
       <aside
         className={`
           bg-sidebar/50 backdrop-blur-xl border-r border-line flex flex-col transition-all duration-300 ease-in-out
-          ${isCollapsed ? 'w-[60px]' : 'w-56'}
+          ${sidebarCollapsed ? 'w-[60px]' : 'w-56'}
           lg:relative lg:translate-x-0
           fixed inset-y-0 left-0 z-50
           ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
         {/* Header */}
-        <div className={`p-3 border-b border-line flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
-          {!isCollapsed && (
+        <div className={`p-3 border-b border-line flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
+          {!sidebarCollapsed && (
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary-500 to-primary-300 flex items-center justify-center shadow-lg shadow-primary-600/20">
                 <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -126,7 +125,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
               </div>
             </div>
           )}
-          {isCollapsed && (
+          {sidebarCollapsed && (
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary-500 to-primary-300 flex items-center justify-center">
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
@@ -143,9 +142,9 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-            {!isCollapsed && (
+            {!sidebarCollapsed && (
               <button
-                onClick={() => setIsCollapsed(!isCollapsed)}
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                 className="hidden lg:flex p-1.5 text-content-faint hover:text-content-secondary transition-colors rounded-md hover:bg-surface-active"
                 title="Collapse"
               >
@@ -158,9 +157,9 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
         </div>
 
         {/* Expand button when collapsed */}
-        {isCollapsed && (
+        {sidebarCollapsed && (
           <button
-            onClick={() => setIsCollapsed(false)}
+            onClick={() => setSidebarCollapsed(false)}
             className="hidden lg:flex mx-auto mt-2 p-1.5 text-content-faint hover:text-content-secondary transition-colors rounded-md hover:bg-surface-active"
             title="Expand"
           >
@@ -182,23 +181,23 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                   isActive
                     ? 'bg-primary-50 text-primary-700 font-semibold'
                     : 'text-content-muted hover:bg-surface-hover hover:text-content'
-                } ${isCollapsed ? 'justify-center' : ''}`
+                } ${sidebarCollapsed ? 'justify-center' : ''}`
               }
-              title={isCollapsed ? item.label : undefined}
+              title={sidebarCollapsed ? item.label : undefined}
             >
               <span className="shrink-0 transition-colors">{item.icon}</span>
-              {!isCollapsed && <span className="text-[13px] font-medium">{item.label}</span>}
+              {!sidebarCollapsed && <span className="text-[13px] font-medium">{item.label}</span>}
             </NavLink>
           ))}
         </nav>
 
         {/* Theme Selector */}
-        <div className={`px-3 py-2 flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
-          {!isCollapsed && <span className="text-[10px] text-content-faint uppercase tracking-wider font-medium">Theme</span>}
+        <div className={`px-3 py-2 flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'}`}>
+          {!sidebarCollapsed && <span className="text-[10px] text-content-faint uppercase tracking-wider font-medium">Point Color</span>}
           <div className="flex gap-1.5">
             {([
-              { id: 'blue' as Theme, color: 'bg-[#4B6EF5]', ring: 'ring-[#4B6EF5]' },
-              { id: 'green' as Theme, color: 'bg-[#1DB960]', ring: 'ring-[#1DB960]' },
+              { id: 'blue' as Theme, label: 'Light Blue', color: 'bg-[#4B6EF5]', ring: 'ring-[#4B6EF5]' },
+              { id: 'green' as Theme, label: 'Sage Green', color: 'bg-[#1DB960]', ring: 'ring-[#1DB960]' },
             ]).map((t) => (
               <button
                 key={t.id}
@@ -208,8 +207,8 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                     ? `ring-2 ${t.ring} ring-offset-2 ring-offset-sidebar scale-110`
                     : 'opacity-40 hover:opacity-80 hover:scale-105'
                 }`}
-                title={t.id.charAt(0).toUpperCase() + t.id.slice(1)}
-                aria-label={`Switch to ${t.id} theme`}
+                title={t.label}
+                aria-label={`Switch to ${t.label}`}
                 aria-pressed={theme === t.id}
               />
             ))}
@@ -221,8 +220,8 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
           <button
             onClick={handleRestart}
             disabled={isRestarting}
-            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-content-muted hover:bg-surface-hover hover:text-content transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation ${isCollapsed ? 'justify-center' : ''}`}
-            title={isCollapsed ? 'Restart' : undefined}
+            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-content-muted hover:bg-surface-hover hover:text-content transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation ${sidebarCollapsed ? 'justify-center' : ''}`}
+            title={sidebarCollapsed ? 'Restart' : undefined}
           >
             <span className="shrink-0">
               {isRestarting ? (
@@ -235,20 +234,20 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
                 </svg>
               )}
             </span>
-            {!isCollapsed && <span className="text-[13px] font-medium">{isRestarting ? 'Restarting...' : 'Restart'}</span>}
+            {!sidebarCollapsed && <span className="text-[13px] font-medium">{isRestarting ? 'Restarting...' : 'Restart'}</span>}
           </button>
           {authEnabled && (
             <button
               onClick={logout}
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-content-muted hover:bg-surface-hover hover:text-content transition-all duration-150 touch-manipulation ${isCollapsed ? 'justify-center' : ''}`}
-              title={isCollapsed ? 'Logout' : undefined}
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-content-muted hover:bg-surface-hover hover:text-content transition-all duration-150 touch-manipulation ${sidebarCollapsed ? 'justify-center' : ''}`}
+              title={sidebarCollapsed ? 'Logout' : undefined}
             >
               <span className="shrink-0">
                 <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
                 </svg>
               </span>
-              {!isCollapsed && <span className="text-[13px] font-medium">Logout</span>}
+              {!sidebarCollapsed && <span className="text-[13px] font-medium">Logout</span>}
             </button>
           )}
         </div>

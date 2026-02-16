@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"syscall"
 )
 
@@ -104,6 +106,77 @@ func (s *Server) legacyRestart() {
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		slog.Error("failed to send SIGTERM", "error", err)
 	}
+}
+
+// handleConfig handles GET /api/config
+// Returns sanitized configuration, redacting sensitive fields.
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if s.config == nil {
+		writeError(w, http.StatusInternalServerError, "config not available")
+		return
+	}
+
+	// Build a sanitized config map using reflection
+	result := sanitizeStruct(reflect.ValueOf(*s.config), 0)
+	writeJSON(w, http.StatusOK, result)
+}
+
+// sensitiveFieldNames are field names whose values should be redacted.
+var sensitiveFieldNames = map[string]bool{
+	"token": true, "password": true, "webhookurl": true,
+	"tokenenv": true, "passwordenv": true, "webhookurlenv": true,
+}
+
+func sanitizeStruct(v reflect.Value, depth int) map[string]interface{} {
+	if depth > 4 {
+		return nil
+	}
+	t := v.Type()
+	out := make(map[string]interface{})
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+
+		// Use yaml tag name if available, else lowercase field name
+		name := field.Tag.Get("yaml")
+		if name == "" || name == "-" {
+			name = strings.ToLower(field.Name)
+		}
+
+		fv := v.Field(i)
+
+		// Redact sensitive fields
+		if sensitiveFieldNames[strings.ToLower(field.Name)] {
+			s := fv.String()
+			if s != "" {
+				out[name] = "***"
+			} else {
+				out[name] = ""
+			}
+			continue
+		}
+
+		switch fv.Kind() {
+		case reflect.Struct:
+			out[name] = sanitizeStruct(fv, depth+1)
+		case reflect.Slice:
+			items := make([]interface{}, fv.Len())
+			for j := 0; j < fv.Len(); j++ {
+				elem := fv.Index(j)
+				if elem.Kind() == reflect.Struct {
+					items[j] = sanitizeStruct(elem, depth+1)
+				} else {
+					items[j] = elem.Interface()
+				}
+			}
+			out[name] = items
+		default:
+			out[name] = fv.Interface()
+		}
+	}
+	return out
 }
 
 // handleInsights handles GET /api/insights

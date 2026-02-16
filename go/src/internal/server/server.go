@@ -126,6 +126,9 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle("POST /api/tasks/{id}/cancel", s.authMiddleware(http.HandlerFunc(s.handleCancelTask)))
 	s.mux.Handle("POST /api/tasks/{id}/retry", s.authMiddleware(http.HandlerFunc(s.handleRetryTask)))
 
+	// Task stats (requires auth)
+	s.mux.Handle("GET /api/tasks/stats", s.authMiddleware(http.HandlerFunc(s.handleTaskStats)))
+
 	// Projects API (requires auth)
 	s.mux.Handle("POST /api/projects", s.authMiddleware(http.HandlerFunc(s.handleCreateProject)))
 	s.mux.Handle("GET /api/projects", s.authMiddleware(http.HandlerFunc(s.handleListProjects)))
@@ -141,6 +144,9 @@ func (s *Server) setupRoutes() {
 	// System endpoints (requires auth)
 	s.mux.Handle("POST /api/system/restart", s.authMiddleware(http.HandlerFunc(s.handleRestart)))
 	s.mux.Handle("GET /api/insights", s.authMiddleware(http.HandlerFunc(s.handleInsights)))
+
+	// Config endpoint (requires auth)
+	s.mux.Handle("GET /api/config", s.authMiddleware(http.HandlerFunc(s.handleConfig)))
 
 	// Deploy endpoints (requires auth)
 	s.mux.Handle("GET /api/system/deploy/status", s.authMiddleware(http.HandlerFunc(s.handleDeployStatus)))

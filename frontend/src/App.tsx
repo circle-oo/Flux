@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuthStore } from './stores/authStore'
 import Login from './pages/Login'
+import CommandPalette from './components/CommandPalette'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Goals from './pages/Goals'
@@ -40,6 +41,8 @@ function App() {
   }
 
   return (
+    <>
+    <CommandPalette />
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
@@ -54,6 +57,7 @@ function App() {
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
+    </>
   )
 }
 

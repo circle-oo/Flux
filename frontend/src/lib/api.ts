@@ -122,6 +122,19 @@ export interface Insights {
   project_activities: ProjectActivity[]
 }
 
+export interface TaskStatusCounts {
+  completed: number
+  failed: number
+  running: number
+  ready: number
+  pending: number
+}
+
+export interface TaskStats {
+  today: TaskStatusCounts
+  yesterday: TaskStatusCounts
+}
+
 class APIClient {
   private baseURL = ''
 
@@ -281,6 +294,11 @@ class APIClient {
     return this.fetch(`/api/tasks/${parentId}/subtasks/dependencies`)
   }
 
+  // Task Stats
+  async getTaskStats(): Promise<TaskStats> {
+    return this.fetch('/api/tasks/stats')
+  }
+
   // Projects
   async listProjects(): Promise<Project[]> {
     const data = await this.fetch<{ projects: Project[] }>('/api/projects')
@@ -394,6 +412,11 @@ class APIClient {
   // Insights
   async getInsights(): Promise<Insights> {
     return this.fetch('/api/insights')
+  }
+
+  // Config
+  async getConfig(): Promise<Record<string, unknown>> {
+    return this.fetch('/api/config')
   }
 }
 
