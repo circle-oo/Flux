@@ -168,14 +168,21 @@ type SubtaskRequest struct {
 	Description string `json:"description"`
 }
 
+// SubtaskDependency represents a dependency edge between two subtasks.
+type SubtaskDependency struct {
+	DependentID  string `json:"dependent_id"`
+	DependencyID string `json:"dependency_id"`
+}
+
 // CreateSubtasks creates subtasks for a parent task.
 // POST /internal/subtasks
-func (c *Client) CreateSubtasks(parentID string, subtasks []SubtaskRequest) error {
+func (c *Client) CreateSubtasks(parentID string, subtasks []SubtaskRequest, dependencies []SubtaskDependency) error {
 	slog.Info("creating subtasks", "parent_id", parentID, "count", len(subtasks))
 
 	req := map[string]interface{}{
-		"parent_id": parentID,
-		"subtasks":  subtasks,
+		"parent_id":             parentID,
+		"subtasks":              subtasks,
+		"subtask_dependencies": dependencies,
 	}
 	if err := c.postJSON("/internal/subtasks", http.StatusCreated, req, nil); err != nil {
 		return err

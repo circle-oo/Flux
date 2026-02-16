@@ -280,7 +280,7 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 		if decomp := ParseDecomposition(parsed.ResultText); decomp != nil {
 			subtasks := ToSubtaskRequests(decomp)
 			slog.Info("task decomposed into subtasks", "task_id", task.ID, "subtask_count", len(subtasks))
-			if err := e.manager.CreateSubtasks(task.ID, subtasks); err != nil {
+			if err := e.manager.CreateSubtasks(task.ID, subtasks, nil); err != nil {
 				slog.Error("failed to create subtasks", "task_id", task.ID, "error", err)
 				_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("subtask creation failed: %v", err), result.TokensUsed, result.CostUSD)
 				return nil, fmt.Errorf("subtask creation failed: %w", err)
