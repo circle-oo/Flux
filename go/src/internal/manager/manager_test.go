@@ -832,7 +832,7 @@ func TestCheckParentCompletion_SomeFailed(t *testing.T) {
 	mgr.TransitionTask(parent.ID, models.TaskRunning)
 	mgr.TransitionTask(parent.ID, models.TaskDecomposed)
 
-	// One completed, one failed
+	// One completed, one failed with exhausted retries
 	mgr.CreateTask(&models.Task{
 		Title: "Sub OK", Type: models.TaskTypeCoding, Status: models.TaskCompleted,
 		Priority: 50, ParentID: parent.ID, Depth: 1,
@@ -840,6 +840,7 @@ func TestCheckParentCompletion_SomeFailed(t *testing.T) {
 	mgr.CreateTask(&models.Task{
 		Title: "Sub Fail", Type: models.TaskTypeCoding, Status: models.TaskFailed,
 		Priority: 50, ParentID: parent.ID, Depth: 1,
+		RetryCount: 3, MaxRetries: 3, // Retries exhausted
 	})
 
 	if err := mgr.CheckParentCompletion(parent.ID); err != nil {
@@ -1419,5 +1420,281 @@ func TestCheckParentCompletion_WithAggregation(t *testing.T) {
 	}
 	if !strings.Contains(updated.Result, "Result for subtask 2") {
 		t.Error("parent result should contain subtask 2 result")
+	}
+}
+
+func TestPopNextTask_AutoRetryFailed(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create a FAILED task that is still retryable
+	task := &models.Task{
+		Title:      "Failed Task",
+		Type:       models.TaskTypeCoding,
+		Status:     models.TaskFailed,
+		Priority:   50,
+		RetryCount: 1,
+		MaxRetries: 3,
+		ErrorLog:   "previous failure",
+	}
+	if err := mgr.CreateTask(task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// PopNextTask should pick it up and auto-retry
+	popped, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop next task: %v", err)
+	}
+	if popped == nil {
+		t.Fatal("expected to pop failed retryable task")
+	}
+	if popped.ID != task.ID {
+		t.Errorf("expected to pop task %s, got %s", task.ID, popped.ID)
+	}
+	if popped.Status != models.TaskRunning {
+		t.Errorf("expected status RUNNING, got %s", popped.Status)
+	}
+
+	// Verify retry count was incremented
+	updated, _ := mgr.GetTask(task.ID)
+	if updated.RetryCount != 2 {
+		t.Errorf("expected retry_count 2, got %d", updated.RetryCount)
+	}
+	if updated.ErrorLog != "" {
+		t.Error("expected error_log to be cleared")
+	}
+}
+
+func TestPopNextTask_SkipExhaustedRetries(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create a FAILED task with exhausted retries
+	task1 := &models.Task{
+		Title:      "Exhausted Task",
+		Type:       models.TaskTypeCoding,
+		Status:     models.TaskFailed,
+		Priority:   50,
+		RetryCount: 3,
+		MaxRetries: 3,
+	}
+	if err := mgr.CreateTask(task1); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Create a READY task
+	task2 := &models.Task{
+		Title:    "Ready Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 51,
+	}
+	if err := mgr.CreateTask(task2); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// PopNextTask should skip the exhausted task and pick the ready one
+	popped, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop next task: %v", err)
+	}
+	if popped == nil {
+		t.Fatal("expected to pop ready task")
+	}
+	if popped.ID != task2.ID {
+		t.Errorf("expected to pop ready task %s, got %s", task2.ID, popped.ID)
+	}
+}
+
+func TestCheckParentCompletion_DeferFailureForRetryable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{
+		Orchestrator: config.OrchestratorConfig{
+			WorkspaceBase: t.TempDir(),
+		},
+	}
+	mgr := NewManager(db, cfg)
+
+	// Create parent task
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Create completed subtask
+	sub1 := &models.Task{
+		Title:    "Completed Subtask",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskCompleted,
+		Priority: 50,
+		ParentID: parent.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(sub1); err != nil {
+		t.Fatalf("create subtask 1: %v", err)
+	}
+
+	// Create failed but retryable subtask
+	sub2 := &models.Task{
+		Title:      "Failed Retryable Subtask",
+		Type:       models.TaskTypeCoding,
+		Status:     models.TaskFailed,
+		Priority:   50,
+		ParentID:   parent.ID,
+		Depth:      1,
+		RetryCount: 1,
+		MaxRetries: 3,
+	}
+	if err := mgr.CreateTask(sub2); err != nil {
+		t.Fatalf("create subtask 2: %v", err)
+	}
+
+	// Check parent completion - should NOT transition parent to FAILED
+	if err := mgr.CheckParentCompletion(parent.ID); err != nil {
+		t.Fatalf("check parent completion: %v", err)
+	}
+
+	updated, _ := mgr.GetTask(parent.ID)
+	if updated.Status != models.TaskDecomposed {
+		t.Errorf("expected parent to stay DECOMPOSED, got %s", updated.Status)
+	}
+}
+
+func TestCheckParentCompletion_FailWhenRetriesExhausted(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{
+		Orchestrator: config.OrchestratorConfig{
+			WorkspaceBase: t.TempDir(),
+		},
+	}
+	mgr := NewManager(db, cfg)
+
+	// Create parent task
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Create completed subtask
+	sub1 := &models.Task{
+		Title:    "Completed Subtask",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskCompleted,
+		Priority: 50,
+		ParentID: parent.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(sub1); err != nil {
+		t.Fatalf("create subtask 1: %v", err)
+	}
+
+	// Create failed subtask with exhausted retries
+	sub2 := &models.Task{
+		Title:      "Failed Exhausted Subtask",
+		Type:       models.TaskTypeCoding,
+		Status:     models.TaskFailed,
+		Priority:   50,
+		ParentID:   parent.ID,
+		Depth:      1,
+		RetryCount: 3,
+		MaxRetries: 3,
+	}
+	if err := mgr.CreateTask(sub2); err != nil {
+		t.Fatalf("create subtask 2: %v", err)
+	}
+
+	// Check parent completion - should transition parent to FAILED
+	if err := mgr.CheckParentCompletion(parent.ID); err != nil {
+		t.Fatalf("check parent completion: %v", err)
+	}
+
+	updated, _ := mgr.GetTask(parent.ID)
+	if updated.Status != models.TaskFailed {
+		t.Errorf("expected parent to be FAILED, got %s", updated.Status)
+	}
+}
+
+func TestCheckParentCompletion_RevalidateAfterRetry(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{
+		Orchestrator: config.OrchestratorConfig{
+			WorkspaceBase: t.TempDir(),
+		},
+	}
+	mgr := NewManager(db, cfg)
+
+	// Create parent task
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Create two subtasks
+	sub1 := &models.Task{
+		Title:    "Subtask 1",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskCompleted,
+		Priority: 50,
+		ParentID: parent.ID,
+		Depth:    1,
+	}
+	if err := mgr.CreateTask(sub1); err != nil {
+		t.Fatalf("create subtask 1: %v", err)
+	}
+
+	sub2 := &models.Task{
+		Title:      "Subtask 2",
+		Type:       models.TaskTypeCoding,
+		Status:     models.TaskFailed,
+		Priority:   50,
+		ParentID:   parent.ID,
+		Depth:      1,
+		RetryCount: 1,
+		MaxRetries: 3,
+	}
+	if err := mgr.CreateTask(sub2); err != nil {
+		t.Fatalf("create subtask 2: %v", err)
+	}
+
+	// First check - parent should stay DECOMPOSED
+	if err := mgr.CheckParentCompletion(parent.ID); err != nil {
+		t.Fatalf("check parent completion: %v", err)
+	}
+	updated, _ := mgr.GetTask(parent.ID)
+	if updated.Status != models.TaskDecomposed {
+		t.Errorf("expected parent to stay DECOMPOSED, got %s", updated.Status)
+	}
+
+	// Simulate retry success - mark subtask 2 as completed
+	sub2.Status = models.TaskCompleted
+	if err := mgr.tasks.Update(sub2); err != nil {
+		t.Fatalf("update subtask 2: %v", err)
+	}
+
+	// Re-check parent - should now transition to COMPLETED
+	if err := mgr.CheckParentCompletion(parent.ID); err != nil {
+		t.Fatalf("re-check parent completion: %v", err)
+	}
+	updated, _ = mgr.GetTask(parent.ID)
+	if updated.Status != models.TaskCompleted {
+		t.Errorf("expected parent to be COMPLETED, got %s", updated.Status)
 	}
 }

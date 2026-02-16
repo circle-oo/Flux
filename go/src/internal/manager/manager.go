@@ -107,7 +107,8 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 	defer tx.Rollback()
 
 	// Build query based on pod type with goal boost and extended limit for dependency checking
-	// Include both READY and RETRY tasks for automatic retry on restart
+	// Include READY, RETRY, and FAILED (but retryable) tasks
+	// FAILED tasks are auto-retried if retry_count < max_retries
 	orderAndLimit := `
 			ORDER BY priority ASC,
 				CASE WHEN goal_id = ? THEN 0 ELSE 1 END,
@@ -116,11 +117,11 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 	var query string
 	var args []interface{}
 	if podType == "RESEARCHER" {
-		query = models.TaskSelectSQL + " WHERE status IN (?, ?) AND type = ?" + orderAndLimit
-		args = []interface{}{models.TaskReady, models.TaskRetry, models.TaskTypeResearch, currentGoalID}
+		query = models.TaskSelectSQL + " WHERE (status IN (?, ?) OR (status = ? AND retry_count < max_retries)) AND type = ?" + orderAndLimit
+		args = []interface{}{models.TaskReady, models.TaskRetry, models.TaskFailed, models.TaskTypeResearch, currentGoalID}
 	} else {
-		query = models.TaskSelectSQL + " WHERE status IN (?, ?) AND type != ?" + orderAndLimit
-		args = []interface{}{models.TaskReady, models.TaskRetry, models.TaskTypeResearch, currentGoalID}
+		query = models.TaskSelectSQL + " WHERE (status IN (?, ?) OR (status = ? AND retry_count < max_retries)) AND type != ?" + orderAndLimit
+		args = []interface{}{models.TaskReady, models.TaskRetry, models.TaskFailed, models.TaskTypeResearch, currentGoalID}
 	}
 
 	// Query multiple candidates for dependency checking
@@ -161,7 +162,32 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 		return nil, nil // No task with met dependencies available
 	}
 
-	slog.Debug("claiming task", "task_id", task.ID, "title", task.Title)
+	slog.Debug("claiming task", "task_id", task.ID, "title", task.Title, "current_status", task.Status)
+
+	// If task is FAILED but retryable, transition to RETRY first, then to RUNNING
+	if task.Status == models.TaskFailed && task.IsRetryable() {
+		slog.Info("auto-retrying failed task",
+			"task_id", task.ID,
+			"retry_count", task.RetryCount,
+			"max_retries", task.MaxRetries)
+
+		// Increment retry count and clear previous failure data
+		_, err = tx.Exec(
+			`UPDATE tasks SET status = ?, retry_count = retry_count + 1,
+			 error_log = '', result = '', started_at = '', completed_at = '',
+			 updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+			models.TaskRetry, task.ID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("update task to retry: %w", err)
+		}
+		task.RetryCount++
+		task.Status = models.TaskRetry
+		task.ErrorLog = ""
+		task.Result = ""
+		task.StartedAt = ""
+		task.CompletedAt = ""
+	}
 
 	// Transition to RUNNING and set started_at
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -247,8 +273,8 @@ func (m *Manager) TransitionTask(taskID, newStatus string) error {
 		}
 
 		// Check retry count limit (unless crash recovery)
-		if !task.CrashRecovery && task.RetryCount >= 3 {
-			return fmt.Errorf("retry limit exceeded (max 3 retries)")
+		if !task.CrashRecovery && task.RetryCount >= task.MaxRetries {
+			return fmt.Errorf("retry limit exceeded (max %d retries)", task.MaxRetries)
 		}
 
 		// Increment retry count unless crash recovery
@@ -262,6 +288,7 @@ func (m *Manager) TransitionTask(taskID, newStatus string) error {
 		slog.Info("task retry",
 			"task_id", taskID,
 			"retry_count", task.RetryCount,
+			"max_retries", task.MaxRetries,
 			"crash_recovery", task.CrashRecovery)
 	}
 
@@ -383,6 +410,7 @@ func (m *Manager) popNextPendingOnce(triagerID string) (*models.Task, error) {
 
 // CheckParentCompletion checks if all subtasks of a parent are done,
 // merges their branches into the parent branch, and auto-transitions the parent accordingly.
+// Parent failure is deferred until all retry options are exhausted for failed subtasks.
 func (m *Manager) CheckParentCompletion(parentID string) error {
 	parent, err := m.tasks.GetByID(parentID)
 	if err != nil {
@@ -403,8 +431,10 @@ func (m *Manager) CheckParentCompletion(parentID string) error {
 	}
 
 	// Check completion status and merge completed subtasks
-	allDone := true
-	anyFailed := false
+	allInTerminalState := true
+	anyFailedPermanently := false
+	anyRetryable := false
+
 	for _, sub := range subtasks {
 		switch sub.Status {
 		case models.TaskCompleted, models.TaskArchived:
@@ -417,26 +447,52 @@ func (m *Manager) CheckParentCompletion(parentID string) error {
 				// Continue processing other subtasks even if one merge fails
 			}
 		case models.TaskFailed:
-			anyFailed = true
+			// Check if this failed task is retryable
+			if sub.IsRetryable() {
+				anyRetryable = true
+				allInTerminalState = false
+				slog.Debug("subtask is retryable, deferring parent failure",
+					"parent_id", parentID,
+					"subtask_id", sub.ID,
+					"retry_count", sub.RetryCount,
+					"max_retries", sub.MaxRetries)
+			} else {
+				// Failed with retries exhausted
+				anyFailedPermanently = true
+				slog.Debug("subtask failed permanently",
+					"parent_id", parentID,
+					"subtask_id", sub.ID,
+					"retry_count", sub.RetryCount,
+					"max_retries", sub.MaxRetries)
+			}
 		case models.TaskCancelled:
-			// treat as done
+			// treat as done (terminal state)
 		default:
-			allDone = false
+			// Task is still pending, ready, running, or decomposed
+			allInTerminalState = false
 		}
 	}
 
-	if !allDone {
+	// If any subtasks are still retryable or not in terminal state, keep parent as DECOMPOSED
+	if !allInTerminalState {
+		if anyRetryable {
+			slog.Info("parent task still has retryable subtasks, keeping DECOMPOSED",
+				"parent_id", parentID)
+		} else {
+			slog.Debug("parent task has non-terminal subtasks, keeping DECOMPOSED",
+				"parent_id", parentID)
+		}
 		return nil
 	}
 
-	// Aggregate subtask results after merging
+	// All subtasks are in terminal states - aggregate results and transition parent
 	if err := m.AggregateSubtaskResults(parentID); err != nil {
 		slog.Error("failed to aggregate subtask results", "parent_id", parentID, "error", err)
 		// Continue with transition even if aggregation fails
 	}
 
 	newStatus := models.TaskCompleted
-	if anyFailed {
+	if anyFailedPermanently {
 		newStatus = models.TaskFailed
 	}
 

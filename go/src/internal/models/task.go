@@ -73,6 +73,7 @@ type Task struct {
 	Plan              string  `json:"plan"`
 	TestPassed    *bool    `json:"test_passed"`
 	RetryCount    int      `json:"retry_count"`
+	MaxRetries    int      `json:"max_retries"`
 	CrashRecovery bool    `json:"crash_recovery"`
 	TokensUsed    int      `json:"tokens_used"`
 	CostUSD       float64  `json:"cost_usd"`
@@ -102,6 +103,16 @@ func (t *Task) NeedsOpus() bool {
 // RequiresTest returns true if this task type requires tests.
 func (t *Task) RequiresTest() bool {
 	return t.Type == TaskTypeCoding || t.Type == TaskTypeBugfix || t.Type == TaskTypeMaintenance
+}
+
+// IsRetryable returns true if this task can be retried (failed but within retry limits).
+func (t *Task) IsRetryable() bool {
+	return t.Status == TaskFailed && t.RetryCount < t.MaxRetries
+}
+
+// HasRetriesExhausted returns true if this task has failed and exhausted all retries.
+func (t *Task) HasRetriesExhausted() bool {
+	return t.Status == TaskFailed && t.RetryCount >= t.MaxRetries
 }
 
 func (t *Task) hasComplexKeywords() bool {
@@ -154,6 +165,9 @@ func (s *TaskStore) Create(t *Task) error {
 	if t.Tags == nil {
 		t.Tags = []string{}
 	}
+	if t.MaxRetries == 0 {
+		t.MaxRetries = 3
+	}
 
 	// Operator tasks stay PENDING until triage completes, then move to READY.
 	// Non-operator tasks (SYSTEM, SELF) go directly to READY.
@@ -175,15 +189,15 @@ func (s *TaskStore) Create(t *Task) error {
 		 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 		 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
 		 diff_lines, files_changed, triage_analysis, triage_description, triage_title, plan, test_passed,
-		 retry_count, crash_recovery, tokens_used, cost_usd, started_at, completed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 retry_count, max_retries, crash_recovery, tokens_used, cost_usd, started_at, completed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Title, t.Description, t.Type, t.Status, t.Priority, t.Source,
 		t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
 		dependsOnJSON, tagsJSON, t.Prompt,
 		t.Result, t.ErrorLog, t.ExecutorID, t.Model, t.BranchName,
 		t.PRUrl, t.PRStatus, t.DiffLines, t.FilesChanged,
 		t.TriageAnalysis, t.TriageDescription, t.TriageTitle, t.Plan, t.TestPassed,
-		t.RetryCount, t.CrashRecovery, t.TokensUsed, t.CostUSD,
+		t.RetryCount, t.MaxRetries, t.CrashRecovery, t.TokensUsed, t.CostUSD,
 		t.StartedAt, t.CompletedAt,
 	)
 	if err != nil {
@@ -274,7 +288,7 @@ func (s *TaskStore) Update(t *Task) error {
 		 depends_on = ?, tags = ?, prompt = ?, result = ?, error_log = ?, executor_id = ?,
 		 model = ?, branch_name = ?, pr_url = ?, pr_status = ?, diff_lines = ?,
 		 files_changed = ?, triage_analysis = ?, triage_description = ?, triage_title = ?, plan = ?,
-		 test_passed = ?, retry_count = ?, crash_recovery = ?,
+		 test_passed = ?, retry_count = ?, max_retries = ?, crash_recovery = ?,
 		 tokens_used = ?, cost_usd = ?, updated_at = CURRENT_TIMESTAMP,
 		 started_at = ?, completed_at = ? WHERE id = ?`,
 		t.Title, t.Description, t.Type, t.Status, t.Priority,
@@ -282,7 +296,7 @@ func (s *TaskStore) Update(t *Task) error {
 		dependsOnJSON, tagsJSON, t.Prompt, t.Result, t.ErrorLog,
 		t.ExecutorID, t.Model, t.BranchName, t.PRUrl, t.PRStatus, t.DiffLines,
 		t.FilesChanged, t.TriageAnalysis, t.TriageDescription, t.TriageTitle, t.Plan,
-		t.TestPassed, t.RetryCount, t.CrashRecovery,
+		t.TestPassed, t.RetryCount, t.MaxRetries, t.CrashRecovery,
 		t.TokensUsed, t.CostUSD, t.StartedAt, t.CompletedAt, t.ID,
 	)
 	if err != nil {
@@ -343,7 +357,7 @@ func (s *TaskStore) Retry(id string) error {
 		 retry_count = retry_count + 1, started_at = '', completed_at = '',
 		 executor_id = '', branch_name = '', pr_url = '', pr_status = '',
 		 updated_at = CURRENT_TIMESTAMP
-		 WHERE id = ? AND status IN (?, ?)`,
+		 WHERE id = ? AND status IN (?, ?) AND retry_count < max_retries`,
 		TaskReady, id, TaskFailed, TaskRetry,
 	)
 	if err != nil {
@@ -499,7 +513,7 @@ const TaskSelectSQL = `SELECT id, title, description, type, status, priority, so
 	project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 	result, error_log, executor_id, model, branch_name, pr_url, pr_status,
 	diff_lines, files_changed, triage_analysis, triage_description, triage_title, plan,
-	test_passed, retry_count, crash_recovery, tokens_used, cost_usd,
+	test_passed, retry_count, max_retries, crash_recovery, tokens_used, cost_usd,
 	created_at, updated_at, started_at, completed_at
 	FROM tasks`
 
@@ -516,7 +530,7 @@ func ScanTask(scanner interface{ Scan(...interface{}) error }) (*Task, error) {
 		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
 		&t.PRUrl, &t.PRStatus, &t.DiffLines, &t.FilesChanged,
 		&t.TriageAnalysis, &t.TriageDescription, &t.TriageTitle, &t.Plan,
-		&t.TestPassed, &t.RetryCount, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
+		&t.TestPassed, &t.RetryCount, &t.MaxRetries, &t.CrashRecovery, &t.TokensUsed, &t.CostUSD,
 		&t.CreatedAt, &t.UpdatedAt, &t.StartedAt, &t.CompletedAt,
 	)
 	if err != nil {

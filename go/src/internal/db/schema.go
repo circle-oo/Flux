@@ -145,4 +145,5 @@ var schemaStatements = []string{
 var migrations = []string{
 	`ALTER TABLE tasks ADD COLUMN triage_description TEXT DEFAULT ''`,
 	`ALTER TABLE tasks ADD COLUMN triage_title TEXT DEFAULT ''`,
+	`ALTER TABLE tasks ADD COLUMN max_retries INTEGER DEFAULT 3`,
 }
