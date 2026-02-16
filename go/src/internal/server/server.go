@@ -41,36 +41,48 @@ type Server struct {
 	usage    *models.UsageStore
 }
 
-// NewServer creates a new Server.
-// NOTE: mgr parameter added for Phase 2 integration. Pass nil if manager not initialized yet.
-func NewServer(cfg *config.Config, db *sql.DB, mgr *manager.Manager, discord *notifier.Discord, webFS fs.FS) *Server {
+// ServerDeps bundles all dependencies required to create a Server.
+type ServerDeps struct {
+	Config   *config.Config
+	DB       *sql.DB
+	Manager  *manager.Manager
+	Discord  *notifier.Discord
+	WebFS    fs.FS
+	Version  string
+}
+
+// NewServer creates a new Server with the provided dependencies.
+func NewServer(deps ServerDeps) *Server {
+	if deps.Version != "" {
+		version = deps.Version
+	}
 	s := &Server{
-		config:      cfg,
-		db:          db,
-		mgr:         mgr,
+		config:      deps.Config,
+		db:          deps.DB,
+		mgr:         deps.Manager,
 		mux:         http.NewServeMux(),
-		notifier:    discord,
-		webFS:       webFS,
+		notifier:    deps.Discord,
+		webFS:       deps.WebFS,
 		podRegistry: NewPodRegistry(),
-		goals:       models.NewGoalStore(db),
-		tasks:       models.NewTaskStore(db),
-		projects:    models.NewProjectStore(db),
-		alerts:      models.NewAlertStore(db),
-		usage:       models.NewUsageStore(db),
+		goals:       models.NewGoalStore(deps.DB),
+		tasks:       models.NewTaskStore(deps.DB),
+		projects:    models.NewProjectStore(deps.DB),
+		alerts:      models.NewAlertStore(deps.DB),
+		usage:       models.NewUsageStore(deps.DB),
 	}
 
-	s.auth = NewAuthManager(cfg.Server.Auth)
+	s.auth = NewAuthManager(deps.Config.Server.Auth)
 	s.ws = NewWebSocketHub()
 
 	// Initialize GitHub client if configured
-	if cfg.GitHub.Token != "" {
-		s.ghClient = github_pkg.NewClient(cfg.GitHub.Token, cfg.GitHub.Username)
+	if deps.Config.GitHub.Token != "" {
+		s.ghClient = github_pkg.NewClient(deps.Config.GitHub.Token, deps.Config.GitHub.Username)
 	}
 
 	s.setupRoutes()
 
 	s.server = &http.Server{
-		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Addr:    fmt.Sprintf("%s:%d", deps.Config.Server.Host, deps.Config.Server.Port),
 		Handler: s.mux,
 	}
 
@@ -186,14 +198,12 @@ func (s *Server) spaHandler() http.Handler {
 		}
 
 		// Check if file exists in embedded FS
-		f, err := s.webFS.Open(path[1:]) // strip leading /
-		if err != nil {
+		if _, err := fs.Stat(s.webFS, path[1:]); err != nil {
 			// File not found — serve index.html for SPA routing
 			r.URL.Path = "/"
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		f.Close()
 
 		fileServer.ServeHTTP(w, r)
 	})
@@ -224,13 +234,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// version is set at build time via -ldflags.
+// version is set via ServerDeps.Version during initialization.
 var version = "dev"
-
-// SetVersion sets the server version string (called from main).
-func SetVersion(v string) {
-	version = v
-}
 
 // Common error messages returned by API handlers.
 const (

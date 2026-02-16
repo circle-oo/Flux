@@ -14,8 +14,8 @@ export default function StatCard({ label, value, color, onClick }: StatCardProps
       onClick={onClick}
       {...(onClick ? { type: 'button' as const } : {})}
     >
-      <div className="text-xs sm:text-sm font-medium text-slate-400 mb-1">{label}</div>
-      <div className={`text-2xl sm:text-3xl font-bold ${color}`}>{value}</div>
+      <div className="text-xs font-medium text-slate-400 mb-1">{label}</div>
+      <div className={`text-2xl font-bold ${color}`}>{value}</div>
     </Wrapper>
   )
 }

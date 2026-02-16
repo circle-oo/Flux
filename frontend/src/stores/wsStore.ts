@@ -4,7 +4,6 @@ import { useTaskStore } from './taskStore'
 import { useLogStore } from './logStore'
 import { useDeployStore } from './deployStore'
 import type { UpdaterStatus } from '../lib/api'
-import type {} from './projectStore' // available for future PR_STATUS handling
 
 type EventType = 'TASK_UPDATED' | 'GOAL_CHANGED' | 'PR_STATUS' | 'POD_STATUS' | 'LOG_ENTRY' | 'DEPLOY_STATUS'
 
@@ -150,11 +149,17 @@ function handleEvent(event: WSEvent) {
   }
 
   switch (event.type) {
-    case 'TASK_UPDATED':
-      // Refresh tasks list and notify detail views
-      useTaskStore.getState().fetchTasks()
+    case 'TASK_UPDATED': {
+      // Incrementally update the specific task instead of full refetch
+      const taskData = event.data as TaskUpdatedData
+      if (taskData.task_id) {
+        useTaskStore.getState().refreshTask(taskData.task_id)
+      } else {
+        useTaskStore.getState().fetchTasks()
+      }
       useWSStore.setState((s) => ({ taskUpdateCounter: s.taskUpdateCounter + 1 }))
       break
+    }
 
     case 'GOAL_CHANGED':
       // Refresh goals and current goal
@@ -162,10 +167,16 @@ function handleEvent(event: WSEvent) {
       useGoalStore.getState().fetchCurrentGoal()
       break
 
-    case 'PR_STATUS':
-      // Refresh tasks to get updated PR status
-      useTaskStore.getState().fetchTasks()
+    case 'PR_STATUS': {
+      // Incrementally update the specific task's PR status
+      const prData = event.data as PRStatusData
+      if (prData.task_id) {
+        useTaskStore.getState().refreshTask(prData.task_id)
+      } else {
+        useTaskStore.getState().fetchTasks()
+      }
       break
+    }
 
     case 'POD_STATUS':
       // Pod status updates (Phase 2A)

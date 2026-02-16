@@ -120,7 +120,7 @@ const computeLayout = (
           label: (
             <div className="text-xs text-center">
               <div className="font-semibold text-white truncate max-w-[180px]">{task.title}</div>
-              <div className="text-[10px] mt-1 text-slate-300">{task.status}</div>
+              <div className="text-xs mt-1 text-slate-300">{task.status}</div>
             </div>
           ),
         },

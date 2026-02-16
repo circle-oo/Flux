@@ -6,16 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/circle-oo/flux/internal/manager"
 	"github.com/circle-oo/flux/internal/models"
 )
-
-// SetManager is deprecated. Use NewServer with mgr parameter instead.
-// Kept for backwards compatibility during integration.
-func SetManager(m *manager.Manager) {
-	// TODO(integration): Remove this function after main.go is updated
-	slog.Warn("SetManager is deprecated, pass mgr to NewServer instead")
-}
 
 // handleInternalNextTask handles POST /internal/tasks/next
 // Pod requests next task from Manager.
@@ -53,6 +45,58 @@ func (s *Server) handleInternalNextTask(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"task": task})
+}
+
+// taskDoneFields holds the optional fields reported when a task completes.
+type taskDoneFields struct {
+	Result       string
+	ErrorLog     string
+	TokensUsed   int
+	CostUSD      float64
+	ExecutorID   string
+	Model        string
+	BranchName   string
+	DiffLines    int
+	FilesChanged int
+	TestPassed   *bool
+	PRUrl        string
+	PRStatus     string
+}
+
+// updateTaskFields applies non-zero reported fields to a task.
+func updateTaskFields(task *models.Task, f taskDoneFields) {
+	if f.Result != "" {
+		task.Result = f.Result
+	}
+	if f.ErrorLog != "" {
+		task.ErrorLog = f.ErrorLog
+	}
+	task.TokensUsed = f.TokensUsed
+	task.CostUSD = f.CostUSD
+	if f.ExecutorID != "" {
+		task.ExecutorID = f.ExecutorID
+	}
+	if f.Model != "" {
+		task.Model = f.Model
+	}
+	if f.BranchName != "" {
+		task.BranchName = f.BranchName
+	}
+	if f.DiffLines != 0 {
+		task.DiffLines = f.DiffLines
+	}
+	if f.FilesChanged != 0 {
+		task.FilesChanged = f.FilesChanged
+	}
+	if f.TestPassed != nil {
+		task.TestPassed = f.TestPassed
+	}
+	if f.PRUrl != "" {
+		task.PRUrl = f.PRUrl
+	}
+	if f.PRStatus != "" {
+		task.PRStatus = f.PRStatus
+	}
 }
 
 // handleInternalTaskDone handles POST /internal/tasks/{id}/done
@@ -116,41 +160,21 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Update result fields
-	if req.Result != "" {
-		task.Result = req.Result
-	}
-	if req.ErrorLog != "" {
-		task.ErrorLog = req.ErrorLog
-	}
-	task.TokensUsed = req.TokensUsed
-	task.CostUSD = req.CostUSD
-
-	// Update execution detail fields
-	if req.ExecutorID != "" {
-		task.ExecutorID = req.ExecutorID
-	}
-	if req.Model != "" {
-		task.Model = req.Model
-	}
-	if req.BranchName != "" {
-		task.BranchName = req.BranchName
-	}
-	if req.DiffLines != 0 {
-		task.DiffLines = req.DiffLines
-	}
-	if req.FilesChanged != 0 {
-		task.FilesChanged = req.FilesChanged
-	}
-	if req.TestPassed != nil {
-		task.TestPassed = req.TestPassed
-	}
-	if req.PRUrl != "" {
-		task.PRUrl = req.PRUrl
-	}
-	if req.PRStatus != "" {
-		task.PRStatus = req.PRStatus
-	}
+	// Apply all reported fields to the task
+	updateTaskFields(task, taskDoneFields{
+		Result:       req.Result,
+		ErrorLog:     req.ErrorLog,
+		TokensUsed:   req.TokensUsed,
+		CostUSD:      req.CostUSD,
+		ExecutorID:   req.ExecutorID,
+		Model:        req.Model,
+		BranchName:   req.BranchName,
+		DiffLines:    req.DiffLines,
+		FilesChanged: req.FilesChanged,
+		TestPassed:   req.TestPassed,
+		PRUrl:        req.PRUrl,
+		PRStatus:     req.PRStatus,
+	})
 
 	if err := s.tasks.Update(task); err != nil {
 		serverError(w, "failed to update task", "id", id, "error", err)
@@ -537,26 +561,20 @@ func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) 
 		task, err := s.mgr.GetTask(taskID)
 		if err != nil {
 			slog.Error("failed to get task", "id", taskID, "error", err)
-			model := "sonnet"
-			slog.Info("internal API: model assigned (fallback)", "task_id", taskID, "model", model)
-			writeJSON(w, http.StatusOK, map[string]string{"model": model})
+			slog.Info("internal API: model assigned (fallback)", "task_id", taskID, "model", models.DefaultModel)
+			writeJSON(w, http.StatusOK, map[string]string{"model": models.DefaultModel})
 			return
 		}
 
-		// Use NeedsOpus heuristic for model selection
-		model := "sonnet"
-		if task.NeedsOpus() {
-			model = "opus"
-		}
+		model := task.SelectModel()
 		slog.Info("internal API: model assigned (heuristic)", "task_id", taskID, "model", model)
 		writeJSON(w, http.StatusOK, map[string]string{"model": model})
 		return
 	}
 
 	// No manager: fallback
-	model := "sonnet"
-	slog.Info("internal API: model assigned (default)", "task_id", taskID, "model", model)
-	writeJSON(w, http.StatusOK, map[string]string{"model": model})
+	slog.Info("internal API: model assigned (default)", "task_id", taskID, "model", models.DefaultModel)
+	writeJSON(w, http.StatusOK, map[string]string{"model": models.DefaultModel})
 }
 
 // handleInternalGetProject handles GET /internal/projects/{id}

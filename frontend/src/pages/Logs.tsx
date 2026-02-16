@@ -207,8 +207,8 @@ export default function Logs() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPaused(!paused)}
-              className={`btn-secondary !py-1.5 !px-3 !min-h-0 ${
-                paused ? '!bg-amber-600 !text-white hover:!bg-amber-500' : ''
+              className={`btn-sm ${
+                paused ? 'btn-warning' : 'btn-secondary'
               }`}
               aria-pressed={paused}
             >
@@ -216,7 +216,7 @@ export default function Logs() {
             </button>
             <button
               onClick={clearLogs}
-              className="btn-secondary !py-1.5 !px-3 !min-h-0"
+              className="btn-sm btn-secondary"
             >
               Clear
             </button>

@@ -7,7 +7,7 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status, size = 'md' }: StatusBadgeProps) {
   const cls = statusBadgeClass[status] || 'badge-secondary'
-  const sizeClass = size === 'sm' ? 'text-[10px]' : ''
+  const sizeClass = size === 'sm' ? 'text-xs' : ''
   return <span className={`badge ${cls} ${sizeClass}`}>{status}</span>
 }
 

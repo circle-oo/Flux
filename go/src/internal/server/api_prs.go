@@ -98,7 +98,7 @@ func (s *Server) handleApprovePR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	owner, repo := extractOwnerRepoFromURL(project.RepoURL)
+	owner, repo := github.ExtractOwnerRepo(project.RepoURL)
 	if owner == "" || repo == "" {
 		writeError(w, http.StatusBadRequest, "invalid repo URL in project")
 		return
@@ -168,7 +168,7 @@ func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	owner, repo := extractOwnerRepoFromURL(project.RepoURL)
+	owner, repo := github.ExtractOwnerRepo(project.RepoURL)
 	if owner == "" || repo == "" {
 		writeError(w, http.StatusBadRequest, "invalid repo URL in project")
 		return
@@ -233,7 +233,7 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	owner, repo := extractOwnerRepoFromURL(project.RepoURL)
+	owner, repo := github.ExtractOwnerRepo(project.RepoURL)
 	if owner == "" || repo == "" {
 		writeError(w, http.StatusBadRequest, "invalid repo URL in project")
 		return
@@ -305,32 +305,3 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// extractOwnerRepoFromURL parses owner and repo from a GitHub URL.
-// TODO(integration): Replace with github.ExtractOwnerRepo after integration phase
-func extractOwnerRepoFromURL(repoURL string) (owner, repo string) {
-	// HTTPS: https://github.com/owner/repo.git or https://github.com/owner/repo
-	repoURL = strings.TrimSuffix(repoURL, ".git")
-
-	if strings.Contains(repoURL, "github.com/") {
-		parts := strings.Split(repoURL, "github.com/")
-		if len(parts) >= 2 {
-			segments := strings.SplitN(parts[1], "/", 2)
-			if len(segments) == 2 {
-				return segments[0], segments[1]
-			}
-		}
-	}
-
-	// SSH: git@github.com:owner/repo.git
-	if strings.Contains(repoURL, "github.com:") {
-		parts := strings.Split(repoURL, "github.com:")
-		if len(parts) >= 2 {
-			segments := strings.SplitN(parts[1], "/", 2)
-			if len(segments) == 2 {
-				return segments[0], segments[1]
-			}
-		}
-	}
-
-	return "", ""
-}

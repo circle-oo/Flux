@@ -6,6 +6,8 @@ import { Project } from '../lib/api'
 import PageHeader from '../components/PageHeader'
 import LoadingState from '../components/LoadingState'
 import EmptyState from '../components/EmptyState'
+import { useConfirm } from '../hooks/useConfirm'
+import { useToast } from '../components/Toast'
 
 export default function Projects() {
   const navigate = useNavigate()
@@ -19,6 +21,8 @@ export default function Projects() {
   } = useProjectStore()
   const { goals, fetchGoals } = useGoalStore()
   const [showForm, setShowForm] = useState(false)
+  const { confirm, dialog } = useConfirm()
+  const { toast } = useToast()
   const [formData, setFormData] = useState({
     name: '',
     type: 'LIBRARY' as Project['type'],
@@ -65,22 +69,16 @@ export default function Projects() {
   }
 
   const handleApprove = async (id: string, name: string) => {
-    if (confirm(`Approve project: ${name}?`)) {
-      try {
-        await approveProject(id)
-      } catch (error) {
-        console.error('Failed to approve project:', error)
-      }
+    const confirmed = await confirm({ title: 'Approve project?', description: name, confirmLabel: 'Approve' })
+    if (confirmed) {
+      try { await approveProject(id); toast('Project approved', 'success') } catch (error) { toast(`Failed to approve project: ${error}`, 'error') }
     }
   }
 
   const handleReject = async (id: string, name: string) => {
-    if (confirm(`Reject project: ${name}?`)) {
-      try {
-        await rejectProject(id)
-      } catch (error) {
-        console.error('Failed to reject project:', error)
-      }
+    const confirmed = await confirm({ title: 'Reject project?', description: name, confirmLabel: 'Reject', variant: 'danger' })
+    if (confirmed) {
+      try { await rejectProject(id); toast('Project rejected', 'success') } catch (error) { toast(`Failed to reject project: ${error}`, 'error') }
     }
   }
 
@@ -92,6 +90,7 @@ export default function Projects() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
+      {dialog}
       <PageHeader
         title="Projects"
         subtitle="Register and manage projects"

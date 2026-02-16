@@ -40,7 +40,11 @@ func setupTestServer(t *testing.T) (*Server, *sql.DB) {
 	}
 
 	var subFS fs.FS = webFS
-	srv := NewServer(cfg, database, nil, nil, subFS)
+	srv := NewServer(ServerDeps{
+		Config: cfg,
+		DB:     database,
+		WebFS:  subFS,
+	})
 
 	return srv, database
 }

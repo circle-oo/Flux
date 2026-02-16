@@ -44,7 +44,7 @@ export default function TaskListItem({
             </h3>
             <StatusBadge status={task.status} />
             {task.triage_analysis && (
-              <span className="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0">
+              <span className="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-2 py-0.5 rounded-md text-xs font-medium shrink-0">
                 Triaged
               </span>
             )}
@@ -53,7 +53,7 @@ export default function TaskListItem({
                 onClick={(e) => onToggleSubtasks(task.id, e)}
                 className="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded shrink-0 hover:bg-purple-900/50 transition-colors flex items-center gap-1"
               >
-                <span className="text-[10px]">
+                <span className="text-xs">
                   {isExpanded ? '▼' : '▶'}
                 </span>
                 {subtaskCount} subtask{subtaskCount !== 1 ? 's' : ''}
@@ -110,7 +110,7 @@ export default function TaskListItem({
           {task.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {task.tags.map((tag, i) => (
-                <span key={i} className="badge-info text-[10px]">{tag}</span>
+                <span key={i} className="badge-info">{tag}</span>
               ))}
             </div>
           )}
@@ -121,7 +121,7 @@ export default function TaskListItem({
           {(task.status === 'FAILED' || task.status === 'RETRY') && (
             <button
               onClick={() => onRetry(task.id, task.title)}
-              className="btn-primary !py-1.5 !px-3 !min-h-0"
+              className="btn-sm btn-primary"
             >
               Retry
             </button>
@@ -137,7 +137,7 @@ export default function TaskListItem({
           {(task.status === 'COMPLETED' || task.status === 'FAILED' || task.status === 'CANCELLED') && (
             <button
               onClick={() => onArchive(task.id, task.title)}
-              className="btn-secondary !py-1.5 !px-3 !min-h-0"
+              className="btn-sm btn-secondary"
             >
               Archive
             </button>
@@ -176,7 +176,7 @@ export default function TaskListItem({
                       </h4>
                       <StatusBadge status={subtask.status} size="sm" />
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-600">
+                    <div className="flex items-center gap-2 text-xs text-slate-600">
                       <span>P{subtask.priority}</span>
                       {subtask.started_at && <span>Started {timeAgo(subtask.started_at)}</span>}
                       {subtask.completed_at && <span>Done {timeAgo(subtask.completed_at)}</span>}

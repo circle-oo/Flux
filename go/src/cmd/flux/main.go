@@ -91,10 +91,8 @@ func main() {
 	vaultWriter := vault.NewWriter(cfg.Vault.Path)
 	defer vaultWriter.Close()
 
-	// 5. Initialize Manager and wire into server
+	// 5. Initialize Manager
 	mgr := manager.NewManager(database, cfg)
-	server.SetManager(mgr)
-	server.SetVersion(version)
 
 	// 6. Create and start HTTP server
 	webFS, err := fs.Sub(web.DistFS, "dist")
@@ -102,7 +100,14 @@ func main() {
 		logger.Error("failed to get embedded web filesystem", "error", err)
 		os.Exit(1)
 	}
-	srv := server.NewServer(cfg, database, mgr, discord, webFS)
+	srv := server.NewServer(server.ServerDeps{
+		Config:  cfg,
+		DB:      database,
+		Manager: mgr,
+		Discord: discord,
+		WebFS:   webFS,
+		Version: version,
+	})
 
 	// 6b. Wrap logger with broadcast handler so logs stream to the Web UI
 	logBroadcast := server.NewLogBroadcastHandler(slog.Default().Handler(), srv.Hub())

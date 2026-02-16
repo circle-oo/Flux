@@ -1,5 +1,19 @@
 // API Client for Flux backend
 
+export const TaskStatus = {
+  PENDING: 'PENDING',
+  READY: 'READY',
+  RUNNING: 'RUNNING',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  CANCELLED: 'CANCELLED',
+  RETRY: 'RETRY',
+  ARCHIVED: 'ARCHIVED',
+  DECOMPOSED: 'DECOMPOSED',
+} as const
+
+export type TaskStatusType = (typeof TaskStatus)[keyof typeof TaskStatus]
+
 export interface Goal {
   id: string
   title: string
@@ -16,7 +30,7 @@ export interface Task {
   id: string
   title: string
   description: string
-  status: 'PENDING' | 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'RETRY' | 'ARCHIVED' | 'DECOMPOSED'
+  status: TaskStatusType
   priority: number
   project_id: string
   goal_id?: string

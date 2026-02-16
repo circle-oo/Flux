@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
 	"github.com/circle-oo/flux/internal/apiclient"
 	"github.com/circle-oo/flux/internal/claudecli"
 	"github.com/circle-oo/flux/internal/config"
+	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
 	"github.com/circle-oo/flux/internal/notifier"
 )
@@ -23,15 +25,7 @@ const component = "triager"
 //go:embed triage.txt
 var triagePromptFS embed.FS
 
-var triageTemplate *template.Template
-
-func init() {
-	var err error
-	triageTemplate, err = template.ParseFS(triagePromptFS, "triage.txt")
-	if err != nil {
-		panic(fmt.Sprintf("failed to parse triage prompt template: %v", err))
-	}
-}
+var triageTemplate = template.Must(template.ParseFS(triagePromptFS, "triage.txt"))
 
 // Triager is a standalone component that polls for PENDING tasks,
 // runs triage (Claude analysis), and promotes them to READY.
@@ -44,6 +38,7 @@ type Triager struct {
 	client        *apiclient.Client
 	notifier      *notifier.Discord
 	stopCh        chan struct{}
+	stopOnce      sync.Once
 	currentTaskID string
 	running       bool
 }
@@ -94,9 +89,9 @@ func (t *Triager) Run(ctx context.Context) {
 	}
 }
 
-// Stop signals the triager to stop.
+// Stop signals the triager to stop. Safe to call multiple times.
 func (t *Triager) Stop() {
-	close(t.stopCh)
+	t.stopOnce.Do(func() { close(t.stopCh) })
 }
 
 // processNext polls for one PENDING task and triages it.
@@ -154,30 +149,12 @@ func (t *Triager) processNext(ctx context.Context) {
 }
 
 // smokeTest verifies the Claude CLI is available.
-// TODO(integration): replace with executor.SmokeTest(t.claude, model)
 func (t *Triager) smokeTest() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
 	model := t.config.Triager.Model
 	if model == "" {
 		model = "haiku"
 	}
-
-	result, err := t.claude.Run(ctx, claudecli.Opts{
-		Prompt:  "respond with exactly: SMOKE_TEST_OK",
-		Model:   model,
-		WorkDir: "/tmp",
-	})
-	if err != nil {
-		return fmt.Errorf("smoke test failed: %w", err)
-	}
-
-	if result.ExitCode != 0 {
-		return fmt.Errorf("smoke test exited with code %d", result.ExitCode)
-	}
-
-	return nil
+	return executor.SmokeTest(t.claude, model)
 }
 
 // --- Triage execution logic ---

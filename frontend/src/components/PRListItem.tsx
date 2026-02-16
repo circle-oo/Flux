@@ -71,7 +71,7 @@ export default function PRListItem({
               </span>
             )}
             {pr.branch_name && (
-              <span className="font-mono text-slate-500 bg-slate-700/50 px-1.5 py-0.5 rounded text-[11px]">
+              <span className="font-mono text-slate-500 bg-slate-700/50 px-1.5 py-0.5 rounded text-xs">
                 {pr.branch_name}
               </span>
             )}
@@ -95,7 +95,7 @@ export default function PRListItem({
               </a>
             )}
             {pr.tags.length > 0 && pr.tags.map((tag, i) => (
-              <span key={i} className="badge-info text-[10px]">{tag}</span>
+              <span key={i} className="badge-info">{tag}</span>
             ))}
           </div>
         </div>

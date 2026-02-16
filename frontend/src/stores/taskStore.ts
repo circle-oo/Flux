@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api, Task } from '../lib/api'
+import { api, Task, TaskStatus } from '../lib/api'
 
 interface TaskState {
   tasks: Task[]
@@ -13,6 +13,7 @@ interface TaskState {
   fetchTasks: () => Promise<void>
   getTask: (id: string) => Promise<Task>
   fetchSubtasks: (parentId: string) => Promise<Task[]>
+  refreshTask: (id: string) => Promise<void>
   createTask: (task: {
     title: string
     description: string
@@ -54,11 +55,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   getTask: async (id) => {
-    try {
-      return await api.getTask(id)
-    } catch (error) {
-      throw error
-    }
+    return await api.getTask(id)
   },
 
   fetchSubtasks: async (parentId) => {
@@ -67,6 +64,22 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     } catch (error) {
       console.error('Failed to fetch subtasks:', error)
       return []
+    }
+  },
+
+  refreshTask: async (id) => {
+    try {
+      const updated = await api.getTask(id)
+      set((state) => {
+        const exists = state.tasks.some((t) => t.id === id)
+        if (exists) {
+          return { tasks: state.tasks.map((t) => (t.id === id ? updated : t)) }
+        }
+        // New task not in list yet — prepend it
+        return { tasks: [updated, ...state.tasks] }
+      })
+    } catch {
+      // Task may have been deleted, ignore
     }
   },
 
@@ -123,47 +136,52 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   cancelTask: async (id) => {
-    set({ isLoading: true, error: null })
+    // Optimistic update
+    set((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === id ? { ...t, status: TaskStatus.CANCELLED as Task['status'] } : t
+      ),
+    }))
     try {
       await api.cancelTask(id)
-      await get().fetchTasks()
-      set({ isLoading: false })
+      // Refresh from server for accurate state
+      await get().refreshTask(id)
     } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to cancel task',
-        isLoading: false,
-      })
-      throw error
+      // Revert on failure
+      await get().fetchTasks()
+      throw error instanceof Error ? error : new Error('Failed to cancel task')
     }
   },
 
   retryTask: async (id) => {
-    set({ isLoading: true, error: null })
+    // Optimistic update
+    set((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === id ? { ...t, status: TaskStatus.RETRY as Task['status'] } : t
+      ),
+    }))
     try {
       await api.retryTask(id)
-      await get().fetchTasks()
-      set({ isLoading: false })
+      await get().refreshTask(id)
     } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to retry task',
-        isLoading: false,
-      })
-      throw error
+      await get().fetchTasks()
+      throw error instanceof Error ? error : new Error('Failed to retry task')
     }
   },
 
   archiveTask: async (id) => {
-    set({ isLoading: true, error: null })
+    // Optimistic update
+    set((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === id ? { ...t, status: TaskStatus.ARCHIVED as Task['status'] } : t
+      ),
+    }))
     try {
       await api.archiveTask(id)
-      await get().fetchTasks()
-      set({ isLoading: false })
+      await get().refreshTask(id)
     } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to archive task',
-        isLoading: false,
-      })
-      throw error
+      await get().fetchTasks()
+      throw error instanceof Error ? error : new Error('Failed to archive task')
     }
   },
 }))

@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -97,7 +98,10 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 	currentGoalID := GetCurrentGoalID(m.goals)
 	slog.Debug("pop next task once started", "current_goal_id", currentGoalID, "pod_type", podType)
 
-	tx, err := m.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
@@ -372,7 +376,10 @@ func (m *Manager) PopNextPending(triagerID string) (*models.Task, error) {
 }
 
 func (m *Manager) popNextPendingOnce(triagerID string) (*models.Task, error) {
-	tx, err := m.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
 	}
@@ -385,7 +392,10 @@ func (m *Manager) popNextPendingOnce(triagerID string) (*models.Task, error) {
 
 	task, err := models.ScanTask(tx.QueryRow(query, models.TaskPending))
 	if err != nil {
-		return nil, nil // No pending task available
+		if err == sql.ErrNoRows {
+			return nil, nil // No pending task available
+		}
+		return nil, fmt.Errorf("scan pending task: %w", err)
 	}
 
 	// Claim the task by setting executor_id to the triager

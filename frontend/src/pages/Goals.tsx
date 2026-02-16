@@ -3,11 +3,15 @@ import { useGoalStore } from '../stores/goalStore'
 import PageHeader from '../components/PageHeader'
 import LoadingState from '../components/LoadingState'
 import EmptyState from '../components/EmptyState'
+import { useConfirm } from '../hooks/useConfirm'
+import { useToast } from '../components/Toast'
 
 export default function Goals() {
   const { goals, currentGoal, isLoading, fetchGoals, createGoal, activateGoal } =
     useGoalStore()
   const [showForm, setShowForm] = useState(false)
+  const { confirm, dialog } = useConfirm()
+  const { toast } = useToast()
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -42,21 +46,19 @@ export default function Goals() {
   }
 
   const handleActivate = async (id: string) => {
-    if (
-      confirm(
-        'Activating this goal will supersede the current goal. Continue?'
-      )
-    ) {
-      try {
-        await activateGoal(id)
-      } catch (error) {
-        console.error('Failed to activate goal:', error)
-      }
+    const confirmed = await confirm({
+      title: 'Activate goal?',
+      description: 'Activating this goal will supersede the current goal.',
+      confirmLabel: 'Activate',
+    })
+    if (confirmed) {
+      try { await activateGoal(id); toast('Goal activated', 'success') } catch (error) { toast(`Failed to activate goal: ${error}`, 'error') }
     }
   }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
+      {dialog}
       <PageHeader
         title="Goals"
         subtitle="Manage system goals and objectives"

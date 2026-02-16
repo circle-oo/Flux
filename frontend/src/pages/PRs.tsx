@@ -5,6 +5,8 @@ import EmptyState from '../components/EmptyState'
 import LoadingState from '../components/LoadingState'
 import ErrorBanner from '../components/ErrorBanner'
 import PRListItem from '../components/PRListItem'
+import { useConfirm } from '../hooks/useConfirm'
+import { useToast } from '../components/Toast'
 
 const statusFilters = [
   { value: '', label: 'Actionable', description: 'Open & Changes Requested' },
@@ -31,26 +33,31 @@ export default function PRs() {
     closePR,
   } = usePRStore()
   const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(new Set())
+  const { confirm, dialog } = useConfirm()
+  const { toast } = useToast()
 
   useEffect(() => {
     fetchPendingPRs()
   }, [fetchPendingPRs])
 
   const handleApprove = async (taskId: string, title: string) => {
-    if (confirm(`Approve and merge PR: ${title}?`)) {
-      try { await approvePR(taskId) } catch (error) { console.error('Failed to approve PR:', error) }
+    const confirmed = await confirm({ title: 'Approve and merge?', description: title, confirmLabel: 'Approve & Merge' })
+    if (confirmed) {
+      try { await approvePR(taskId); toast('PR approved and merged', 'success') } catch (error) { toast(`Failed to approve PR: ${error}`, 'error') }
     }
   }
 
   const handleRequestChanges = async (taskId: string, title: string) => {
-    if (confirm(`Request changes for PR: ${title}?`)) {
-      try { await requestChanges(taskId) } catch (error) { console.error('Failed to request changes:', error) }
+    const confirmed = await confirm({ title: 'Request changes?', description: title, confirmLabel: 'Request Changes', variant: 'danger' })
+    if (confirmed) {
+      try { await requestChanges(taskId); toast('Changes requested', 'success') } catch (error) { toast(`Failed to request changes: ${error}`, 'error') }
     }
   }
 
   const handleClose = async (taskId: string, title: string) => {
-    if (confirm(`Close PR: ${title}?\n\nThis will close the PR on GitHub without merging.`)) {
-      try { await closePR(taskId) } catch (error) { console.error('Failed to close PR:', error) }
+    const confirmed = await confirm({ title: 'Close PR?', description: `${title}\n\nThis will close the PR on GitHub without merging.`, confirmLabel: 'Close PR', variant: 'danger' })
+    if (confirmed) {
+      try { await closePR(taskId); toast('PR closed', 'success') } catch (error) { toast(`Failed to close PR: ${error}`, 'error') }
     }
   }
 
@@ -64,6 +71,7 @@ export default function PRs() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+      {dialog}
       <PageHeader
         title="Pull Requests"
         subtitle="Review and manage pull requests"

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/circle-oo/flux/internal/github"
 )
 
 // WorktreeManager manages git worktrees for task execution.
@@ -194,7 +196,7 @@ func (wm *WorktreeManager) tokenURL(repoURL string) string {
 	if wm.githubToken == "" {
 		return repoURL
 	}
-	owner, repo := extractOwnerRepo(repoURL)
+	owner, repo := github.ExtractOwnerRepo(repoURL)
 	if owner == "" || repo == "" {
 		return repoURL
 	}
@@ -308,7 +310,7 @@ func (wm *WorktreeManager) configureWorktreeGit(worktreePath string) error {
 		urlOut, err := getURL.Output()
 		if err == nil {
 			remoteURL := strings.TrimSpace(string(urlOut))
-			owner, repo := extractOwnerRepo(remoteURL)
+			owner, repo := github.ExtractOwnerRepo(remoteURL)
 			if owner != "" && repo != "" {
 				tokenURL := fmt.Sprintf("https://%s:%s@github.com/%s/%s.git", user, wm.githubToken, owner, repo)
 				gitCfg = append(gitCfg, []string{"remote", "set-url", "origin", tokenURL})

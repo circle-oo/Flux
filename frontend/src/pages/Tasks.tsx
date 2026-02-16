@@ -1,13 +1,15 @@
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useGoalStore } from '../stores/goalStore'
-import { Task, api } from '../lib/api'
 import PageHeader from '../components/PageHeader'
 import TaskCreateForm from '../components/TaskCreateForm'
 import TaskFilterBar, { SortOption, statusFilterGroups } from '../components/TaskFilterBar'
 import TaskListItem from '../components/TaskListItem'
+import { useConfirm } from '../hooks/useConfirm'
+import { useToast } from '../components/Toast'
+import { useSubtaskExpansion } from '../hooks/useSubtaskExpansion'
 
 const statusOrder: Record<string, number> = {
   RUNNING: 0,
@@ -39,15 +41,20 @@ export default function Tasks() {
   const [showForm, setShowForm] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('newest')
   const [activeFilterGroup, setActiveFilterGroup] = useState<string>('active')
-
-  const [subtaskCounts, setSubtaskCounts] = useState<Record<string, number>>({})
-  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
-  const [loadedSubtasks, setLoadedSubtasks] = useState<Record<string, Task[]>>({})
-  const [loadingSubtasks, setLoadingSubtasks] = useState<Set<string>>(new Set())
   const [showSubtasksInList, setShowSubtasksInList] = useState<boolean>(() => {
     const stored = localStorage.getItem('flux-show-subtasks-in-list')
     return stored ? JSON.parse(stored) : false
   })
+  const { confirm, dialog } = useConfirm()
+  const { toast } = useToast()
+  const {
+    subtaskCounts,
+    expandedTasks,
+    loadedSubtasks,
+    loadingSubtasks,
+    fetchSubtaskCounts,
+    toggleSubtasks,
+  } = useSubtaskExpansion()
 
   // Initialize filters from URL params on mount
   useEffect(() => {
@@ -67,21 +74,9 @@ export default function Tasks() {
     fetchCurrentGoal()
   }, [fetchTasks, fetchProjects, fetchCurrentGoal])
 
-  // Fetch subtask counts for DECOMPOSED parent tasks
-  const fetchSubtaskCounts = useCallback(async () => {
-    const parents = tasks.filter((t) => t.status === 'DECOMPOSED' || t.tags?.includes('build-failure'))
-    const counts: Record<string, number> = {}
-    for (const parent of parents) {
-      try {
-        const subs = await api.listSubtasks(parent.id)
-        if (subs.length > 0) counts[parent.id] = subs.length
-      } catch { /* ignore */ }
-    }
-    setSubtaskCounts(counts)
-  }, [tasks])
-
+  // Fetch subtask counts for parent tasks (parallel)
   useEffect(() => {
-    if (tasks.length > 0) fetchSubtaskCounts()
+    if (tasks.length > 0) fetchSubtaskCounts(tasks)
   }, [tasks, fetchSubtaskCounts])
 
   // Filter tasks based on active group or individual status filter
@@ -140,51 +135,23 @@ export default function Tasks() {
   }
 
   const handleCancel = async (id: string, title: string) => {
-    if (confirm(`Cancel task: ${title}?`)) {
-      try { await cancelTask(id) } catch (error) { console.error('Failed to cancel task:', error) }
+    const confirmed = await confirm({ title: 'Cancel task?', description: title, confirmLabel: 'Cancel Task', variant: 'danger' })
+    if (confirmed) {
+      try { await cancelTask(id); toast('Task cancelled', 'success') } catch (error) { toast(`Failed to cancel task: ${error}`, 'error') }
     }
   }
 
   const handleRetry = async (id: string, title: string) => {
-    if (confirm(`Retry task: ${title}?`)) {
-      try { await retryTask(id) } catch (error) { console.error('Failed to retry task:', error) }
+    const confirmed = await confirm({ title: 'Retry task?', description: title, confirmLabel: 'Retry' })
+    if (confirmed) {
+      try { await retryTask(id); toast('Task queued for retry', 'success') } catch (error) { toast(`Failed to retry task: ${error}`, 'error') }
     }
   }
 
   const handleArchive = async (id: string, title: string) => {
-    if (confirm(`Archive task: ${title}?`)) {
-      try { await archiveTask(id) } catch (error) { console.error('Failed to archive task:', error) }
-    }
-  }
-
-  const toggleSubtasks = async (taskId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-
-    if (expandedTasks.has(taskId)) {
-      const newExpanded = new Set(expandedTasks)
-      newExpanded.delete(taskId)
-      setExpandedTasks(newExpanded)
-    } else {
-      const newExpanded = new Set(expandedTasks)
-      newExpanded.add(taskId)
-      setExpandedTasks(newExpanded)
-
-      if (!loadedSubtasks[taskId]) {
-        const newLoading = new Set(loadingSubtasks)
-        newLoading.add(taskId)
-        setLoadingSubtasks(newLoading)
-
-        try {
-          const subtasks = await api.listSubtasks(taskId)
-          setLoadedSubtasks({ ...loadedSubtasks, [taskId]: subtasks })
-        } catch (error) {
-          console.error('Failed to load subtasks:', error)
-        } finally {
-          const newLoading = new Set(loadingSubtasks)
-          newLoading.delete(taskId)
-          setLoadingSubtasks(newLoading)
-        }
-      }
+    const confirmed = await confirm({ title: 'Archive task?', description: title, confirmLabel: 'Archive' })
+    if (confirmed) {
+      try { await archiveTask(id); toast('Task archived', 'success') } catch (error) { toast(`Failed to archive task: ${error}`, 'error') }
     }
   }
 
@@ -210,6 +177,7 @@ export default function Tasks() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
+      {dialog}
       <PageHeader
         title="Tasks"
         subtitle="Manage and track system tasks"

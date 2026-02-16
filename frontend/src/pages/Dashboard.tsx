@@ -128,7 +128,7 @@ export default function Dashboard() {
 
       {/* Pods Section */}
       <section className="card p-4 sm:p-6">
-        <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">Pods</h2>
+        <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-4">Pods</h2>
         {pods.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {[...pods].sort((a, b) => a.id.localeCompare(b.id)).map((pod) => (
@@ -143,7 +143,7 @@ export default function Dashboard() {
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         <section className="card p-4 sm:p-6 lg:col-span-2">
-          <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">Insights</h2>
+          <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-4">Insights</h2>
           <InsightsPanel insights={insights} onProjectClick={(id) => navigate(`/projects/${id}`)} />
         </section>
 
@@ -153,13 +153,13 @@ export default function Dashboard() {
             className="card p-4 sm:p-5 w-full text-left hover:border-slate-600 transition-colors touch-manipulation"
             onClick={() => navigate('/projects')}
           >
-            <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">Projects</h2>
+            <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">Projects</h2>
             <div className="text-xl sm:text-2xl font-bold text-slate-100 mb-1">{activeProjectCount}</div>
             <p className="text-xs text-slate-500">active projects</p>
           </button>
 
           <div className="card p-4 sm:p-5">
-            <h2 className="text-xs sm:text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">System</h2>
+            <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">System</h2>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-slate-400">WebSocket</span>

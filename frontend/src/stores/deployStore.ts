@@ -36,7 +36,10 @@ export const useDeployStore = create<DeployState>((set) => ({
     set({ isDeploying: true, error: null })
     try {
       await api.triggerDeploy()
-      set({ isDeploying: true }) // stays deploying until page reloads
+      // Reset after 60s if page hasn't reloaded (safety net for stuck state)
+      setTimeout(() => {
+        set({ isDeploying: false })
+      }, 60000)
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Failed to trigger deploy',

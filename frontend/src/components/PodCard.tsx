@@ -17,7 +17,7 @@ export default function PodCard({ pod }: PodCardProps) {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-slate-200">{pod.id}</h3>
-          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+          <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
             pod.pod_type === 'researcher'
               ? 'bg-purple-600/30 text-purple-300 border border-purple-600/50'
               : 'bg-blue-600/30 text-blue-300 border border-blue-600/50'

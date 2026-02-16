@@ -16,11 +16,16 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full">
-        <div className="text-center mb-6 sm:mb-8">
-          <h1 className="text-3xl sm:text-4xl font-bold text-slate-100 mb-2">Flux</h1>
-          <p className="text-sm sm:text-base text-slate-400">Autonomous Engineering System</p>
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/30 mb-4">
+            <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-slate-100 mb-1">Flux</h1>
+          <p className="text-sm text-slate-400">Autonomous Engineering System</p>
         </div>
 
         <div className="card p-6 sm:p-8">
@@ -42,7 +47,7 @@ export default function Login() {
             </div>
 
             {error && (
-              <div className="bg-red-900/50 border border-red-600 text-red-200 px-4 py-3 rounded-lg text-sm">
+              <div className="bg-red-900/30 border border-red-600/50 text-red-300 px-4 py-3 rounded-lg text-sm" role="alert">
                 {error}
               </div>
             )}
@@ -55,10 +60,6 @@ export default function Login() {
               {isLoading ? 'Logging in...' : 'Login'}
             </button>
           </form>
-        </div>
-
-        <div className="mt-8 text-center text-sm text-slate-500">
-          <p>Autonomous Engineering System</p>
         </div>
       </div>
     </div>

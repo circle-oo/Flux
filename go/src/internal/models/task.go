@@ -71,6 +71,17 @@ type Task struct {
 	CompletedAt   string   `json:"completed_at"`
 }
 
+// DefaultModel is the default model used when no heuristic matches.
+const DefaultModel = "sonnet"
+
+// SelectModel returns the model to use for a task based on heuristics.
+func (t *Task) SelectModel() string {
+	if t.NeedsOpus() {
+		return "opus"
+	}
+	return DefaultModel
+}
+
 // NeedsOpus returns true if this task should use the Opus model.
 func (t *Task) NeedsOpus() bool {
 	if t.Priority <= 5 {
