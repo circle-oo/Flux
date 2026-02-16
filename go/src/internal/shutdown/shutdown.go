@@ -5,6 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/circle-oo/flux/internal/config"
@@ -41,10 +45,16 @@ func GracefulShutdown(ctx context.Context, cfg *config.ShutdownConfig, pods []Po
 		select {
 		case <-ctx.Done():
 			slog.Warn("shutdown context canceled, forcing immediate kill")
+			if err := killOrphanedClaudeProcesses(); err != nil {
+				slog.Error("failed to kill orphaned claude processes", "error", err)
+			}
 			return forceKillPods(pods, db, discord)
 
 		case <-timer.C:
 			slog.Warn("grace period expired, forcing pod kill")
+			if err := killOrphanedClaudeProcesses(); err != nil {
+				slog.Error("failed to kill orphaned claude processes", "error", err)
+			}
 			return forceKillPods(pods, db, discord)
 
 		case <-ticker.C:
@@ -62,7 +72,7 @@ func GracefulShutdown(ctx context.Context, cfg *config.ShutdownConfig, pods []Po
 				return nil
 			}
 
-			slog.Info("shutdown: checking pod state", "running", runningCount, "total", len(pods))
+			slog.Debug("shutdown: waiting for pods", "running", runningCount, "total", len(pods))
 		}
 	}
 }
@@ -106,6 +116,131 @@ func forceKillPods(pods []Pod, db *sql.DB, discord *notifier.Discord) error {
 		if discord != nil {
 			discord.Send(notifier.LevelWarning, msg)
 		}
+	}
+
+	return nil
+}
+
+// killOrphanedClaudeProcesses finds and kills any orphaned Claude Code CLI processes.
+// This ensures no zombie processes are left running after shutdown.
+func killOrphanedClaudeProcesses() error {
+	slog.Info("checking for orphaned claude processes")
+
+	// Find all "claude" processes (pgrep is available on macOS and Linux)
+	cmd := exec.Command("pgrep", "-f", "^claude")
+	output, err := cmd.Output()
+	if err != nil {
+		// Exit code 1 means no processes found, which is fine
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			slog.Debug("no orphaned claude processes found")
+			return nil
+		}
+		return fmt.Errorf("failed to search for claude processes: %w", err)
+	}
+
+	// Parse PIDs
+	pids := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(pids) == 0 || (len(pids) == 1 && pids[0] == "") {
+		slog.Debug("no orphaned claude processes found")
+		return nil
+	}
+
+	// Get our own PID to avoid killing ourselves
+	myPID := os.Getpid()
+
+	// Kill each process with SIGTERM first, then SIGKILL
+	var killedCount int
+	for _, pidStr := range pids {
+		pid, err := strconv.Atoi(strings.TrimSpace(pidStr))
+		if err != nil {
+			continue
+		}
+
+		// Skip our own process
+		if pid == myPID {
+			continue
+		}
+
+		// Try SIGTERM first
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+
+		slog.Info("terminating orphaned claude process", "pid", pid)
+		if err := process.Signal(os.Interrupt); err != nil {
+			// If SIGTERM fails, try SIGKILL
+			slog.Warn("SIGTERM failed, sending SIGKILL", "pid", pid, "error", err)
+			_ = process.Kill()
+		}
+
+		killedCount++
+	}
+
+	if killedCount > 0 {
+		slog.Warn("killed orphaned claude processes", "count", killedCount)
+	}
+
+	return nil
+}
+
+// CleanupIncompleteWorktrees removes worktree directories for tasks that were interrupted.
+// This prevents disk space leaks from incomplete task executions.
+func CleanupIncompleteWorktrees(workspaceBase string, db *sql.DB) error {
+	slog.Info("cleaning up incomplete worktrees", "workspace_base", workspaceBase)
+
+	// Find all RUNNING or RETRY tasks
+	rows, err := db.Query(`
+		SELECT t.id, p.name
+		FROM tasks t
+		JOIN projects p ON t.project_id = p.id
+		WHERE t.status IN ('RUNNING', 'RETRY')
+		  AND t.branch_name IS NOT NULL
+		  AND t.branch_name != ''
+	`)
+	if err != nil {
+		return fmt.Errorf("query incomplete tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var cleanedCount int
+	for rows.Next() {
+		var taskID, projectName string
+		if err := rows.Scan(&taskID, &projectName); err != nil {
+			slog.Error("failed to scan task", "error", err)
+			continue
+		}
+
+		// Construct task directory path: {workspace_base}/trees/{project}--task-{taskID}/
+		taskShortID := taskID
+		if len(taskID) > 8 {
+			taskShortID = taskID[:8]
+		}
+		taskBaseDir := fmt.Sprintf("%s/trees/%s--task-%s", workspaceBase, projectName, taskShortID)
+
+		// Check if directory exists
+		if _, err := os.Stat(taskBaseDir); os.IsNotExist(err) {
+			continue
+		}
+
+		// Remove the task directory
+		slog.Info("removing incomplete worktree", "task_id", taskID, "path", taskBaseDir)
+		if err := os.RemoveAll(taskBaseDir); err != nil {
+			slog.Error("failed to remove worktree directory", "task_id", taskID, "path", taskBaseDir, "error", err)
+			continue
+		}
+
+		cleanedCount++
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate tasks: %w", err)
+	}
+
+	if cleanedCount > 0 {
+		slog.Info("cleaned up incomplete worktrees", "count", cleanedCount)
+	} else {
+		slog.Debug("no incomplete worktrees to clean up")
 	}
 
 	return nil

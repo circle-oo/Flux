@@ -79,7 +79,8 @@ func (r *Runner) Run(ctx context.Context, opts Opts) (*Result, error) {
 	cmd := exec.CommandContext(timeoutCtx, "claude", args...)
 	cmd.Dir = opts.WorkDir
 
-	// Set process group to kill child processes on timeout
+	// Set process group to allow killing entire process tree
+	// On context cancellation, we'll send SIGTERM first, then SIGKILL
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	// Create limited buffers for stdout/stderr to prevent memory exhaustion
@@ -89,7 +90,45 @@ func (r *Runner) Run(ctx context.Context, opts Opts) (*Result, error) {
 	cmd.Stderr = stderrBuf
 
 	start := time.Now()
-	err := cmd.Run()
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Wait for command to complete or context to be cancelled
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	var err error
+	select {
+	case err = <-done:
+		// Command completed normally
+	case <-timeoutCtx.Done():
+		// Context cancelled or timed out - send SIGTERM first
+		slog.Warn("claude code execution context cancelled, sending SIGTERM", "workdir", opts.WorkDir)
+		if cmd.Process != nil {
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+		}
+
+		// Wait briefly for graceful shutdown
+		gracefulTimer := time.NewTimer(2 * time.Second)
+		select {
+		case err = <-done:
+			gracefulTimer.Stop()
+			slog.Info("claude code terminated gracefully after SIGTERM")
+		case <-gracefulTimer.C:
+			// Still not dead, send SIGKILL to entire process group
+			slog.Warn("claude code did not respond to SIGTERM, sending SIGKILL to process group")
+			if cmd.Process != nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+			err = <-done
+		}
+	}
+
 	duration := time.Since(start)
 
 	result := &Result{

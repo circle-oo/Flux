@@ -2,6 +2,8 @@ package shutdown
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -348,5 +350,171 @@ func TestGracefulShutdown_MixedPodTypes(t *testing.T) {
 	}
 	if status != "RETRY" {
 		t.Errorf("task %s: expected status=RETRY (force kill), got %s", taskID3, status)
+	}
+}
+
+func TestCleanupIncompleteWorktrees_RemovesRunningTaskDirs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+
+	// Verify projects table exists
+	var tableName string
+	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").Scan(&tableName)
+	if err != nil {
+		t.Fatalf("projects table does not exist: %v", err)
+	}
+
+	// Create temp workspace
+	tmpDir := t.TempDir()
+	workspaceBase := filepath.Join(tmpDir, "workspaces")
+	treesDir := filepath.Join(workspaceBase, "trees")
+	if err := os.MkdirAll(treesDir, 0755); err != nil {
+		t.Fatalf("create trees dir: %v", err)
+	}
+
+	// Insert project (schema already created by NewTestDB)
+	projectID := uuid.New().String()
+	_, err = db.Exec(`
+		INSERT INTO projects (id, name, type, repo_url, description, tech_stack)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, projectID, "test-project", "ENGINEERING", "https://github.com/test/repo", "Test project", "[]")
+	if err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	// Insert RUNNING task with branch name
+	taskID := uuid.New().String()
+	branchName := "task/" + taskID[:8]
+	_, err = db.Exec(`
+		INSERT INTO tasks (id, title, type, status, project_id, branch_name)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, taskID, "Test Task", "IMPLEMENTATION", "RUNNING", projectID, branchName)
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	// Create worktree directory for the RUNNING task
+	taskDir := filepath.Join(treesDir, "test-project--task-"+taskID[:8])
+	worktreeDir := filepath.Join(taskDir, "worktree")
+	if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+		t.Fatalf("create worktree dir: %v", err)
+	}
+
+	// Create a dummy file to verify cleanup
+	dummyFile := filepath.Join(worktreeDir, "test.txt")
+	if err := os.WriteFile(dummyFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("write dummy file: %v", err)
+	}
+
+	// Run cleanup
+	err = CleanupIncompleteWorktrees(workspaceBase, db)
+	if err != nil {
+		t.Fatalf("CleanupIncompleteWorktrees failed: %v", err)
+	}
+
+	// Verify worktree directory was removed
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Errorf("task directory still exists after cleanup: %s", taskDir)
+	}
+}
+
+func TestCleanupIncompleteWorktrees_PreservesCompletedTaskDirs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+
+	// Create temp workspace
+	tmpDir := t.TempDir()
+	workspaceBase := filepath.Join(tmpDir, "workspaces")
+	treesDir := filepath.Join(workspaceBase, "trees")
+	if err := os.MkdirAll(treesDir, 0755); err != nil {
+		t.Fatalf("create trees dir: %v", err)
+	}
+
+	// Insert project
+	projectID := uuid.New().String()
+	_, err := db.Exec(`
+		INSERT INTO projects (id, name, type, repo_url, description, tech_stack)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, projectID, "test-project", "ENGINEERING", "https://github.com/test/repo", "Test project", "[]")
+	if err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	// Insert COMPLETED task with branch name
+	taskID := uuid.New().String()
+	branchName := "task/" + taskID[:8]
+	_, err = db.Exec(`
+		INSERT INTO tasks (id, title, type, status, project_id, branch_name)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, taskID, "Test Task", "IMPLEMENTATION", "COMPLETED", projectID, branchName)
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	// Create worktree directory for the COMPLETED task
+	taskDir := filepath.Join(treesDir, "test-project--task-"+taskID[:8])
+	worktreeDir := filepath.Join(taskDir, "worktree")
+	if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+		t.Fatalf("create worktree dir: %v", err)
+	}
+
+	// Run cleanup
+	err = CleanupIncompleteWorktrees(workspaceBase, db)
+	if err != nil {
+		t.Fatalf("CleanupIncompleteWorktrees failed: %v", err)
+	}
+
+	// Verify worktree directory still exists (COMPLETED tasks are not cleaned)
+	if _, err := os.Stat(taskDir); os.IsNotExist(err) {
+		t.Errorf("COMPLETED task directory was incorrectly removed: %s", taskDir)
+	}
+}
+
+func TestCleanupIncompleteWorktrees_HandlesRetryTasks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+
+	// Create temp workspace
+	tmpDir := t.TempDir()
+	workspaceBase := filepath.Join(tmpDir, "workspaces")
+	treesDir := filepath.Join(workspaceBase, "trees")
+	if err := os.MkdirAll(treesDir, 0755); err != nil {
+		t.Fatalf("create trees dir: %v", err)
+	}
+
+	// Insert project
+	projectID := uuid.New().String()
+	_, err := db.Exec(`
+		INSERT INTO projects (id, name, type, repo_url, description, tech_stack)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, projectID, "test-project", "ENGINEERING", "https://github.com/test/repo", "Test project", "[]")
+	if err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	// Insert RETRY task
+	taskID := uuid.New().String()
+	branchName := "task/" + taskID[:8]
+	_, err = db.Exec(`
+		INSERT INTO tasks (id, title, type, status, project_id, branch_name, crash_recovery)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, taskID, "Test Task", "IMPLEMENTATION", "RETRY", projectID, branchName, true)
+	if err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+
+	// Create worktree directory
+	taskDir := filepath.Join(treesDir, "test-project--task-"+taskID[:8])
+	worktreeDir := filepath.Join(taskDir, "worktree")
+	if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+		t.Fatalf("create worktree dir: %v", err)
+	}
+
+	// Run cleanup
+	err = CleanupIncompleteWorktrees(workspaceBase, db)
+	if err != nil {
+		t.Fatalf("CleanupIncompleteWorktrees failed: %v", err)
+	}
+
+	// Verify RETRY task directory was removed (incomplete execution)
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Errorf("RETRY task directory still exists after cleanup: %s", taskDir)
 	}
 }
