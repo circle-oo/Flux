@@ -39,7 +39,6 @@ type SystemPromptData struct {
 	GoalID             string
 	GoalTitle          string
 	GoalDescription    string
-	TaskType           string
 	Priority           int
 }
 
@@ -53,5 +52,4 @@ type AutopilotData struct {
 	ProjectName        string
 	ProjectDescription string
 	ProjectTechStack   string
-	TaskType           string
 }

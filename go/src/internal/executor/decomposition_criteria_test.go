@@ -20,7 +20,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Add real-time notifications system",
 				Description: "Implement WebSocket backend infrastructure, notification queue, frontend UI component, and subscription management. Include authentication and security for WebSocket connections.",
-				Type:        models.TaskTypeCoding,
 				Priority:    15,
 				Depth:       0,
 			},
@@ -34,7 +33,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Fix typo in README",
 				Description: "Correct spelling mistake in README.md file",
-				Type:        models.TaskTypeBugfix,
 				Priority:    50,
 				Depth:       0,
 			},
@@ -46,7 +44,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Migrate database to PostgreSQL",
 				Description: "Phase 1: Create schema. Phase 2: Migrate data. Phase 3: Update app connections and test.",
-				Type:        models.TaskTypeCoding,
 				Priority:    20,
 				Depth:       0,
 			},
@@ -59,7 +56,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Add complex feature",
 				Description: "This is a complex task with backend, frontend, and database changes",
-				Type:        models.TaskTypeCoding,
 				Priority:    15,
 				Depth:       2, // max depth
 			},
@@ -71,7 +67,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Refactor authentication and optimize performance",
 				Description: "Update the auth system and also improve query performance. Additionally, add caching.",
-				Type:        models.TaskTypeCoding,
 				Priority:    25,
 				Depth:       0,
 			},
@@ -83,7 +78,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Implement OAuth2 authentication",
 				Description: "Add OAuth2 authentication with JWT tokens and authorization middleware. Integrate third-party OAuth provider. Build frontend login UI, backend API, and token management.",
-				Type:        models.TaskTypeCoding,
 				Priority:    10,
 				Depth:       0,
 			},
@@ -96,7 +90,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Update API documentation",
 				Description: "Add documentation for new endpoints",
-				Type:        models.TaskTypeDocument,
 				Priority:    60,
 				Depth:       0,
 			},
@@ -112,7 +105,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 - Should show user statistics
 - Should have privacy settings
 - Must validate all inputs`,
-				Type:     models.TaskTypeCoding,
 				Priority: 30,
 				Depth:    0,
 			},
@@ -124,7 +116,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Optimize slow query performance",
 				Description: "Step 1: Profile queries and identify bottlenecks. Step 2: Add indexes. Finally implement caching.",
-				Type:        models.TaskTypeCoding,
 				Priority:    25,
 				Depth:       0,
 			},
@@ -137,7 +128,6 @@ func TestAnalyzeDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Integrate payment gateway",
 				Description: "Add Stripe integration with webhook handlers, backend payment processing, and frontend payment UI",
-				Type:        models.TaskTypeCoding,
 				Priority:    15,
 				Depth:       0,
 			},
@@ -273,7 +263,6 @@ func TestShouldSkipDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Fix typo in README",
 				Description: "Correct spelling",
-				Type:        models.TaskTypeBugfix,
 			},
 			wantSkip: true,
 		},
@@ -281,7 +270,6 @@ func TestShouldSkipDecomposition(t *testing.T) {
 			name: "documentation task",
 			task: &models.Task{
 				Title: "Update docs",
-				Type:  models.TaskTypeDocument,
 			},
 			wantSkip: true,
 		},
@@ -298,7 +286,6 @@ func TestShouldSkipDecomposition(t *testing.T) {
 			task: &models.Task{
 				Title:       "Implement authentication system",
 				Description: "Add complete authentication with frontend, backend, database, and middleware. Include OAuth2 and JWT support.",
-				Type:        models.TaskTypeCoding,
 			},
 			wantSkip: false,
 		},
@@ -431,7 +418,6 @@ func TestDetectSecondarySignals(t *testing.T) {
 		{
 			name: "high-priority coding",
 			task: &models.Task{
-				Type:     models.TaskTypeCoding,
 				Priority: 15,
 			},
 			wantSignalName: "High-Value Feature",

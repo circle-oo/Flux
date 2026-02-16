@@ -20,5 +20,4 @@ Goal Description: {{.GoalDescription}}
 {{- if .GoalID}}
 Goal ID: {{.GoalID}}
 {{- end}}
-Task Type: {{.TaskType}}
 Task Priority: {{.Priority}}

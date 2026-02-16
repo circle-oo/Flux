@@ -297,7 +297,7 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 func (e *Executor) processResults(task *models.Task, result *claudecli.Result, worktreePath string, project *models.Project) error {
 	// Build verification
 	if task.RequiresTest() {
-		buildOK, buildOutput := e.runBuild(worktreePath, task)
+		buildOK, buildOutput := e.runBuild(worktreePath)
 		if !buildOK {
 			slog.Warn("build failed for task", "task_id", task.ID)
 			e.registerBuildFailureTask(task, buildOutput)
@@ -308,7 +308,7 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 
 	// QA: run tests
 	if task.RequiresTest() {
-		passed := e.runTests(worktreePath, task)
+		passed := e.runTests(worktreePath)
 		task.TestPassed = &passed
 		if !passed {
 			slog.Warn("tests failed for task", "task_id", task.ID)
@@ -432,7 +432,6 @@ func (e *Executor) buildSystemPrompt(task *models.Task, projectName, projectDesc
 		GoalID:             task.GoalID,
 		GoalTitle:          goalTitle,
 		GoalDescription:    goalDesc,
-		TaskType:           task.Type,
 		Priority:           task.Priority,
 	})
 	if err != nil {
@@ -519,12 +518,7 @@ func runProjectCommand(worktreePath string, commands []projectCommand, commandTy
 }
 
 // runTests detects the test framework and runs tests in the worktree.
-func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
-	// Skip tests for RESEARCH and DOCUMENT types
-	if task.Type == models.TaskTypeResearch || task.Type == models.TaskTypeDocument {
-		return true
-	}
-
+func (e *Executor) runTests(worktreePath string) bool {
 	testCmds := []projectCommand{
 		{"go.mod", "go", []string{"test", "./..."}},
 		{"package.json", "npm", []string{"test", "--", "--passWithNoTests"}},
@@ -539,7 +533,7 @@ func (e *Executor) runTests(worktreePath string, task *models.Task) bool {
 
 // runBuild detects the build system and runs a build in the worktree.
 // Returns (passed, output) where output contains error details on failure.
-func (e *Executor) runBuild(worktreePath string, task *models.Task) (bool, string) {
+func (e *Executor) runBuild(worktreePath string) (bool, string) {
 	buildCmds := []projectCommand{
 		{"go.mod", "go", []string{"build", "./..."}},
 		{"package.json", "npm", []string{"run", "build", "--if-present"}},
@@ -562,7 +556,6 @@ func buildFailureTask(failedTask *models.Task, buildOutput string) *models.Task 
 	return &models.Task{
 		Title:       fmt.Sprintf("Fix build failure from: %s", failedTask.Title),
 		Description: fmt.Sprintf("The task %q (ID: %s) produced code that fails to build.\n\nBuild output:\n```\n%s\n```\n\nPlease fix the build errors in branch `%s`.", failedTask.Title, failedTask.ID, truncatedOutput, failedTask.BranchName),
-		Type:        models.TaskTypeBugfix,
 		Priority:    min(failedTask.Priority, 10), // High priority — build is broken
 		Source:      models.TaskSourceSystem,
 		ProjectID:   failedTask.ProjectID,
@@ -570,7 +563,7 @@ func buildFailureTask(failedTask *models.Task, buildOutput string) *models.Task 
 		Depth:       failedTask.Depth + 1,
 		GoalID:      failedTask.GoalID,
 		BranchName:  failedTask.BranchName, // Reuse the same branch
-		Tags:        []string{"build-failure", "auto-registered"},
+		Tags:        []string{"bugfix", "build-failure", "auto-registered"},
 	}
 }
 
@@ -613,8 +606,8 @@ func (e *Executor) commitAndGetDiff(worktreePath string, task *models.Task) (dif
 	}
 
 	// git commit
-	commitMsg := fmt.Sprintf("[flux] %s\n\nTask: %s\nType: %s\nPriority: %d",
-		task.Title, task.ID, task.Type, task.Priority)
+	commitMsg := fmt.Sprintf("[flux] %s\n\nTask: %s\nPriority: %d",
+		task.Title, task.ID, task.Priority)
 	commitCmd := exec.Command("git", "commit", "-m", commitMsg)
 	commitCmd.Dir = worktreePath
 	if output, commitErr := commitCmd.CombinedOutput(); commitErr != nil {
@@ -674,13 +667,13 @@ func ShouldAutoMerge(task *models.Task, diffLines, filesChanged int) (bool, stri
 		return true, fmt.Sprintf("✅ **Auto-merged**: System/self-generated task (%d lines, %d files)", diffLines, filesChanged)
 	}
 
-	// Maintenance type: auto-merge
-	if task.Type == models.TaskTypeMaintenance {
+	// Tasks with maintenance or bugfix tags: auto-merge
+	if hasTag(task, "maintenance") {
 		return true, fmt.Sprintf("✅ **Auto-merged**: Maintenance task (%d lines, %d files)", diffLines, filesChanged)
 	}
 
 	// Bugfix with high priority (low number): auto-merge
-	if task.Type == models.TaskTypeBugfix && task.Priority <= 15 {
+	if hasTag(task, "bugfix") && task.Priority <= 15 {
 		return true, fmt.Sprintf("✅ **Auto-merged**: High-priority bugfix (P:%d, %d lines, %d files)", task.Priority, diffLines, filesChanged)
 	}
 
@@ -690,7 +683,17 @@ func ShouldAutoMerge(task *models.Task, diffLines, filesChanged int) (bool, stri
 	}
 
 	// Otherwise: operator review
-	return false, fmt.Sprintf("⏸️ **Auto-merge skipped**: Requires operator review (Type: %s, Priority: %d, %d lines, %d files)", task.Type, task.Priority, diffLines, filesChanged)
+	return false, fmt.Sprintf("⏸️ **Auto-merge skipped**: Requires operator review (Priority: %d, %d lines, %d files)", task.Priority, diffLines, filesChanged)
+}
+
+// hasTag checks if a task has a specific tag.
+func hasTag(task *models.Task, tag string) bool {
+	for _, t := range task.Tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
 }
 
 // extractOwnerRepo parses owner and repo from a GitHub URL.

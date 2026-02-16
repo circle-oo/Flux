@@ -20,7 +20,6 @@ func BuildAutopilotPrompt(task *models.Task, projectName, projectDesc, projectTe
 		ProjectName:        projectName,
 		ProjectDescription: projectDesc,
 		ProjectTechStack:   projectTech,
-		TaskType:           task.Type,
 	})
 	if err != nil {
 		slog.Warn("failed to render autopilot prompt template, using fallback", "error", err)

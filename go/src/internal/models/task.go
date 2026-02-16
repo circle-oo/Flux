@@ -100,9 +100,17 @@ func (t *Task) NeedsOpus() bool {
 	return false
 }
 
-// RequiresTest returns true if this task type requires tests.
+// RequiresTest returns true if this task requires tests.
+// Tests are required by default unless the task has a "skip-tests" tag.
 func (t *Task) RequiresTest() bool {
-	return t.Type == TaskTypeCoding || t.Type == TaskTypeBugfix || t.Type == TaskTypeMaintenance
+	// Check for explicit skip-tests tag
+	for _, tag := range t.Tags {
+		if tag == "skip-tests" || tag == "no-tests" {
+			return false
+		}
+	}
+	// By default, require tests
+	return true
 }
 
 // IsRetryable returns true if this task can be retried (failed but within retry limits).
