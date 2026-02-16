@@ -420,6 +420,12 @@ func (m *Manager) CheckParentCompletion(parentID string) error {
 		return nil
 	}
 
+	// Aggregate subtask results before transitioning parent
+	if err := m.AggregateSubtaskResults(parentID); err != nil {
+		slog.Error("failed to aggregate subtask results", "parent_id", parentID, "error", err)
+		// Continue with transition even if aggregation fails
+	}
+
 	newStatus := models.TaskCompleted
 	if anyFailed {
 		newStatus = models.TaskFailed
@@ -427,5 +433,82 @@ func (m *Manager) CheckParentCompletion(parentID string) error {
 
 	slog.Info("auto-transitioning parent task", "parent_id", parentID, "new_status", newStatus)
 	return m.TransitionTask(parentID, newStatus)
+}
+
+// AggregateSubtaskResults collects results from all completed subtasks
+// and stores a unified summary in the parent task's Result field.
+func (m *Manager) AggregateSubtaskResults(parentID string) error {
+	parent, err := m.tasks.GetByID(parentID)
+	if err != nil {
+		return fmt.Errorf("get parent: %w", err)
+	}
+
+	subtasks, err := m.tasks.ListByParent(parentID)
+	if err != nil {
+		return fmt.Errorf("list subtasks: %w", err)
+	}
+
+	if len(subtasks) == 0 {
+		return nil
+	}
+
+	// Build aggregated result as structured markdown
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("# Subtask Results Summary\n\n"))
+	result.WriteString(fmt.Sprintf("Total subtasks: %d\n\n", len(subtasks)))
+
+	completedCount := 0
+	failedCount := 0
+	cancelledCount := 0
+
+	for i, sub := range subtasks {
+		result.WriteString(fmt.Sprintf("## Subtask %d: %s\n\n", i+1, sub.Title))
+		result.WriteString(fmt.Sprintf("**Status:** %s\n\n", sub.Status))
+
+		if sub.Description != "" {
+			result.WriteString(fmt.Sprintf("**Description:** %s\n\n", sub.Description))
+		}
+
+		if sub.Result != "" {
+			result.WriteString(fmt.Sprintf("**Result:**\n%s\n\n", sub.Result))
+		}
+
+		if sub.ErrorLog != "" {
+			result.WriteString(fmt.Sprintf("**Error:** %s\n\n", sub.ErrorLog))
+		}
+
+		// Track status counts
+		switch sub.Status {
+		case models.TaskCompleted, models.TaskArchived:
+			completedCount++
+		case models.TaskFailed:
+			failedCount++
+		case models.TaskCancelled:
+			cancelledCount++
+		}
+
+		result.WriteString("---\n\n")
+	}
+
+	// Add summary statistics
+	result.WriteString("## Overall Status\n\n")
+	result.WriteString(fmt.Sprintf("- Completed: %d\n", completedCount))
+	result.WriteString(fmt.Sprintf("- Failed: %d\n", failedCount))
+	result.WriteString(fmt.Sprintf("- Cancelled: %d\n", cancelledCount))
+
+	// Update parent task with aggregated result
+	parent.Result = result.String()
+	if err := m.tasks.Update(parent); err != nil {
+		return fmt.Errorf("update parent result: %w", err)
+	}
+
+	slog.Info("aggregated subtask results",
+		"parent_id", parentID,
+		"subtask_count", len(subtasks),
+		"completed", completedCount,
+		"failed", failedCount,
+		"cancelled", cancelledCount)
+
+	return nil
 }
 

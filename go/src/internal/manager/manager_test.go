@@ -1,6 +1,8 @@
 package manager
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1150,5 +1152,272 @@ func TestPopNextTask_ResearcherIncludesRetry(t *testing.T) {
 
 	if next.Status != models.TaskRunning {
 		t.Errorf("expected status RUNNING, got %s", next.Status)
+	}
+}
+
+func TestAggregateSubtaskResults_AllCompleted(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create parent task
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Create completed subtasks with results
+	subtasks := []*models.Task{
+		{
+			Title:       "Subtask 1",
+			Description: "First subtask description",
+			Type:        models.TaskTypeCoding,
+			Status:      models.TaskCompleted,
+			Priority:    50,
+			ParentID:    parent.ID,
+			Depth:       1,
+			Result:      "Successfully implemented feature A",
+		},
+		{
+			Title:       "Subtask 2",
+			Description: "Second subtask description",
+			Type:        models.TaskTypeCoding,
+			Status:      models.TaskCompleted,
+			Priority:    50,
+			ParentID:    parent.ID,
+			Depth:       1,
+			Result:      "Successfully added tests for feature B",
+		},
+		{
+			Title:    "Subtask 3",
+			Type:     models.TaskTypeCoding,
+			Status:   models.TaskCompleted,
+			Priority: 50,
+			ParentID: parent.ID,
+			Depth:    1,
+			Result:   "Documentation updated",
+		},
+	}
+
+	for _, sub := range subtasks {
+		if err := mgr.CreateTask(sub); err != nil {
+			t.Fatalf("create subtask: %v", err)
+		}
+	}
+
+	// Aggregate results
+	if err := mgr.AggregateSubtaskResults(parent.ID); err != nil {
+		t.Fatalf("aggregate results: %v", err)
+	}
+
+	// Verify parent result is populated
+	updated, err := mgr.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+
+	if updated.Result == "" {
+		t.Fatal("expected parent result to be populated")
+	}
+
+	// Verify result contains key information
+	result := updated.Result
+	if !strings.Contains(result, "Subtask Results Summary") {
+		t.Error("result should contain summary header")
+	}
+	if !strings.Contains(result, "Total subtasks: 3") {
+		t.Error("result should contain subtask count")
+	}
+	if !strings.Contains(result, "Subtask 1") {
+		t.Error("result should contain first subtask")
+	}
+	if !strings.Contains(result, "Successfully implemented feature A") {
+		t.Error("result should contain first subtask result")
+	}
+	if !strings.Contains(result, "First subtask description") {
+		t.Error("result should contain subtask description")
+	}
+	if !strings.Contains(result, "Completed: 3") {
+		t.Error("result should contain completion count")
+	}
+	if !strings.Contains(result, "Failed: 0") {
+		t.Error("result should contain failed count")
+	}
+}
+
+func TestAggregateSubtaskResults_MixedStatus(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Create subtasks with mixed statuses
+	subtasks := []*models.Task{
+		{
+			Title:    "Completed Sub",
+			Type:     models.TaskTypeCoding,
+			Status:   models.TaskCompleted,
+			Priority: 50,
+			ParentID: parent.ID,
+			Depth:    1,
+			Result:   "Completed successfully",
+		},
+		{
+			Title:    "Failed Sub",
+			Type:     models.TaskTypeCoding,
+			Status:   models.TaskFailed,
+			Priority: 50,
+			ParentID: parent.ID,
+			Depth:    1,
+			Result:   "Attempted but failed",
+			ErrorLog: "Build error: syntax issue",
+		},
+		{
+			Title:    "Cancelled Sub",
+			Type:     models.TaskTypeCoding,
+			Status:   models.TaskCancelled,
+			Priority: 50,
+			ParentID: parent.ID,
+			Depth:    1,
+			ErrorLog: "cancelled by operator",
+		},
+	}
+
+	for _, sub := range subtasks {
+		if err := mgr.CreateTask(sub); err != nil {
+			t.Fatalf("create subtask: %v", err)
+		}
+	}
+
+	if err := mgr.AggregateSubtaskResults(parent.ID); err != nil {
+		t.Fatalf("aggregate results: %v", err)
+	}
+
+	updated, err := mgr.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+
+	result := updated.Result
+	if !strings.Contains(result, "Completed: 1") {
+		t.Error("result should show 1 completed")
+	}
+	if !strings.Contains(result, "Failed: 1") {
+		t.Error("result should show 1 failed")
+	}
+	if !strings.Contains(result, "Cancelled: 1") {
+		t.Error("result should show 1 cancelled")
+	}
+	if !strings.Contains(result, "Build error: syntax issue") {
+		t.Error("result should contain error log")
+	}
+}
+
+func TestAggregateSubtaskResults_NoSubtasks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskDecomposed,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	// Aggregate with no subtasks should not error
+	if err := mgr.AggregateSubtaskResults(parent.ID); err != nil {
+		t.Errorf("aggregate with no subtasks: %v", err)
+	}
+
+	// Parent result should remain empty
+	updated, err := mgr.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+	if updated.Result != "" {
+		t.Error("parent result should remain empty with no subtasks")
+	}
+}
+
+func TestCheckParentCompletion_WithAggregation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create parent and transition to DECOMPOSED
+	parent := &models.Task{
+		Title:    "Parent Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	mgr.TransitionTask(parent.ID, models.TaskRunning)
+	mgr.TransitionTask(parent.ID, models.TaskDecomposed)
+
+	// Create completed subtasks with results
+	for i := 1; i <= 2; i++ {
+		sub := &models.Task{
+			Title:    fmt.Sprintf("Subtask %d", i),
+			Type:     models.TaskTypeCoding,
+			Status:   models.TaskCompleted,
+			Priority: 50,
+			ParentID: parent.ID,
+			Depth:    1,
+			Result:   fmt.Sprintf("Result for subtask %d", i),
+		}
+		if err := mgr.CreateTask(sub); err != nil {
+			t.Fatalf("create subtask %d: %v", i, err)
+		}
+	}
+
+	// CheckParentCompletion should aggregate results and transition parent
+	if err := mgr.CheckParentCompletion(parent.ID); err != nil {
+		t.Fatalf("check parent completion: %v", err)
+	}
+
+	// Verify parent is completed
+	updated, err := mgr.GetTask(parent.ID)
+	if err != nil {
+		t.Fatalf("get parent: %v", err)
+	}
+
+	if updated.Status != models.TaskCompleted {
+		t.Errorf("expected parent COMPLETED, got %s", updated.Status)
+	}
+
+	// Verify aggregated result is present
+	if updated.Result == "" {
+		t.Fatal("expected aggregated result in parent")
+	}
+
+	if !strings.Contains(updated.Result, "Subtask Results Summary") {
+		t.Error("parent result should contain aggregated summary")
+	}
+	if !strings.Contains(updated.Result, "Result for subtask 1") {
+		t.Error("parent result should contain subtask 1 result")
+	}
+	if !strings.Contains(updated.Result, "Result for subtask 2") {
+		t.Error("parent result should contain subtask 2 result")
 	}
 }
