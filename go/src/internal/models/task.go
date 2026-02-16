@@ -633,27 +633,6 @@ func (s *TaskStore) ValidateSubtaskDAGWithUpdate(parentID string, taskID string,
 	return nil
 }
 
-// hasCycle performs DFS to detect cycles in a directed graph.
-// Returns true if a cycle is detected starting from the given node.
-func hasCycle(node string, graph map[string][]string, visited, inStack map[string]bool) bool {
-	visited[node] = true
-	inStack[node] = true
-
-	for _, neighbor := range graph[node] {
-		if !visited[neighbor] {
-			if hasCycle(neighbor, graph, visited, inStack) {
-				return true
-			}
-		} else if inStack[neighbor] {
-			// Found a back edge (cycle)
-			return true
-		}
-	}
-
-	inStack[node] = false
-	return false
-}
-
 // GetTopologicalOrder returns subtasks of the given parent in topological order.
 // Tasks that can execute in parallel (no dependency relationship) are ordered by priority.
 // Returns an error if the dependency graph contains a cycle.
