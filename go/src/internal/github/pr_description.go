@@ -65,7 +65,6 @@ func (b *PRDescriptionBuilder) buildRequirementsSection() string {
 	}
 
 	// Task metadata (moved up for better visibility)
-	sb.WriteString(fmt.Sprintf("**Task Type:** %s\n", b.task.Type))
 	sb.WriteString(fmt.Sprintf("**Priority:** %d\n", b.task.Priority))
 
 	// Triage analysis (if available) - now includes priority reasoning
@@ -153,57 +152,15 @@ func (b *PRDescriptionBuilder) buildReviewPointsSection() string {
 	return sb.String()
 }
 
-// generateReviewPoints creates task-specific review points.
+// generateReviewPoints creates generic review points for all tasks.
 func (b *PRDescriptionBuilder) generateReviewPoints() []string {
 	points := []string{
 		"Code follows existing conventions and style",
 		"Changes are focused and minimal",
 		"No unintended side effects",
-	}
-
-	switch b.task.Type {
-	case models.TaskTypeCoding:
-		points = append(points,
-			"New functionality works as expected",
-			"Error handling is appropriate",
-			"Tests cover new code paths",
-		)
-	case models.TaskTypeBugfix:
-		points = append(points,
-			"Bug is fixed and root cause addressed",
-			"Fix doesn't introduce new issues",
-			"Regression test added",
-		)
-	case models.TaskTypeDocument:
-		points = append(points,
-			"Documentation is clear and accurate",
-			"Examples are helpful",
-			"Links and references are valid",
-		)
-	case models.TaskTypeMaintenance:
-		points = append(points,
-			"Dependencies are up to date",
-			"No breaking changes",
-			"Backwards compatibility maintained",
-		)
-	case models.TaskTypeResearch:
-		points = append(points,
-			"Research findings are documented",
-			"Sources are cited",
-			"Recommendations are actionable",
-		)
-	case models.TaskTypeDeploy:
-		points = append(points,
-			"Deployment steps are validated",
-			"Rollback plan is in place",
-			"No service disruption expected",
-		)
-	case models.TaskTypePlanning:
-		points = append(points,
-			"Plan is comprehensive",
-			"Dependencies are identified",
-			"Timeline is realistic",
-		)
+		"Implementation meets requirements",
+		"Error handling is appropriate",
+		"Tests are adequate",
 	}
 
 	return points

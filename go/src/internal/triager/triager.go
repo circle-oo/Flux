@@ -185,7 +185,6 @@ func (t *Triager) smokeTest() error {
 // triageData holds data for triage.txt template.
 type triageData struct {
 	Title              string
-	Type               string
 	Priority           int
 	Description        string
 	Tags               string
@@ -304,7 +303,6 @@ func buildTriagePromptWithContext(task *models.Task, project *models.Project, go
 
 	data := triageData{
 		Title:       task.Title,
-		Type:        task.Type,
 		Priority:    task.Priority,
 		Description: task.Description,
 		Tags:        tags,
@@ -334,7 +332,7 @@ func buildTriagePromptWithContext(task *models.Task, project *models.Project, go
 	err := triageTemplate.ExecuteTemplate(&buf, "triage.txt", data)
 	if err != nil {
 		slog.Warn("failed to render triage prompt template, using fallback", "error", err)
-		return fmt.Sprintf("Analyze this task and suggest priority and rewrite description:\n\nTitle: %s\nType: %s\nDescription: %s", task.Title, task.Type, task.Description)
+		return fmt.Sprintf("Analyze this task and suggest priority and rewrite description:\n\nTitle: %s\nDescription: %s", task.Title, task.Description)
 	}
 	return buf.String()
 }
