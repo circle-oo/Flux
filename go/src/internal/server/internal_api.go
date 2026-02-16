@@ -363,6 +363,9 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 		}
 		slog.Info("internal API: subtask created", "parent_id", parent.ID, "subtask_id", task.ID, "title", sub.Title)
 		created = append(created, task)
+
+		// Broadcast subtask creation via WebSocket for real-time UI updates
+		s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 	}
 
 	slog.Info("internal API: all subtasks created", "parent_id", req.ParentID, "total", len(created))
