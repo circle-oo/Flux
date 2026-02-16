@@ -1286,11 +1286,11 @@ func TestInternal_TaskStarted(t *testing.T) {
 func TestInternal_Triaged(t *testing.T) {
 	srv, database := setupTestServer(t)
 
-	// Create a PENDING task
+	// Create a PENDING task with a user-provided description
 	_, err := database.Exec(
-		`INSERT INTO tasks (id, title, type, status, priority, source, depends_on, tags)
-		 VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')`,
-		"test-triage-001", "Triage me", "CODING", "PENDING", 50, "OPERATOR",
+		`INSERT INTO tasks (id, title, description, type, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"test-triage-001", "Triage me", "User provided description", "CODING", "PENDING", 50, "OPERATOR",
 	)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
@@ -1299,7 +1299,7 @@ func TestInternal_Triaged(t *testing.T) {
 	// Report triage completion
 	body, _ := json.Marshal(map[string]interface{}{
 		"analysis":    "This task is well-defined",
-		"description": "Updated description with clear requirements",
+		"description": "Triage-generated description with clear requirements",
 		"priority":    30,
 	})
 	req := httptest.NewRequest("POST", "/internal/tasks/test-triage-001/triaged", bytes.NewBuffer(body))
@@ -1323,16 +1323,21 @@ func TestInternal_Triaged(t *testing.T) {
 	if task["triage_analysis"] != "This task is well-defined" {
 		t.Errorf("expected triage analysis, got %v", task["triage_analysis"])
 	}
-	if task["description"] != "Updated description with clear requirements" {
-		t.Errorf("expected updated description, got %v", task["description"])
+	// User description must be preserved (NOT overwritten by triage)
+	if task["description"] != "User provided description" {
+		t.Errorf("expected user description preserved, got %v", task["description"])
+	}
+	// Triage description stored separately
+	if task["triage_description"] != "Triage-generated description with clear requirements" {
+		t.Errorf("expected triage_description, got %v", task["triage_description"])
 	}
 	if int(task["priority"].(float64)) != 30 {
 		t.Errorf("expected priority 30, got %v", task["priority"])
 	}
 }
 
-// TestTriageAnalysis_FullLifecycle tests that triage_analysis is correctly
-// persisted and preserved through the full task lifecycle:
+// TestTriageAnalysis_FullLifecycle tests that triage_analysis and triage_description
+// are correctly persisted and preserved through the full task lifecycle:
 // PENDING -> triaged -> READY -> popped by executor -> RUNNING -> done -> COMPLETED
 func TestTriageAnalysis_FullLifecycle(t *testing.T) {
 	srv, database := setupTestServer(t)
@@ -1342,11 +1347,11 @@ func TestTriageAnalysis_FullLifecycle(t *testing.T) {
 	m := manager.NewManager(database, cfg)
 	srv.mgr = m
 
-	// Step 1: Create a PENDING operator task directly in DB
+	// Step 1: Create a PENDING operator task directly in DB with user description
 	_, err := database.Exec(
-		`INSERT INTO tasks (id, title, type, status, priority, source, depends_on, tags)
-		 VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')`,
-		"triage-lifecycle-001", "Full lifecycle test", "CODING", "PENDING", 50, "OPERATOR",
+		`INSERT INTO tasks (id, title, description, type, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"triage-lifecycle-001", "Full lifecycle test", "Original user description", "CODING", "PENDING", 50, "OPERATOR",
 	)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
@@ -1379,6 +1384,13 @@ func TestTriageAnalysis_FullLifecycle(t *testing.T) {
 	}
 	if task["triage_analysis"] != "This is a detailed triage analysis for the task." {
 		t.Errorf("after triage: expected triage analysis, got %v", task["triage_analysis"])
+	}
+	// User description preserved, triage description stored separately
+	if task["description"] != "Original user description" {
+		t.Errorf("after triage: expected user description preserved, got %v", task["description"])
+	}
+	if task["triage_description"] != "Rewritten description with clear requirements." {
+		t.Errorf("after triage: expected triage_description, got %v", task["triage_description"])
 	}
 
 	// Step 3: Executor pops the task via /internal/tasks/next
@@ -1451,7 +1463,7 @@ func TestTriageAnalysis_FullLifecycle(t *testing.T) {
 		t.Fatalf("done: expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	// Step 6: Verify triage_analysis is STILL present after task completion
+	// Step 6: Verify triage_analysis and triage_description are STILL present after task completion
 	rr = doAuthRequest(t, srv, "GET", "/api/tasks/triage-lifecycle-001", nil)
 	parseResponse(t, rr, &task)
 
@@ -1461,15 +1473,32 @@ func TestTriageAnalysis_FullLifecycle(t *testing.T) {
 	if task["triage_analysis"] != "This is a detailed triage analysis for the task." {
 		t.Errorf("after done: triage_analysis lost! expected analysis text, got %v", task["triage_analysis"])
 	}
+	// User description preserved through entire lifecycle
+	if task["description"] != "Original user description" {
+		t.Errorf("after done: user description lost! got %v", task["description"])
+	}
+	// Triage description preserved through entire lifecycle
+	if task["triage_description"] != "Rewritten description with clear requirements." {
+		t.Errorf("after done: triage_description lost! got %v", task["triage_description"])
+	}
 
 	// Also verify via direct DB query
-	var dbAnalysis string
-	err = database.QueryRow("SELECT triage_analysis FROM tasks WHERE id = ?", "triage-lifecycle-001").Scan(&dbAnalysis)
+	var dbAnalysis, dbDesc, dbTriageDesc string
+	err = database.QueryRow(
+		"SELECT triage_analysis, description, triage_description FROM tasks WHERE id = ?",
+		"triage-lifecycle-001",
+	).Scan(&dbAnalysis, &dbDesc, &dbTriageDesc)
 	if err != nil {
 		t.Fatalf("direct DB query: %v", err)
 	}
 	if dbAnalysis != "This is a detailed triage analysis for the task." {
 		t.Errorf("direct DB: triage_analysis lost! expected analysis text, got %q", dbAnalysis)
+	}
+	if dbDesc != "Original user description" {
+		t.Errorf("direct DB: user description lost! got %q", dbDesc)
+	}
+	if dbTriageDesc != "Rewritten description with clear requirements." {
+		t.Errorf("direct DB: triage_description lost! got %q", dbTriageDesc)
 	}
 }
 

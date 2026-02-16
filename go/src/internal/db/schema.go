@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // CreateSchema creates all tables and indexes if they don't exist.
@@ -10,6 +11,16 @@ func CreateSchema(db *sql.DB) error {
 	for _, stmt := range schemaStatements {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("execute schema statement: %w\nSQL: %s", err, stmt)
+		}
+	}
+	// Run migrations (idempotent ALTER TABLE statements for existing databases).
+	for _, stmt := range migrations {
+		if _, err := db.Exec(stmt); err != nil {
+			// Ignore "duplicate column" errors — the migration already ran.
+			if strings.Contains(err.Error(), "duplicate column") {
+				continue
+			}
+			return fmt.Errorf("execute migration: %w\nSQL: %s", err, stmt)
 		}
 	}
 	return nil
@@ -69,7 +80,8 @@ var schemaStatements = []string{
 		diff_lines      INTEGER DEFAULT 0,
 		files_changed   INTEGER DEFAULT 0,
 		test_passed     BOOLEAN DEFAULT NULL,
-		triage_analysis TEXT DEFAULT '',
+		triage_analysis   TEXT DEFAULT '',
+		triage_description TEXT DEFAULT '',
 		plan            TEXT DEFAULT '',
 		retry_count     INTEGER DEFAULT 0,
 		crash_recovery  BOOLEAN DEFAULT FALSE,
@@ -126,4 +138,10 @@ var schemaStatements = []string{
 	)`,
 
 	`CREATE INDEX IF NOT EXISTS idx_metrics_service_time ON service_metrics(service_name, recorded_at)`,
+}
+
+// migrations are ALTER TABLE statements that add columns to existing tables.
+// Each migration is idempotent — it silently ignores "duplicate column" errors.
+var migrations = []string{
+	`ALTER TABLE tasks ADD COLUMN triage_description TEXT DEFAULT ''`,
 }

@@ -14,6 +14,7 @@ func BuildAutopilotPrompt(task *models.Task, projectName, projectDesc, projectTe
 	result, err := prompts.Render("autopilot.txt", prompts.AutopilotData{
 		Title:              task.Title,
 		Description:        task.Description,
+		TriageDescription:  task.TriageDescription,
 		TriageAnalysis:     task.TriageAnalysis,
 		Prompt:             task.Prompt,
 		ProjectName:        projectName,
