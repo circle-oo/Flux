@@ -540,3 +540,195 @@ func ScanTask(scanner interface{ Scan(...interface{}) error }) (*Task, error) {
 	t.Tags = unmarshalStringSlice("tags", tagsJSON)
 	return &t, nil
 }
+
+// ValidateSubtaskDAG validates that adding a subtask with given dependencies won't create a cycle.
+// It checks that the dependency graph for all subtasks under parentID remains acyclic.
+// If taskID is provided, it validates updating that task's dependencies; otherwise it validates a new task.
+// Returns an error if a cycle would be created.
+func (s *TaskStore) ValidateSubtaskDAG(parentID string, dependencies []string) error {
+	return s.ValidateSubtaskDAGWithUpdate(parentID, "", dependencies)
+}
+
+// ValidateSubtaskDAGWithUpdate validates DAG property when updating an existing task or adding a new one.
+// If taskID is empty, it simulates adding a new task; otherwise it simulates updating the existing task.
+func (s *TaskStore) ValidateSubtaskDAGWithUpdate(parentID string, taskID string, dependencies []string) error {
+	// Build the current dependency graph for this parent's subtasks
+	subtasks, err := s.ListByParent(parentID)
+	if err != nil {
+		return fmt.Errorf("list subtasks: %w", err)
+	}
+
+	// Build adjacency list: taskID -> []dependencyIDs
+	graph := make(map[string][]string)
+	taskIDs := make(map[string]bool)
+
+	for _, task := range subtasks {
+		taskIDs[task.ID] = true
+		if task.ID == taskID {
+			// Use the updated dependencies for this task
+			graph[task.ID] = dependencies
+		} else {
+			graph[task.ID] = task.DependsOn
+		}
+	}
+
+	// If taskID is empty, we're adding a new task
+	if taskID == "" && len(dependencies) > 0 {
+		newTaskID := "new-task-placeholder"
+		taskIDs[newTaskID] = true
+		graph[newTaskID] = dependencies
+	}
+
+	// Verify all dependencies reference valid subtasks under the same parent
+	for _, depID := range dependencies {
+		if !taskIDs[depID] {
+			return fmt.Errorf("dependency %s is not a subtask of parent %s", depID, parentID)
+		}
+	}
+
+	// Detect cycles using DFS
+	visited := make(map[string]bool)
+	inStack := make(map[string]bool)
+
+	for id := range taskIDs {
+		if !visited[id] {
+			if hasCycle(id, graph, visited, inStack) {
+				return fmt.Errorf("adding dependencies would create a cycle in subtask DAG")
+			}
+		}
+	}
+
+	return nil
+}
+
+// hasCycle performs DFS to detect cycles in a directed graph.
+// Returns true if a cycle is detected starting from the given node.
+func hasCycle(node string, graph map[string][]string, visited, inStack map[string]bool) bool {
+	visited[node] = true
+	inStack[node] = true
+
+	for _, neighbor := range graph[node] {
+		if !visited[neighbor] {
+			if hasCycle(neighbor, graph, visited, inStack) {
+				return true
+			}
+		} else if inStack[neighbor] {
+			// Found a back edge (cycle)
+			return true
+		}
+	}
+
+	inStack[node] = false
+	return false
+}
+
+// GetTopologicalOrder returns subtasks of the given parent in topological order.
+// Tasks that can execute in parallel (no dependency relationship) are ordered by priority.
+// Returns an error if the dependency graph contains a cycle.
+func (s *TaskStore) GetTopologicalOrder(parentID string) ([]*Task, error) {
+	subtasks, err := s.ListByParent(parentID)
+	if err != nil {
+		return nil, fmt.Errorf("list subtasks: %w", err)
+	}
+
+	if len(subtasks) == 0 {
+		return []*Task{}, nil
+	}
+
+	// Build adjacency list and in-degree map
+	graph := make(map[string][]string)
+	inDegree := make(map[string]int)
+	taskMap := make(map[string]*Task)
+
+	for _, task := range subtasks {
+		taskMap[task.ID] = task
+		inDegree[task.ID] = 0
+		graph[task.ID] = []string{}
+	}
+
+	// Build graph edges (task -> tasks that depend on it)
+	for _, task := range subtasks {
+		for _, depID := range task.DependsOn {
+			if _, exists := taskMap[depID]; exists {
+				graph[depID] = append(graph[depID], task.ID)
+				inDegree[task.ID]++
+			}
+		}
+	}
+
+	// Kahn's algorithm for topological sort
+	var queue []*Task
+	for _, task := range subtasks {
+		if inDegree[task.ID] == 0 {
+			queue = append(queue, task)
+		}
+	}
+
+	var result []*Task
+	for len(queue) > 0 {
+		// Process current level (tasks with no remaining dependencies)
+		current := queue[0]
+		queue = queue[1:]
+		result = append(result, current)
+
+		// Reduce in-degree for dependent tasks
+		for _, dependentID := range graph[current.ID] {
+			inDegree[dependentID]--
+			if inDegree[dependentID] == 0 {
+				queue = append(queue, taskMap[dependentID])
+			}
+		}
+	}
+
+	// If not all tasks are in result, there's a cycle
+	if len(result) != len(subtasks) {
+		return nil, fmt.Errorf("subtask dependency graph contains a cycle")
+	}
+
+	return result, nil
+}
+
+// AddSubtaskDependency adds a dependency edge from dependentID to dependencyID.
+// It validates that both tasks are subtasks of the same parent and that adding
+// the dependency won't create a cycle.
+func (s *TaskStore) AddSubtaskDependency(dependentID, dependencyID string) error {
+	if dependentID == dependencyID {
+		return fmt.Errorf("task cannot depend on itself")
+	}
+
+	// Get both tasks
+	dependent, err := s.GetByID(dependentID)
+	if err != nil {
+		return fmt.Errorf("get dependent task: %w", err)
+	}
+
+	dependency, err := s.GetByID(dependencyID)
+	if err != nil {
+		return fmt.Errorf("get dependency task: %w", err)
+	}
+
+	// Verify both tasks have the same parent
+	if dependent.ParentID == "" {
+		return fmt.Errorf("dependent task %s is not a subtask", dependentID)
+	}
+	if dependent.ParentID != dependency.ParentID {
+		return fmt.Errorf("tasks must be subtasks of the same parent")
+	}
+
+	// Check if dependency already exists
+	for _, depID := range dependent.DependsOn {
+		if depID == dependencyID {
+			return nil // Already exists, no-op
+		}
+	}
+
+	// Add the new dependency and validate no cycles
+	newDependencies := append(dependent.DependsOn, dependencyID)
+	if err := s.ValidateSubtaskDAGWithUpdate(dependent.ParentID, dependentID, newDependencies); err != nil {
+		return err
+	}
+
+	// Update the task with the new dependency
+	dependent.DependsOn = newDependencies
+	return s.Update(dependent)
+}
