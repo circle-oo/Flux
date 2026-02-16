@@ -38,6 +38,14 @@ fi
 
 echo "  npm: $(npm --version)"
 
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: Python3 is not installed. Please install Python 3.11+."
+    echo "  brew install python"
+    exit 1
+fi
+
+echo "  Python: $(python3 --version | awk '{print $2}')"
+
 if ! command -v notesmd-cli &>/dev/null; then
     echo ""
     echo "Installing notesmd-cli..."
@@ -110,12 +118,18 @@ cd "$SCRIPT_DIR"
 echo "  Built: go/bin/flux"
 echo ""
 
-# 8. Create runtime directories
+# 8. Install Python Agent Manager dependencies
+echo "Installing Agent Manager dependencies..."
+python3 -m pip install -r agent_manager/requirements.txt --quiet
+echo "  Done."
+echo ""
+
+# 9. Create runtime directories
 mkdir -p data logs
 echo "Created runtime directories (data/, logs/)."
 echo ""
 
-# 9. Register Obsidian vault with notesmd-cli
+# 10. Register Obsidian vault with notesmd-cli
 if command -v notesmd-cli &>/dev/null; then
     echo "Registering Obsidian vault with notesmd-cli..."
     notesmd-cli set-default "Flux" 2>/dev/null || echo "  NOTE: Open the Flux vault in Obsidian at least once, then re-run setup."
@@ -129,8 +143,8 @@ echo "Before starting, set required environment variables:"
 echo "  export FLUX_UI_PASSWORD='your-password'"
 echo ""
 echo "To start Flux:"
-echo "  bash startup-dev.sh           # dev — foreground, go run"
-echo "  bash startup-prod.sh          # prod — launchd service"
+echo "  bash startup-dev.sh           # dev — foreground, go run + agent manager"
+echo "  bash startup-prod.sh          # prod — launchd services"
 echo ""
 echo "To stop production:"
 echo "  bash stop-prod.sh"

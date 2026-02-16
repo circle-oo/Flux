@@ -2,15 +2,12 @@
 set -euo pipefail
 
 # Flux Production Startup
-# Full build + install as launchd service (auto-restart, run at login).
-# Usage: bash startup-prod.sh
+# Builds Go + frontend, then installs launchd services (Go backend + Python Agent Manager).
+# Usage: bash startup-prod.sh [--backend-only]
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-PLIST_NAME="com.circle-oo.flux"
-PLIST_SRC="$SCRIPT_DIR/deploy/${PLIST_NAME}.plist"
-PLIST_DST="$HOME/Library/LaunchAgents/${PLIST_NAME}.plist"
 CONFIG="$SCRIPT_DIR/config.yaml"
 
 echo "=== Flux Production Deploy ==="
@@ -20,11 +17,6 @@ echo ""
 if [ ! -f "$CONFIG" ]; then
     echo "ERROR: config.yaml not found"
     echo "  Run: bash setup.sh"
-    exit 1
-fi
-
-if [ ! -f "$PLIST_SRC" ]; then
-    echo "ERROR: Launchd plist not found at $PLIST_SRC"
     exit 1
 fi
 
@@ -69,51 +61,31 @@ for var in "${VARS_TO_PERSIST[@]}"; do
     echo "  Persisted $var to ~/.zshenv"
 done
 
-# ── Stop existing service if running ────────────────────────────────
-if launchctl list 2>/dev/null | grep -q "$PLIST_NAME"; then
-    echo ""
-    echo "Stopping existing service..."
-    launchctl unload "$PLIST_DST" 2>/dev/null || true
-    sleep 1
-fi
-
 # ── Build ────────────────────────────────────────────────────────────
 echo ""
 echo "Building..."
 mkdir -p data logs
-make build
+
+if [[ "${1:-}" == "--backend-only" ]]; then
+    make build-backend
+else
+    make build
+fi
 echo ""
 
-# ── Install and start launchd service ────────────────────────────────
-echo "Installing launchd service..."
-cp "$PLIST_SRC" "$PLIST_DST"
-launchctl load "$PLIST_DST"
+# ── Install and start launchd services ───────────────────────────────
+echo "Installing launchd services..."
+make install-services
 
 # ── Verify ───────────────────────────────────────────────────────────
 sleep 2
-if launchctl list 2>/dev/null | grep -q "$PLIST_NAME"; then
-    PID=$(launchctl list | grep "$PLIST_NAME" | awk '{print $1}')
-    EXIT_CODE=$(launchctl list | grep "$PLIST_NAME" | awk '{print $2}')
-    if [ "$PID" != "-" ] && [ "${EXIT_CODE:-0}" = "0" ]; then
-        echo ""
-        echo "Flux is running (PID: $PID)"
-    else
-        echo ""
-        echo "WARNING: Flux may have failed to start (exit: $EXIT_CODE)"
-        echo "  Check: tail -20 logs/flux-stderr.log"
-    fi
-else
-    echo ""
-    echo "WARNING: Service not found after install"
-fi
-
 PORT=$(grep -E '^\s+port:' "$CONFIG" | grep -oE '[0-9]+' | head -1 || echo 8080)
 
 echo ""
 echo "  Web UI:  http://localhost:$PORT"
 echo "  Binary:  $SCRIPT_DIR/go/bin/flux"
 echo "  Config:  $CONFIG"
-echo "  Logs:    $SCRIPT_DIR/logs/flux.log"
+echo "  Logs:    $SCRIPT_DIR/logs/"
 echo ""
 echo "Commands:"
 echo "  Status:   launchctl list | grep flux"

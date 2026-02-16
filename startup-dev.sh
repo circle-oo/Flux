@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Flux Development Startup
 # Builds frontend + backend with hot output, runs in foreground.
+# Also starts the Python Agent Manager as a background process.
 # Usage: bash startup-dev.sh [--skip-frontend]
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -34,6 +35,11 @@ if ! command -v node &>/dev/null; then
     exit 1
 fi
 
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: Python3 not found. Install with: brew install python"
+    exit 1
+fi
+
 # ── Build frontend ───────────────────────────────────────────────────
 if [ "$SKIP_FRONTEND" = false ]; then
     echo "Building frontend..."
@@ -45,6 +51,30 @@ if [ "$SKIP_FRONTEND" = false ]; then
     cp -r frontend/dist go/src/web/dist
     echo ""
 fi
+
+# ── Start Python Agent Manager in background ─────────────────────────
+AGENT_PID=""
+cleanup() {
+    if [ -n "$AGENT_PID" ] && kill -0 "$AGENT_PID" 2>/dev/null; then
+        echo ""
+        echo "Stopping Agent Manager (PID: $AGENT_PID)..."
+        kill "$AGENT_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+echo "Starting Agent Manager..."
+python3 -m agent_manager.server &
+AGENT_PID=$!
+sleep 1
+
+if kill -0 "$AGENT_PID" 2>/dev/null; then
+    echo "  Agent Manager running (PID: $AGENT_PID)"
+else
+    echo "WARNING: Agent Manager failed to start. Continuing without it."
+    AGENT_PID=""
+fi
+echo ""
 
 # ── Run backend (go run, no binary needed) ───────────────────────────
 PORT=$(grep -E '^\s+port:' "$CONFIG" | grep -oE '[0-9]+' | head -1 || echo 8080)
