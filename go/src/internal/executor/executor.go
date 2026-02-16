@@ -196,11 +196,8 @@ func (e *Executor) prepareExecution(task *models.Task, project *models.Project) 
 }
 
 // setupWorktree creates or reuses a worktree for the task.
+// Each task gets a dedicated clone + worktree for complete isolation.
 func (e *Executor) setupWorktree(task *models.Task, project *models.Project) (string, error) {
-	if err := e.worktree.EnsureBareRepo(project.RepoURL, project.Name); err != nil {
-		return "", fmt.Errorf("bare repo failed: %w", err)
-	}
-
 	var worktreePath string
 	var err error
 
@@ -210,16 +207,17 @@ func (e *Executor) setupWorktree(task *models.Task, project *models.Project) (st
 		if err != nil {
 			return "", fmt.Errorf("worktree not found: %w", err)
 		}
-		if err := e.worktree.UpdateWorktree(project.Name, worktreePath, task.BranchName); err != nil {
+		if err := e.worktree.UpdateWorktree(worktreePath, task.BranchName); err != nil {
 			return "", fmt.Errorf("worktree update failed: %w", err)
 		}
 		slog.Info("reusing existing worktree", "task_id", task.ID, "branch", task.BranchName, "path", worktreePath)
 	} else {
-		// Create new worktree
-		worktreePath, task.BranchName, err = e.worktree.CreateWorktree(project.Name, task.ID)
+		// Create new dedicated worktree with its own repo clone
+		worktreePath, task.BranchName, err = e.worktree.CreateWorktree(project.Name, task.ID, project.RepoURL)
 		if err != nil {
 			return "", fmt.Errorf("worktree create failed: %w", err)
 		}
+		slog.Info("created dedicated worktree", "task_id", task.ID, "branch", task.BranchName, "path", worktreePath)
 	}
 
 	return worktreePath, nil

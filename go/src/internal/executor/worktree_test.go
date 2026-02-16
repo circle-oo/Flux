@@ -14,15 +14,8 @@ func TestNewWorktreeManager(t *testing.T) {
 	workspaceBase := "/tmp/test-workspace"
 	wm := NewWorktreeManager(workspaceBase, "test-token", "test-user")
 
-	expectedReposDir := filepath.Join(workspaceBase, "repos")
-	expectedTreesDir := filepath.Join(workspaceBase, "trees")
-
-	if wm.reposDir != expectedReposDir {
-		t.Errorf("expected reposDir %s, got %s", expectedReposDir, wm.reposDir)
-	}
-
-	if wm.treesDir != expectedTreesDir {
-		t.Errorf("expected treesDir %s, got %s", expectedTreesDir, wm.treesDir)
+	if wm.workspaceBase != workspaceBase {
+		t.Errorf("expected workspaceBase %s, got %s", workspaceBase, wm.workspaceBase)
 	}
 
 	if wm.githubToken != "test-token" {
@@ -159,12 +152,19 @@ func TestSetupClaudeMD(t *testing.T) {
 func TestBranchNameAndWorktreePathGeneration(t *testing.T) {
 	taskID := "abc123def456"
 	projectName := "my-project"
+	workspaceBase := "/tmp/workspace"
 
 	// Expected branch name format: task/{id[:8]}
 	expectedBranch := "task/abc123de"
 
-	// Expected worktree path format: {project}--task-{id[:8]}
-	expectedPathSuffix := "my-project--task-abc123de"
+	// Expected task base directory: {workspace}/trees/{project}--task-{id[:8]}
+	expectedTaskBaseDir := filepath.Join(workspaceBase, "trees", "my-project--task-abc123de")
+
+	// Expected worktree path: {taskBaseDir}/worktree
+	expectedWorktreePath := filepath.Join(expectedTaskBaseDir, "worktree")
+
+	// Expected bare repo path: {taskBaseDir}/.repo
+	expectedBareRepo := filepath.Join(expectedTaskBaseDir, ".repo")
 
 	// Test branch name format
 	branchName := "task/" + taskID[:8]
@@ -172,10 +172,22 @@ func TestBranchNameAndWorktreePathGeneration(t *testing.T) {
 		t.Errorf("expected branch name %s, got %s", expectedBranch, branchName)
 	}
 
+	// Test task base directory format
+	taskBaseDir := filepath.Join(workspaceBase, "trees", projectName+"--task-"+taskID[:8])
+	if taskBaseDir != expectedTaskBaseDir {
+		t.Errorf("expected task base dir %s, got %s", expectedTaskBaseDir, taskBaseDir)
+	}
+
 	// Test worktree path format
-	worktreeName := projectName + "--task-" + taskID[:8]
-	if worktreeName != expectedPathSuffix {
-		t.Errorf("expected worktree path suffix %s, got %s", expectedPathSuffix, worktreeName)
+	worktreePath := filepath.Join(taskBaseDir, "worktree")
+	if worktreePath != expectedWorktreePath {
+		t.Errorf("expected worktree path %s, got %s", expectedWorktreePath, worktreePath)
+	}
+
+	// Test bare repo path format
+	bareRepo := filepath.Join(taskBaseDir, ".repo")
+	if bareRepo != expectedBareRepo {
+		t.Errorf("expected bare repo path %s, got %s", expectedBareRepo, bareRepo)
 	}
 }
 
@@ -279,13 +291,13 @@ func TestRunCleanupLogic(t *testing.T) {
 	}
 }
 
-func TestEnsureBareRepoCommandConstruction(t *testing.T) {
-	// Test that we construct the correct git commands
+func TestDedicatedRepoCommandConstruction(t *testing.T) {
+	// Test that we construct the correct git commands for dedicated repo clones
 	// We're testing the logic, not actually running git
 
 	repoURL := "https://github.com/test/repo.git"
-	projectName := "test-project"
-	bareDir := filepath.Join("/tmp/repos", projectName+".git")
+	taskBaseDir := "/tmp/trees/test-project--task-abc123de"
+	bareDir := filepath.Join(taskBaseDir, ".repo")
 
 	// When repo exists, we should run: git -C bareDir fetch --all
 	expectedFetchArgs := []string{"-C", bareDir, "fetch", "--all"}
@@ -314,13 +326,14 @@ func TestEnsureBareRepoCommandConstruction(t *testing.T) {
 func TestCreateWorktreeCommandConstruction(t *testing.T) {
 	projectName := "test-project"
 	taskID := "abc123def456"
-	bareDir := filepath.Join("/tmp/repos", projectName+".git")
+	taskBaseDir := filepath.Join("/tmp/trees", projectName+"--task-"+taskID[:8])
+	bareDir := filepath.Join(taskBaseDir, ".repo")
+	worktreePath := filepath.Join(taskBaseDir, "worktree")
 
 	branchName := "task/" + taskID[:8]
-	worktreePath := filepath.Join("/tmp/trees", projectName+"--task-"+taskID[:8])
 
-	// Expected: git -C bareDir worktree add -b branchName worktreePath main
-	expectedArgs := []string{"-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "main"}
+	// Expected: git -C bareDir worktree add -b branchName worktreePath origin/main
+	expectedArgs := []string{"-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, "origin/main"}
 
 	if len(expectedArgs) != 8 {
 		t.Errorf("worktree add command should have 8 args, got %d", len(expectedArgs))
@@ -338,16 +351,18 @@ func TestCreateWorktreeCommandConstruction(t *testing.T) {
 		t.Error("should have -b flag for branch creation")
 	}
 
-	if expectedArgs[7] != "main" {
-		t.Error("should create worktree from main branch")
+	if expectedArgs[7] != "origin/main" {
+		t.Error("should create worktree from origin/main branch")
 	}
 }
 
 func TestUpdateWorktreeCommandConstruction(t *testing.T) {
 	projectName := "test-project"
-	branchName := "task/abc123de"
-	bareDir := filepath.Join("/tmp/repos", projectName+".git")
-	worktreePath := "/tmp/trees/test-project--task-abc123de"
+	taskID := "abc123de"
+	branchName := "task/" + taskID
+	taskBaseDir := filepath.Join("/tmp/trees", projectName+"--task-"+taskID)
+	bareDir := filepath.Join(taskBaseDir, ".repo")
+	worktreePath := filepath.Join(taskBaseDir, "worktree")
 
 	// UpdateWorktree should first fetch: git -C bareDir fetch --all
 	expectedFetchArgs := []string{"-C", bareDir, "fetch", "--all"}
@@ -418,29 +433,23 @@ func TestUpdateWorktreeRemoteRefFormat(t *testing.T) {
 	}
 }
 
-func TestCleanupWorktreeCommandConstruction(t *testing.T) {
+func TestCleanupWorktreeRemovesTaskDirectory(t *testing.T) {
 	projectName := "test-project"
-	worktreePath := "/tmp/trees/test-project--task-abc123de"
-	bareDir := filepath.Join("/tmp/repos", projectName+".git")
+	taskID := "abc123de"
+	taskBaseDir := filepath.Join("/tmp/trees", projectName+"--task-"+taskID)
+	worktreePath := filepath.Join(taskBaseDir, "worktree")
 
-	// Expected: git -C bareDir worktree remove --force worktreePath
-	expectedArgs := []string{"-C", bareDir, "worktree", "remove", "--force", worktreePath}
+	// With the new architecture, CleanupWorktree should remove the entire task directory
+	// which includes both the .repo/ and worktree/ subdirectories
 
-	if len(expectedArgs) != 6 {
-		t.Errorf("worktree remove command should have 6 args, got %d", len(expectedArgs))
+	// Verify the task base dir is derived correctly from worktree path
+	derivedTaskBaseDir := filepath.Dir(worktreePath)
+	if derivedTaskBaseDir != taskBaseDir {
+		t.Errorf("expected task base dir %s, got %s", taskBaseDir, derivedTaskBaseDir)
 	}
 
-	if expectedArgs[0] != "-C" {
-		t.Error("first arg should be -C")
-	}
-
-	if expectedArgs[2] != "worktree" || expectedArgs[3] != "remove" {
-		t.Error("should be 'worktree remove' command")
-	}
-
-	if expectedArgs[4] != "--force" {
-		t.Error("should have --force flag")
-	}
+	// The cleanup operation should use os.RemoveAll on the task base directory
+	// (tested in integration tests, here we just verify path structure)
 }
 
 func TestRebaseOnMainCommandConstruction(t *testing.T) {

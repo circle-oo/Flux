@@ -11,12 +11,12 @@ import (
 	"time"
 )
 
-// WorktreeManager manages git worktrees for task execution
+// WorktreeManager manages git worktrees for task execution.
+// Each task gets a dedicated bare clone + worktree for complete isolation.
 type WorktreeManager struct {
-	reposDir    string // workspaces/repos/
-	treesDir    string // workspaces/trees/
-	githubToken string
-	githubUser  string
+	workspaceBase string // workspaces/ base directory
+	githubToken   string
+	githubUser    string
 }
 
 // WorktreeTask represents a task's worktree state for cleanup decisions
@@ -36,66 +36,64 @@ func NewWorktreeManager(workspaceBase, githubToken, githubUser string) *Worktree
 		absBase = workspaceBase
 	}
 	wm := &WorktreeManager{
-		reposDir:    filepath.Join(absBase, "repos"),
-		treesDir:    filepath.Join(absBase, "trees"),
-		githubToken: githubToken,
-		githubUser:  githubUser,
+		workspaceBase: absBase,
+		githubToken:   githubToken,
+		githubUser:    githubUser,
 	}
-	slog.Debug("worktree manager created", "repos_dir", wm.reposDir, "trees_dir", wm.treesDir)
+	slog.Debug("worktree manager created", "workspace_base", wm.workspaceBase)
 	return wm
 }
 
-// EnsureBareRepo ensures a bare repository exists and is up to date.
-// Uses token-based HTTPS URL when GitHub credentials are available.
-// After cloning, configures remote tracking refs so origin/<branch> works.
-func (wm *WorktreeManager) EnsureBareRepo(repoURL, projectName string) error {
-	slog.Debug("ensuring bare repo", "repo_url", repoURL, "project", projectName)
-	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+// cloneDedicatedRepo creates a dedicated bare clone for a specific task.
+// Returns the path to the bare repository.
+func (wm *WorktreeManager) cloneDedicatedRepo(repoURL, taskBaseDir string) (string, error) {
+	bareDir := filepath.Join(taskBaseDir, ".repo")
 	cloneURL := wm.tokenURL(repoURL)
 
-	// Check if bare repo exists
+	// Check if bare repo already exists
 	if _, err := os.Stat(bareDir); err == nil {
+		// Already exists, fetch latest
+		slog.Debug("updating existing dedicated repo", "path", bareDir)
+
 		// Update remote URL in case credentials changed
 		if cloneURL != repoURL {
 			setURLCmd := exec.Command("git", "-C", bareDir, "remote", "set-url", "origin", cloneURL)
 			_ = setURLCmd.Run()
 		}
-		// Ensure remote tracking refs are configured (upgrade existing bare repos)
-		wm.configureBareFetchRefspec(bareDir)
-		// Repository exists, fetch updates
-		slog.Debug("fetching updates for bare repo", "project", projectName)
-		cmd := exec.Command("git", "-C", bareDir, "fetch", "--all", "--prune")
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to fetch repo: %w: %s", err, output)
+
+		// Fetch latest
+		fetchCmd := exec.Command("git", "-C", bareDir, "fetch", "--all", "--prune")
+		if output, err := fetchCmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("failed to fetch repo: %w: %s", err, output)
 		}
-		slog.Info("bare repo ready", "project", projectName)
-		return nil
+
+		slog.Debug("dedicated repo updated", "path", bareDir)
+		return bareDir, nil
 	}
 
-	// Repository doesn't exist, clone it
-	if err := os.MkdirAll(wm.reposDir, 0755); err != nil {
-		return fmt.Errorf("failed to create repos directory: %w", err)
+	// Create parent directory
+	if err := os.MkdirAll(taskBaseDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create task directory: %w", err)
 	}
 
-	slog.Info("cloning bare repo", "project", projectName)
+	// Clone as bare repository
+	slog.Info("cloning dedicated bare repo", "url", repoURL, "path", bareDir)
 	cmd := exec.Command("git", "clone", "--bare", cloneURL, bareDir)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to clone bare repo: %w: %s", err, output)
+		return "", fmt.Errorf("failed to clone bare repo: %w: %s", err, output)
 	}
 
-	// Configure remote tracking refs so origin/<branch> works in worktrees.
-	// By default, bare clones use +refs/heads/*:refs/heads/* which doesn't
-	// create refs/remotes/origin/* — causing "invalid reference: origin/main".
+	// Configure remote tracking refs so origin/<branch> works in worktrees
 	wm.configureBareFetchRefspec(bareDir)
 
-	// Fetch again with the new refspec to populate refs/remotes/origin/*
+	// Fetch with the new refspec to populate refs/remotes/origin/*
 	fetchCmd := exec.Command("git", "-C", bareDir, "fetch", "--all", "--prune")
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		slog.Warn("post-clone fetch failed", "error", err, "output", string(output))
 	}
 
-	slog.Info("bare repo ready", "project", projectName)
-	return nil
+	slog.Info("dedicated repo ready", "path", bareDir)
+	return bareDir, nil
 }
 
 // configureBareFetchRefspec sets the fetch refspec on a bare repo so that
@@ -206,58 +204,40 @@ func (wm *WorktreeManager) tokenURL(repoURL string) string {
 	return fmt.Sprintf("https://%s:%s@github.com/%s/%s.git", user, wm.githubToken, owner, repo)
 }
 
-// CreateWorktree creates a new worktree for a task
-func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreePath string, branchName string, err error) {
-	slog.Info("creating worktree", "project", projectName, "task_id", taskID, "branch", fmt.Sprintf("task/%s", taskID[:8]))
-	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+// CreateWorktree creates a new dedicated bare clone + worktree for a task.
+// Each task gets complete isolation with its own git repository clone.
+// Returns the worktree path (where Claude Code runs) and the branch name.
+func (wm *WorktreeManager) CreateWorktree(projectName, taskID, repoURL string) (worktreePath string, branchName string, err error) {
 	branchName = fmt.Sprintf("task/%s", taskID[:8])
-	worktreePath = filepath.Join(wm.treesDir, fmt.Sprintf("%s--task-%s", projectName, taskID[:8]))
+	taskBaseDir := filepath.Join(wm.workspaceBase, "trees", fmt.Sprintf("%s--task-%s", projectName, taskID[:8]))
+	worktreePath = filepath.Join(taskBaseDir, "worktree")
 
-	// Ensure trees directory exists
-	if err := os.MkdirAll(wm.treesDir, 0755); err != nil {
-		return "", "", fmt.Errorf("failed to create trees directory: %w", err)
-	}
+	slog.Info("creating dedicated worktree", "project", projectName, "task_id", taskID, "branch", branchName, "path", worktreePath)
 
-	// Clean up ANY existing worktree using this branch (may be at old wrong paths)
-	wm.cleanupBranchWorktree(bareDir, branchName)
-
-	// Clean up stale worktree directory if it still exists
-	if _, statErr := os.Stat(worktreePath); statErr == nil {
-		slog.Info("removing stale worktree directory", "path", worktreePath)
-		if err := os.RemoveAll(worktreePath); err != nil {
-			return "", "", fmt.Errorf("failed to remove stale worktree directory: %w", err)
+	// Clean up any existing task directory (retry scenario)
+	if _, err := os.Stat(taskBaseDir); err == nil {
+		slog.Info("removing existing task directory for clean retry", "path", taskBaseDir)
+		if err := os.RemoveAll(taskBaseDir); err != nil {
+			return "", "", fmt.Errorf("failed to remove existing task directory: %w", err)
 		}
-		pruneCmd := exec.Command("git", "-C", bareDir, "worktree", "prune")
-		_ = pruneCmd.Run()
 	}
 
-	// Fetch latest refs to ensure we branch from the newest main
-	fetchCmd := exec.Command("git", "-C", bareDir, "fetch", "--all", "--prune")
-	if output, err := fetchCmd.CombinedOutput(); err != nil {
-		slog.Warn("pre-branch fetch failed", "error", err, "output", string(output))
+	// Create dedicated bare clone for this task
+	bareDir, err := wm.cloneDedicatedRepo(repoURL, taskBaseDir)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to clone dedicated repo: %w", err)
 	}
 
 	// Detect the default branch (main, master, etc.)
 	defaultBranch := wm.detectDefaultBranch(bareDir)
 	startPoint := "origin/" + defaultBranch
 
-	// Check if branch already exists (from a previous failed attempt / retry)
-	checkCmd := exec.Command("git", "-C", bareDir, "rev-parse", "--verify", "refs/heads/"+branchName)
-	var cmd *exec.Cmd
-	if checkCmd.Run() == nil {
-		// Branch exists — delete it and recreate from latest default branch for clean retry
-		slog.Info("deleting stale branch for clean retry", "branch", branchName)
-		delCmd := exec.Command("git", "-C", bareDir, "branch", "-D", branchName)
-		_ = delCmd.Run()
-		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, startPoint)
-	} else {
-		// Branch doesn't exist — create new branch from latest default branch
-		cmd = exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, startPoint)
-	}
+	// Create worktree from the dedicated bare repo
+	cmd := exec.Command("git", "-C", bareDir, "worktree", "add", "-b", branchName, worktreePath, startPoint)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", "", fmt.Errorf("failed to create worktree: %w: %s", err, output)
 	}
-	slog.Debug("worktree created from latest remote default branch", "path", worktreePath, "start_point", startPoint)
+	slog.Debug("worktree created from dedicated repo", "path", worktreePath, "start_point", startPoint)
 
 	// Configure git user and token-based push URL in the worktree
 	if err := wm.configureWorktreeGit(worktreePath); err != nil {
@@ -274,15 +254,19 @@ func (wm *WorktreeManager) CreateWorktree(projectName, taskID string) (worktreeP
 	}
 	slog.Debug("claude settings configured", "path", worktreePath)
 
-	slog.Info("worktree ready", "project", projectName, "branch", branchName, "path", worktreePath)
+	slog.Info("dedicated worktree ready", "project", projectName, "branch", branchName, "path", worktreePath)
 	return worktreePath, branchName, nil
 }
 
 // UpdateWorktree fetches the latest remote refs and resets the worktree to the
 // latest commit on its branch. This ensures the executor always starts a task
 // with the most recent code, even if commits were pushed externally.
-func (wm *WorktreeManager) UpdateWorktree(projectName, worktreePath, branchName string) error {
-	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+func (wm *WorktreeManager) UpdateWorktree(worktreePath, branchName string) error {
+	// Determine the bare repo path from the worktree path
+	// worktreePath is {base}/trees/{project}--task-{id}/worktree
+	// bareDir is {base}/trees/{project}--task-{id}/.repo
+	taskBaseDir := filepath.Dir(worktreePath)
+	bareDir := filepath.Join(taskBaseDir, ".repo")
 
 	// Fetch latest from remote into the bare repo
 	fetchCmd := exec.Command("git", "-C", bareDir, "fetch", "--all")
@@ -343,85 +327,29 @@ func (wm *WorktreeManager) configureWorktreeGit(worktreePath string) error {
 	return nil
 }
 
-// cleanupBranchWorktree finds and removes any existing worktree checked out on the given branch.
-// This handles stale worktrees at old paths (e.g. from before the absolute path fix).
-func (wm *WorktreeManager) cleanupBranchWorktree(bareDir, branchName string) {
-	// List all worktrees and find the one using this branch
-	listCmd := exec.Command("git", "-C", bareDir, "worktree", "list", "--porcelain")
-	output, err := listCmd.CombinedOutput()
-	if err != nil {
-		return
-	}
+// No longer needed - each task has its own dedicated repo
 
-	lines := strings.Split(string(output), "\n")
-	var currentPath string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			currentPath = ""
-			continue
-		}
-		if strings.HasPrefix(line, "worktree ") {
-			currentPath = strings.TrimPrefix(line, "worktree ")
-		} else if strings.HasPrefix(line, "branch refs/heads/") {
-			branch := strings.TrimPrefix(line, "branch refs/heads/")
-			if branch == branchName && currentPath != "" && currentPath != bareDir {
-				slog.Info("cleaning up existing worktree for branch", "branch", branchName, "path", currentPath)
-				// Try git worktree remove
-				rmCmd := exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", currentPath)
-				if rmOut, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
-					slog.Warn("git worktree remove failed, removing directory manually", "error", rmErr, "output", string(rmOut))
-					_ = os.RemoveAll(currentPath)
-				}
-			}
-		}
-	}
-
-	// Prune any dangling references
-	pruneCmd := exec.Command("git", "-C", bareDir, "worktree", "prune")
-	_ = pruneCmd.Run()
-}
-
-// FindByBranch finds a worktree by its branch name
+// FindByBranch finds a worktree by its branch name.
+// With the new architecture, we can derive the path directly from the task ID.
 func (wm *WorktreeManager) FindByBranch(projectName, branchName string) (string, error) {
-	slog.Debug("searching for worktree by branch", "project", projectName, "branch", branchName)
-	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+	// Branch format: task/{taskID[:8]}
+	// Extract task ID from branch name
+	if !strings.HasPrefix(branchName, "task/") {
+		return "", fmt.Errorf("invalid branch name format: %s", branchName)
+	}
+	taskIDPrefix := strings.TrimPrefix(branchName, "task/")
 
-	cmd := exec.Command("git", "-C", bareDir, "worktree", "list", "--porcelain")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to list worktrees: %w: %s", err, output)
+	// Construct expected worktree path
+	taskBaseDir := filepath.Join(wm.workspaceBase, "trees", fmt.Sprintf("%s--task-%s", projectName, taskIDPrefix))
+	worktreePath := filepath.Join(taskBaseDir, "worktree")
+
+	// Verify it exists
+	if _, err := os.Stat(worktreePath); err != nil {
+		return "", fmt.Errorf("worktree not found for branch %s: %w", branchName, err)
 	}
 
-	// Parse porcelain output
-	// Format:
-	// worktree /path/to/worktree
-	// HEAD abcd1234...
-	// branch refs/heads/branch-name
-	// [blank line between worktrees]
-
-	lines := strings.Split(string(output), "\n")
-	var currentWorktree string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			currentWorktree = ""
-			continue
-		}
-
-		if strings.HasPrefix(line, "worktree ") {
-			currentWorktree = strings.TrimPrefix(line, "worktree ")
-		} else if strings.HasPrefix(line, "branch ") {
-			branch := strings.TrimPrefix(line, "branch refs/heads/")
-			if branch == branchName && currentWorktree != "" {
-				slog.Debug("worktree found", "branch", branchName, "path", currentWorktree)
-				return currentWorktree, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("worktree not found for branch: %s", branchName)
+	slog.Debug("worktree found", "branch", branchName, "path", worktreePath)
+	return worktreePath, nil
 }
 
 // RebaseOnMain rebases the worktree's branch onto the default branch to resolve conflicts.
@@ -466,17 +394,20 @@ func (wm *WorktreeManager) RebaseOnMain(worktreePath string) error {
 	return nil
 }
 
-// CleanupWorktree removes a worktree
+// CleanupWorktree removes the entire task directory (worktree + dedicated bare repo).
 func (wm *WorktreeManager) CleanupWorktree(projectName, worktreePath string) error {
-	slog.Info("cleaning up worktree", "project", projectName, "path", worktreePath)
-	bareDir := filepath.Join(wm.reposDir, projectName+".git")
+	// worktreePath is {base}/trees/{project}--task-{id}/worktree
+	// We want to remove the entire task directory: {base}/trees/{project}--task-{id}/
+	taskBaseDir := filepath.Dir(worktreePath)
 
-	cmd := exec.Command("git", "-C", bareDir, "worktree", "remove", "--force", worktreePath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to remove worktree: %w: %s", err, output)
+	slog.Info("cleaning up task directory", "project", projectName, "path", taskBaseDir)
+
+	// Remove the entire task directory (includes .repo/ and worktree/)
+	if err := os.RemoveAll(taskBaseDir); err != nil {
+		return fmt.Errorf("failed to remove task directory: %w", err)
 	}
 
-	slog.Info("worktree cleaned up", "project", projectName)
+	slog.Info("task directory cleaned up", "project", projectName, "path", taskBaseDir)
 	return nil
 }
 
