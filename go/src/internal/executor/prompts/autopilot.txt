@@ -86,6 +86,41 @@ Before writing any code, state your plan clearly:
 - Run tests to verify your changes work
 - Fix any errors before finishing
 
+### 6. SUMMARIZE
+After completing the task, provide a concise task summary with the following structure:
+
+```
+## Task Summary
+
+### What Was Accomplished
+[2-3 sentences describing what was implemented, fixed, or changed]
+
+### Key Changes
+- File: path/to/file.ext - [brief description of changes]
+- File: path/to/other.ext - [brief description of changes]
+[List 3-5 most important files changed]
+
+### Technical Decisions
+[1-2 key technical choices or trade-offs made, if any]
+
+### Verification
+- Build: [PASSED/FAILED/SKIPPED]
+- Tests: [PASSED/FAILED/SKIPPED]
+[Any important test results or metrics]
+
+### Notes
+[Any important caveats, follow-up items, or observations - optional]
+```
+
+**Summary Guidelines:**
+- Keep it concise but informative (aim for 150-300 words total)
+- Focus on "what" and "why", not just implementation details
+- Highlight important decisions that future developers should know
+- Include actual file paths (use file:line format for specific references)
+- Be specific about verification results (don't just say "tests passed" - mention what was tested)
+- If the task was decomposed, note that clearly
+- If no code changes were made, explain why
+
 ## Rules
 - Follow existing code conventions strictly
 - Write or update tests as needed
