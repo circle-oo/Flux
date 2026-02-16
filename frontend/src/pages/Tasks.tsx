@@ -699,7 +699,7 @@ export default function Tasks() {
                       )}
 
                       {/* Meta row */}
-                      <div className="flex items-center gap-3 text-xs text-slate-500">
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
                         {project && (
                           <span className="text-slate-400">
                             {project.name}
