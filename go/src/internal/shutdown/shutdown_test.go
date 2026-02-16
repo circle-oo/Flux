@@ -291,3 +291,62 @@ func TestGracefulShutdown_ContextCanceled(t *testing.T) {
 		t.Errorf("expected status=RETRY after context cancel, got %s", status)
 	}
 }
+
+func TestGracefulShutdown_MixedPodTypes(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	discord := notifier.NewDiscord("")
+
+	// Insert tasks
+	taskID1 := uuid.New().String()
+	taskID2 := uuid.New().String()
+	taskID3 := uuid.New().String()
+
+	for _, taskID := range []string{taskID1, taskID2, taskID3} {
+		_, err := db.Exec(`
+			INSERT INTO tasks (id, title, type, status)
+			VALUES (?, ?, ?, ?)
+		`, taskID, "Test Task", "IMPLEMENTATION", "RUNNING")
+		if err != nil {
+			t.Fatalf("insert task: %v", err)
+		}
+	}
+
+	// Create mix of pods: some that stop gracefully, some that don't
+	pods := []Pod{
+		newMockPod(taskID1, 100*time.Millisecond), // stops quickly
+		newMockPod(taskID2, 50*time.Millisecond),  // stops quickly
+		newMockPod(taskID3, 999*time.Hour),        // never stops
+	}
+
+	cfg := &config.ShutdownConfig{
+		PodGracePeriod: 500 * time.Millisecond,
+	}
+
+	ctx := context.Background()
+	err := GracefulShutdown(ctx, cfg, pods, db, discord)
+	if err != nil {
+		t.Fatalf("GracefulShutdown failed: %v", err)
+	}
+
+	// Verify first two pods stopped gracefully (tasks still RUNNING)
+	for _, taskID := range []string{taskID1, taskID2} {
+		var status string
+		err = db.QueryRow("SELECT status FROM tasks WHERE id=?", taskID).Scan(&status)
+		if err != nil {
+			t.Fatalf("query task %s: %v", taskID, err)
+		}
+		if status != "RUNNING" {
+			t.Errorf("task %s: expected status=RUNNING (graceful stop), got %s", taskID, status)
+		}
+	}
+
+	// Verify third pod was force-killed (task moved to RETRY)
+	var status string
+	err = db.QueryRow("SELECT status FROM tasks WHERE id=?", taskID3).Scan(&status)
+	if err != nil {
+		t.Fatalf("query task %s: %v", taskID3, err)
+	}
+	if status != "RETRY" {
+		t.Errorf("task %s: expected status=RETRY (force kill), got %s", taskID3, status)
+	}
+}
