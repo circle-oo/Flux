@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useGoalStore } from '../stores/goalStore'
+import PageHeader from '../components/PageHeader'
+import LoadingState from '../components/LoadingState'
+import EmptyState from '../components/EmptyState'
 
 export default function Goals() {
   const { goals, currentGoal, isLoading, fetchGoals, createGoal, activateGoal } =
@@ -54,19 +57,18 @@ export default function Goals() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 mb-2">Goals</h1>
-          <p className="text-sm sm:text-base text-slate-400">Manage system goals and objectives</p>
-        </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="btn-primary whitespace-nowrap"
-        >
-          {showForm ? 'Cancel' : '+ New Goal'}
-        </button>
-      </div>
+      <PageHeader
+        title="Goals"
+        subtitle="Manage system goals and objectives"
+        action={
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="btn-primary whitespace-nowrap"
+          >
+            {showForm ? 'Cancel' : '+ New Goal'}
+          </button>
+        }
+      />
 
       {/* Create Form */}
       {showForm && (
@@ -76,8 +78,9 @@ export default function Goals() {
           </h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="label">Title</label>
+              <label htmlFor="goal-title" className="label">Title</label>
               <input
+                id="goal-title"
                 type="text"
                 value={formData.title}
                 onChange={(e) =>
@@ -85,11 +88,13 @@ export default function Goals() {
                 }
                 className="input"
                 required
+                autoFocus
               />
             </div>
             <div>
-              <label className="label">Description</label>
+              <label htmlFor="goal-description" className="label">Description</label>
               <textarea
+                id="goal-description"
                 value={formData.description}
                 onChange={(e) =>
                   setFormData({ ...formData, description: e.target.value })
@@ -99,10 +104,11 @@ export default function Goals() {
               />
             </div>
             <div>
-              <label className="label">
+              <label htmlFor="goal-priorities" className="label">
                 Priorities (comma-separated)
               </label>
               <input
+                id="goal-priorities"
                 type="text"
                 value={formData.priorities}
                 onChange={(e) =>
@@ -113,10 +119,11 @@ export default function Goals() {
               />
             </div>
             <div>
-              <label className="label">
+              <label htmlFor="goal-metrics" className="label">
                 Metrics (comma-separated)
               </label>
               <input
+                id="goal-metrics"
                 type="text"
                 value={formData.metrics}
                 onChange={(e) =>
@@ -181,11 +188,9 @@ export default function Goals() {
       <div className="space-y-4">
         <h2 className="text-xl font-semibold text-slate-100">All Goals</h2>
         {isLoading ? (
-          <div className="text-slate-400">Loading...</div>
+          <LoadingState message="Loading goals..." />
         ) : goals.length === 0 ? (
-          <div className="card p-6 text-center text-slate-400">
-            No goals yet. Create one to get started.
-          </div>
+          <EmptyState title="No goals yet" message="Create one to get started." />
         ) : (
           <div className="space-y-3">
             {goals.map((goal) => (

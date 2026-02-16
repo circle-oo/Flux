@@ -7,6 +7,8 @@ import { StatusBadge } from '../components/StatusBadge'
 import InfoRow from '../components/InfoRow'
 import ContentRenderer from '../components/ContentRenderer'
 import MarkdownRenderer from '../components/MarkdownRenderer'
+import BackButton from '../components/BackButton'
+import LoadingState from '../components/LoadingState'
 import { formatDate, formatDuration, formatCost, formatTokens, prStatusTextColor } from '../lib/utils'
 
 export default function TaskDetail() {
@@ -78,8 +80,8 @@ export default function TaskDetail() {
 
   if (loading) {
     return (
-      <div className="p-8">
-        <div className="text-slate-400">Loading task...</div>
+      <div className="p-4 sm:p-6 lg:p-8">
+        <LoadingState message="Loading task..." />
       </div>
     )
   }
@@ -87,7 +89,7 @@ export default function TaskDetail() {
   if (error || !task) {
     return (
       <div className="p-8">
-        <div className="text-red-400">Error: {error || 'Task not found'}</div>
+        <div className="text-red-400" role="alert">Error: {error || 'Task not found'}</div>
         <button onClick={() => navigate('/tasks')} className="mt-4 text-blue-400 hover:underline">
           Back to Tasks
         </button>
@@ -102,12 +104,7 @@ export default function TaskDetail() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <button
-            onClick={() => navigate('/tasks')}
-            className="text-sm text-slate-500 hover:text-slate-300 mb-2 inline-block"
-          >
-            &larr; Back to Tasks
-          </button>
+          <BackButton to="/tasks" label="Back to Tasks" />
           <h1 className="text-2xl font-bold text-slate-100 mb-2">{task.title}</h1>
           <div className="flex items-center gap-2">
             <StatusBadge status={task.status} />
@@ -117,7 +114,7 @@ export default function TaskDetail() {
         </div>
         <div className="flex gap-2">
           {(task.status === 'FAILED' || task.status === 'RETRY') && (
-            <button onClick={handleRetry} className="px-4 py-2 rounded text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors">
+            <button onClick={handleRetry} className="btn-primary">
               Retry
             </button>
           )}
@@ -154,12 +151,14 @@ export default function TaskDetail() {
               onClick={() => setSubtasksExpanded(!subtasksExpanded)}
               className="text-slate-400 hover:text-slate-200 transition-colors"
               aria-label={subtasksExpanded ? 'Collapse subtasks' : 'Expand subtasks'}
+              aria-expanded={subtasksExpanded}
             >
               <svg
                 className={`w-5 h-5 transition-transform ${subtasksExpanded ? 'rotate-180' : ''}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
               >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
@@ -167,7 +166,7 @@ export default function TaskDetail() {
           </div>
           {subtasksExpanded ? (
             <>
-              <div className="w-full bg-slate-700 rounded-full h-2 mb-4">
+              <div className="w-full bg-slate-700 rounded-full h-2 mb-4" role="progressbar" aria-valuenow={completedCount} aria-valuemin={0} aria-valuemax={subtasks.length}>
                 <div
                   className="bg-green-500 h-2 rounded-full transition-all"
                   style={{ width: `${(completedCount / subtasks.length) * 100}%` }}
@@ -175,9 +174,10 @@ export default function TaskDetail() {
               </div>
               <div className="space-y-2">
                 {subtasks.map((sub) => (
-                  <div
+                  <button
                     key={sub.id}
-                    className="flex items-center justify-between p-3 bg-slate-800 rounded-lg hover:bg-slate-750 cursor-pointer transition-colors"
+                    type="button"
+                    className="flex items-center justify-between p-3 bg-slate-800 rounded-lg hover:bg-slate-750 transition-colors w-full text-left"
                     onClick={() => navigate(`/tasks/${sub.id}`)}
                   >
                     <div className="flex items-center gap-2 min-w-0">
@@ -185,7 +185,7 @@ export default function TaskDetail() {
                       <span className="text-sm text-slate-200 truncate">{sub.title}</span>
                     </div>
                     <span className="text-xs text-slate-500 shrink-0 ml-2">P{sub.priority}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </>
@@ -327,7 +327,7 @@ export default function TaskDetail() {
 
       {/* Error */}
       {task.error_log && (
-        <div className="card p-6 border border-red-600/50">
+        <div className="card p-6 border border-red-600/50" role="alert">
           <h2 className="text-lg font-semibold text-red-400 mb-3">Error</h2>
           <pre className="text-sm text-red-200 bg-red-900/20 rounded p-4 overflow-auto whitespace-pre-wrap">
             {task.error_log}

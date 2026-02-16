@@ -122,7 +122,7 @@ export default function TaskListItem({
           {(task.status === 'FAILED' || task.status === 'RETRY') && (
             <button
               onClick={() => onRetry(task.id, task.title)}
-              className="px-3 py-1.5 rounded text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+              className="btn-primary !py-1.5 !px-3 !min-h-0"
             >
               Retry
             </button>
@@ -138,7 +138,7 @@ export default function TaskListItem({
           {(task.status === 'COMPLETED' || task.status === 'FAILED' || task.status === 'CANCELLED') && (
             <button
               onClick={() => onArchive(task.id, task.title)}
-              className="px-3 py-1.5 rounded text-sm font-medium bg-slate-600 text-slate-300 hover:bg-slate-500 transition-colors"
+              className="btn-secondary !py-1.5 !px-3 !min-h-0"
             >
               Archive
             </button>
@@ -148,7 +148,7 @@ export default function TaskListItem({
 
       {/* Error */}
       {task.error_log && (
-        <div className="mt-3 p-3 bg-red-900/30 border border-red-600 rounded text-sm text-red-200 line-clamp-3">
+        <div className="mt-3 p-3 bg-red-900/30 border border-red-600 rounded text-sm text-red-200 line-clamp-3" role="alert">
           <strong>Error:</strong> {task.error_log}
         </div>
       )}
@@ -160,9 +160,10 @@ export default function TaskListItem({
             <div className="text-xs text-slate-500">Loading subtasks...</div>
           ) : subtasks && subtasks.length > 0 ? (
             subtasks.map((subtask) => (
-              <div
+              <button
+                type="button"
                 key={subtask.id}
-                className="bg-slate-800/50 border border-slate-700 rounded p-3 cursor-pointer hover:border-slate-600 transition-colors"
+                className="w-full text-left bg-slate-800/50 border border-slate-700 rounded p-3 cursor-pointer hover:border-slate-600 transition-colors"
                 onClick={(e) => {
                   e.stopPropagation()
                   navigate(`/tasks/${subtask.id}`)
@@ -189,7 +190,7 @@ export default function TaskListItem({
                     </div>
                   </div>
                 </div>
-              </div>
+              </button>
             ))
           ) : (
             <div className="text-xs text-slate-500">No subtasks found</div>

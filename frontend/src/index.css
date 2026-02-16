@@ -61,6 +61,14 @@
     @apply badge bg-slate-600 text-white;
   }
 
+  .badge-purple {
+    @apply badge bg-purple-600 text-white;
+  }
+
+  .badge-muted {
+    @apply badge bg-slate-500 text-white;
+  }
+
   .input {
     @apply w-full px-3 py-2.5 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent touch-manipulation min-h-[44px] text-base;
   }
