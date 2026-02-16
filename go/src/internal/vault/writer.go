@@ -2,19 +2,19 @@ package vault
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/circle-oo/flux/internal/notesmd"
 )
 
 // WriteMode defines how content should be written to vault
 type WriteMode int
 
 const (
-	ModeCreate WriteMode = iota // Create new file, error if exists
-	ModeAppend                  // Append to existing file or create new
-	ModeReplace                 // Replace existing file or create new
+	ModeCreate  WriteMode = iota // Create new file, error if exists
+	ModeAppend                   // Append to existing file or create new
+	ModeReplace                  // Replace existing file or create new
 )
 
 // WriteRequest represents a queued write operation
@@ -25,18 +25,18 @@ type WriteRequest struct {
 	Done    chan error
 }
 
-// Writer handles asynchronous writes to the vault
+// Writer handles asynchronous writes to the vault via notesmd-cli
 type Writer struct {
-	basePath string
+	client   *notesmd.Client
 	requests chan WriteRequest
 	wg       sync.WaitGroup
 	done     chan struct{}
 }
 
-// NewWriter creates a new vault writer with background processing
-func NewWriter(basePath string) *Writer {
+// NewWriter creates a new vault writer backed by notesmd-cli.
+func NewWriter(client *notesmd.Client) *Writer {
 	w := &Writer{
-		basePath: basePath,
+		client:   client,
 		requests: make(chan WriteRequest, 100),
 		done:     make(chan struct{}),
 	}
@@ -48,7 +48,7 @@ func NewWriter(basePath string) *Writer {
 func (w *Writer) run() {
 	for req := range w.requests {
 		w.wg.Add(1)
-		err := w.atomicWrite(req)
+		err := w.execute(req)
 		req.Done <- err
 		close(req.Done)
 		w.wg.Done()
@@ -82,39 +82,21 @@ func (w *Writer) Close() {
 	close(w.done)
 }
 
-// atomicWrite performs the actual write operation
-func (w *Writer) atomicWrite(req WriteRequest) error {
-	fullPath := filepath.Join(w.basePath, req.Path)
-
-	// Ensure directory exists
-	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+// execute performs the write operation via notesmd-cli
+func (w *Writer) execute(req WriteRequest) error {
+	// Strip .md extension from path — notesmd-cli adds it automatically
+	path := req.Path
+	if len(path) > 3 && path[len(path)-3:] == ".md" {
+		path = path[:len(path)-3]
 	}
 
 	switch req.Mode {
 	case ModeCreate:
-		// Check if file exists
-		if _, err := os.Stat(fullPath); err == nil {
-			return fmt.Errorf("file already exists: %s", fullPath)
-		}
-		return os.WriteFile(fullPath, []byte(req.Content), 0644)
-
+		return w.client.Create(path, req.Content)
 	case ModeAppend:
-		f, err := os.OpenFile(fullPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to open file for append: %w", err)
-		}
-		defer f.Close()
-
-		if _, err := f.WriteString(req.Content); err != nil {
-			return fmt.Errorf("failed to append content: %w", err)
-		}
-		return nil
-
+		return w.client.Append(path, req.Content)
 	case ModeReplace:
-		return os.WriteFile(fullPath, []byte(req.Content), 0644)
-
+		return w.client.Overwrite(path, req.Content)
 	default:
 		return fmt.Errorf("unknown write mode: %d", req.Mode)
 	}

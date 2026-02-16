@@ -1,4 +1,4 @@
-.PHONY: build build-backend clean dev test frontend frontend-dev lint
+.PHONY: build build-backend clean dev test frontend frontend-dev lint proto install-services uninstall-services check-notesmd
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
@@ -47,6 +47,20 @@ frontend-safe:
 
 frontend-dev:
 	cd frontend && npm run dev
+
+proto:
+	buf generate proto
+	@echo "Generated: go/src/gen (Go), gen/ts (TypeScript), gen/python (Python)"
+
+install-services:
+	bash deploy/install-launchd.sh
+
+uninstall-services:
+	bash deploy/install-launchd.sh --uninstall
+
+check-notesmd:
+	@command -v notesmd-cli >/dev/null 2>&1 || (echo "ERROR: notesmd-cli not installed. Run: brew install yakitrak/yakitrak/notesmd-cli" && exit 1)
+	@echo "notesmd-cli: OK"
 
 lint:
 	cd go/src && go vet ./...

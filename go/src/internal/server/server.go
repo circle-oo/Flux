@@ -102,6 +102,23 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
+// setupRoutes registers all HTTP handlers.
+//
+// Flux exposes four API surfaces that intentionally coexist:
+//
+//   - REST API (/api/*) — Primary for the full orchestration UI: goals, tasks,
+//     projects, PRs, deploy, pods, insights. Backed by SQLite via models.*Store.
+//
+//   - Connect-RPC (/flux.v1.FluxService/*) — Typed API for agent task creation
+//     and streaming (SSE). Mounted in main.go via fluxv1connect handler. Backed
+//     by the in-memory store (internal/store). Will unify with SQLite in Phase 3.
+//
+//   - Internal API (/internal/*) — Localhost-only endpoints for pod-to-manager
+//     coordination: task claiming, status reporting, pod registration.
+//
+//   - WebSocket (/ws/events) — Deprecated; replaced by Connect-RPC SSE for new
+//     consumers. Still load-bearing for the Dashboard (connection badge) and
+//     TaskDetail (refresh triggers). Remove once the UI fully migrates to SSE.
 func (s *Server) setupRoutes() {
 	// Health endpoint (no auth)
 	s.mux.HandleFunc("GET /health", s.handleHealth)
@@ -265,6 +282,11 @@ func serverError(w http.ResponseWriter, msg string, args ...any) {
 	writeError(w, http.StatusInternalServerError, errInternalServer)
 }
 
+// Mux returns the HTTP mux for mounting additional handlers (e.g. Connect-RPC).
+func (s *Server) Mux() *http.ServeMux {
+	return s.mux
+}
+
 // Hub returns the WebSocket hub for external wiring (e.g. log broadcasting).
 func (s *Server) Hub() *WebSocketHub {
 	return s.ws
@@ -273,6 +295,11 @@ func (s *Server) Hub() *WebSocketHub {
 // PodRegistry returns the pod registry for external access (e.g. executor registration).
 func (s *Server) PodRegistry() *PodRegistry {
 	return s.podRegistry
+}
+
+// WrapHandler replaces the server's HTTP handler (e.g. to add h2c or CORS).
+func (s *Server) WrapHandler(wrap func(http.Handler) http.Handler) {
+	s.server.Handler = wrap(s.server.Handler)
 }
 
 // SetLogHandler sets the log broadcast handler so the server can serve recent logs.

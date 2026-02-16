@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useGoalStore } from '../stores/goalStore'
+import { fluxClient } from '../lib/flux-client'
 import PageHeader from '../components/PageHeader'
 import TaskCreateForm from '../components/TaskCreateForm'
 import TaskFilterBar, { SortOption, statusFilterGroups } from '../components/TaskFilterBar'
@@ -71,6 +72,17 @@ export default function Tasks() {
     fetchTasks()
     fetchProjects()
     fetchCurrentGoal()
+
+    // Connect-RPC: parallel listTasks call (additive, logged for comparison)
+    fluxClient.listTasks({}).then((resp) => {
+      if (import.meta.env.DEV) {
+        console.log('[Connect-RPC] ListTasks:', resp.tasks.length, 'tasks')
+      }
+    }).catch((err) => {
+      if (import.meta.env.DEV) {
+        console.warn('[Connect-RPC] ListTasks failed (expected during migration):', err)
+      }
+    })
   }, [fetchTasks, fetchProjects, fetchCurrentGoal])
 
   useEffect(() => {

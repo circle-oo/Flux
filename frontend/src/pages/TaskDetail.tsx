@@ -12,6 +12,7 @@ import TaskExecution from '../components/TaskExecution'
 import TaskOutput from '../components/TaskOutput'
 import { useConfirm } from '../hooks/useConfirm'
 import { useToast } from '../components/Toast'
+import { useTaskStream } from '../hooks/useTaskStream'
 
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>()
@@ -28,6 +29,16 @@ export default function TaskDetail() {
   const [activeTab, setActiveTab] = useState<'overview' | 'execution' | 'output'>('overview')
   const { confirm, dialog } = useConfirm()
   const { toast } = useToast()
+
+  // Connect-RPC SSE stream for real-time task events (additive — WS still active)
+  const { events: streamEvents, isRunning: streamRunning } = useTaskStream(id)
+
+  // Refresh task when stream delivers terminal events
+  useEffect(() => {
+    if (!streamRunning && streamEvents.length > 0 && id) {
+      refreshTask()
+    }
+  }, [streamRunning, streamEvents.length, id])
 
   const refreshTask = useCallback(() => {
     if (!id) return

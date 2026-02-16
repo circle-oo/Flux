@@ -11,10 +11,10 @@ import (
 	"text/template"
 	"time"
 
+	fluxv1 "github.com/circle-oo/flux/gen/flux/v1"
+	"github.com/circle-oo/flux/internal/agent"
 	"github.com/circle-oo/flux/internal/apiclient"
-	"github.com/circle-oo/flux/internal/claudecli"
 	"github.com/circle-oo/flux/internal/config"
-	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
 	"github.com/circle-oo/flux/internal/notifier"
 )
@@ -32,13 +32,13 @@ var triageTemplate = template.Must(template.ParseFS(triagePromptFS, "triage.txt"
 // Triage determines priority, analysis, rewritten description, and
 // the recommended model for task execution.
 type Triager struct {
-	id       string
-	config   *config.Config
-	claude   *claudecli.Runner
-	client   *apiclient.Client
-	notifier *notifier.Discord
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	id          string
+	config      *config.Config
+	agentClient *agent.Client
+	client      *apiclient.Client
+	notifier    *notifier.Discord
+	stopCh      chan struct{}
+	stopOnce    sync.Once
 
 	mu            sync.Mutex // guards currentTaskID and running
 	currentTaskID string
@@ -46,11 +46,11 @@ type Triager struct {
 }
 
 // New creates a new Triager.
-func New(id string, cfg *config.Config, discord *notifier.Discord) *Triager {
+func New(id string, cfg *config.Config, discord *notifier.Discord, ac *agent.Client) *Triager {
 	return &Triager{
 		id:            id,
 		config:        cfg,
-		claude:        claudecli.NewRunner(&cfg.Executor),
+		agentClient:   ac,
 		client:        apiclient.NewClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
 		notifier:      discord,
 		stopCh:        make(chan struct{}),
@@ -71,8 +71,8 @@ func (t *Triager) Run(ctx context.Context) {
 		t.mu.Unlock()
 	}()
 
-	// Smoke test
-	if err := t.smokeTest(); err != nil {
+	// Smoke test: verify agent manager is reachable
+	if err := t.smokeTest(ctx); err != nil {
 		slog.Error("triager smoke test failed", "error", err, "component", component)
 		_ = t.notifier.Send(notifier.LevelCritical,
 			fmt.Sprintf("Triager %s: smoke test failed: %v", t.id, err))
@@ -138,7 +138,7 @@ func (t *Triager) processNext(ctx context.Context) {
 	slog.Info("triaging task", "task_id", task.ID, "title", task.Title, "model", model, "component", component)
 
 	start := time.Now()
-	result, err := TriageTask(ctx, t.claude, t.client, task, model)
+	result, err := t.triageTask(ctx, task, model)
 	if err != nil {
 		slog.Warn("triage failed, promoting with original description",
 			"task_id", task.ID, "title", task.Title, "error", err, "component", component)
@@ -153,11 +153,6 @@ func (t *Triager) processNext(ctx context.Context) {
 	slog.Info("triage completed",
 		"task_id", task.ID, "duration", time.Since(start), "component", component)
 
-	slog.Info("reporting triage results",
-		"task_id", task.ID, "has_analysis", result.Analysis != "",
-		"analysis_len", len(result.Analysis), "priority", result.Priority,
-		"has_title", result.Title != "", "component", component)
-
 	if reportErr := t.client.ReportTriaged(task.ID, result.Analysis, result.Description, result.Title, result.Priority); reportErr != nil {
 		slog.Error("failed to report triage results",
 			"task_id", task.ID, "error", reportErr, "component", component)
@@ -168,13 +163,20 @@ func (t *Triager) processNext(ctx context.Context) {
 		"task_id", task.ID, "priority", result.Priority, "component", component)
 }
 
-// smokeTest verifies the Claude CLI is available.
-func (t *Triager) smokeTest() error {
-	model := t.config.Triager.Model
-	if model == "" {
-		model = "haiku"
+// smokeTest verifies the Python Agent Manager is reachable via gRPC.
+func (t *Triager) smokeTest(ctx context.Context) error {
+	if t.agentClient == nil {
+		return fmt.Errorf("agent client not available")
 	}
-	return executor.SmokeTest(t.claude, model)
+
+	testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	_, err := t.agentClient.PodStatus(testCtx)
+	if err != nil {
+		return fmt.Errorf("agent manager health check failed: %w", err)
+	}
+	return nil
 }
 
 // --- Triage execution logic ---
@@ -210,23 +212,21 @@ type triageJSON struct {
 	Description string `json:"description"`
 }
 
-// TriageTask uses Claude to analyze a task, rewrite its description with clear
-// requirements, suggest a priority level, and recommend an execution model.
-// It enriches the analysis with project and goal context when available.
-func TriageTask(ctx context.Context, runner *claudecli.Runner, client *apiclient.Client, task *models.Task, model string) (*TriageResult, error) {
+// triageTask uses the Python Agent Manager to analyze a task via gRPC.
+func (t *Triager) triageTask(ctx context.Context, task *models.Task, model string) (*TriageResult, error) {
+	if t.agentClient == nil {
+		return nil, fmt.Errorf("agent client not available")
+	}
+
 	// Fetch project context if available
 	var project *models.Project
 	var goal *models.Goal
-	if task.ProjectID != "" && client != nil {
+	if task.ProjectID != "" && t.client != nil {
 		var err error
-		project, err = client.GetProject(task.ProjectID)
+		project, err = t.client.GetProject(task.ProjectID)
 		if err != nil {
 			slog.Warn("failed to fetch project context for triage",
 				"task_id", task.ID, "project_id", task.ProjectID, "error", err)
-			// Continue without project context rather than failing
-		} else {
-			slog.Debug("fetched project context for triage",
-				"task_id", task.ID, "project_id", task.ProjectID, "project_name", project.Name)
 		}
 	}
 
@@ -235,56 +235,49 @@ func TriageTask(ctx context.Context, runner *claudecli.Runner, client *apiclient
 	if goalID == "" && project != nil {
 		goalID = project.GoalID
 	}
-	// Note: Goal fetching would require adding GetGoal to apiclient, skipping for now
-	// as goals are less critical than project context
+	_ = goalID // Goal fetching requires GetGoal in apiclient — deferred
 
 	prompt := buildTriagePromptWithContext(task, project, goal)
 
 	triageCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	result, err := runner.Run(triageCtx, claudecli.Opts{
-		Prompt:  prompt,
-		Model:   model,
-		WorkDir: "/tmp",
-	})
-	if err != nil {
-		stderr, stdoutLen := "", 0
-		if result != nil {
-			stderr = truncate(result.Stderr, 500)
-			stdoutLen = len(result.Stdout)
+	// Execute via gRPC — triage uses a lightweight agent type
+	req := &fluxv1.ExecuteTaskRequest{
+		TaskId:    task.ID,
+		AgentType: "qa", // triage is read-only analysis
+		Prompt:    prompt,
+		// WorkDir not needed for triage — it's pure analysis
+		WorkingDirectory: "/tmp",
+		MaxTurns:         1, // triage should complete in a single turn
+		Metadata: map[string]string{
+			"model": model,
+			"mode":  "triage",
+		},
+	}
+
+	var output strings.Builder
+	err := t.agentClient.ExecuteTask(triageCtx, req, func(event *fluxv1.TaskEvent) {
+		if event.GetContent() != "" {
+			output.WriteString(event.GetContent())
 		}
-		slog.Error("triage CLI execution failed",
-			"task_id", task.ID, "error", err,
-			"stderr", stderr, "stdout_len", stdoutLen)
+	})
+
+	if err != nil {
 		return nil, fmt.Errorf("triage execution failed: %w", err)
 	}
 
-	if result.ExitCode != 0 {
-		slog.Error("triage CLI exited with error",
-			"task_id", task.ID, "exit_code", result.ExitCode,
-			"stderr", truncate(result.Stderr, 500),
-			"stdout_len", len(result.Stdout))
-		return nil, fmt.Errorf("triage exited with code %d: %s", result.ExitCode, truncate(result.Stderr, 200))
-	}
-
-	// Parse the response
-	parsed, err := claudecli.ParseResponse(result.Stdout)
-	if err != nil {
-		slog.Error("triage response parse failed",
-			"task_id", task.ID, "error", err,
-			"stdout_prefix", truncate(result.Stdout, 500))
-		return nil, fmt.Errorf("failed to parse triage response: %w", err)
+	resultText := strings.TrimSpace(output.String())
+	if resultText == "" {
+		return nil, fmt.Errorf("triage returned empty output")
 	}
 
 	slog.Info("triage raw response",
 		"task_id", task.ID,
-		"result_text_len", len(parsed.ResultText),
-		"result_text_prefix", truncate(parsed.ResultText, 300),
-		"raw_stdout_prefix", truncate(result.Stdout, 500))
+		"result_text_len", len(resultText),
+		"result_text_prefix", truncate(resultText, 300))
 
-	triage := parseTriageResponse(parsed.ResultText, task)
-
+	triage := parseTriageResponse(resultText, task)
 	return triage, nil
 }
 

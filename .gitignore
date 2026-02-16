@@ -5,12 +5,18 @@ config.yaml
 # Go
 go/bin/
 go/src/flux
+go/src/*.test
 go/src/web/dist/
 !go/src/web/dist/.gitkeep
 
 # React (frontend/)
 frontend/node_modules/
 frontend/dist/
+frontend/src/gen
+
+# Python
+__pycache__/
+*.pyc
 
 # Runtime data
 data/
@@ -22,3 +28,7 @@ logs/
 .vscode/
 *.swp
 *.swo
+
+# Generated protobuf code
+go/src/gen/
+gen/

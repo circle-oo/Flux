@@ -12,11 +12,19 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
+	"github.com/circle-oo/flux/gen/flux/v1/fluxv1connect"
+	"github.com/circle-oo/flux/internal/agent"
 	"github.com/circle-oo/flux/internal/config"
 	"github.com/circle-oo/flux/internal/db"
 	"github.com/circle-oo/flux/internal/executor"
+	"github.com/circle-oo/flux/internal/handler"
 	"github.com/circle-oo/flux/internal/manager"
+	"github.com/circle-oo/flux/internal/notesmd"
 	"github.com/circle-oo/flux/internal/notifier"
 	"github.com/circle-oo/flux/internal/server"
 	"github.com/circle-oo/flux/internal/shutdown"
@@ -87,8 +95,9 @@ func main() {
 		logger.Error("crash recovery failed", "error", err)
 	}
 
-	// 4c. Initialize Vault Writer
-	vaultWriter := vault.NewWriter(cfg.Vault.Path)
+	// 4c. Initialize Vault Writer (via notesmd-cli)
+	notesmdClient := notesmd.NewClient(cfg.Vault.Name)
+	vaultWriter := vault.NewWriter(notesmdClient)
 	defer vaultWriter.Close()
 
 	// 5. Initialize Manager
@@ -107,6 +116,27 @@ func main() {
 		Discord: discord,
 		WebFS:   webFS,
 		Version: version,
+	})
+
+	// 6a. Connect-RPC: Python Agent Manager client + FluxService handler
+	agentClient, agentErr := agent.NewClient("localhost:50051", logger)
+	if agentErr != nil {
+		logger.Warn("agent manager not available, Connect-RPC and gRPC execution disabled", "error", agentErr)
+	} else {
+		fluxHandler := handler.NewFluxServiceHandler(agentClient, logger)
+		path, connectHandler := fluxv1connect.NewFluxServiceHandler(fluxHandler)
+		srv.Mux().Handle(path, connectHandler)
+		logger.Info("connect-rpc enabled", "path", path)
+
+		// Health check: verify Python Agent Manager connectivity in background
+		go waitForAgentManager(agentClient, logger)
+	}
+	// Note: agentClient may be nil if connection failed. Executor handles this
+	// gracefully by returning an error from runExecution when agentClient is nil.
+
+	// 6a-ii. Wrap server handler with h2c (HTTP/2 cleartext) and CORS for Connect-RPC
+	srv.WrapHandler(func(h http.Handler) http.Handler {
+		return h2c.NewHandler(server.WithCORS(h), &http2.Server{})
 	})
 
 	// 6b. Wrap logger with broadcast handler so logs stream to the Web UI
@@ -136,7 +166,7 @@ func main() {
 	executors := make([]*executor.Executor, executorCount)
 	for i := 0; i < executorCount; i++ {
 		execID := fmt.Sprintf("executor-%02d", i+1)
-		executors[i] = executor.NewExecutor(execID, cfg, discord, vaultWriter)
+		executors[i] = executor.NewExecutor(execID, cfg, discord, vaultWriter, agentClient)
 		go func(e *executor.Executor, id string) {
 			logger.Info("executor pod started", "id", id)
 			e.Run(ctx)
@@ -146,7 +176,7 @@ func main() {
 	// 9b. Start Triager component (if enabled)
 	var triage *triager.Triager
 	if cfg.Triager.Enabled {
-		triage = triager.New("triager-01", cfg, discord)
+		triage = triager.New("triager-01", cfg, discord, agentClient)
 		go func() {
 			logger.Info("triager pod started", "id", "triager-01", "component", "main")
 			triage.Run(ctx)
@@ -221,7 +251,32 @@ func main() {
 		logger.Error("server shutdown error", "error", err)
 	}
 
+	// Close agent client connection
+	if agentClient != nil {
+		if err := agentClient.Close(); err != nil {
+			logger.Error("agent client close error", "error", err)
+		}
+	}
+
 	logger.Info("flux stopped")
+}
+
+// waitForAgentManager polls the Python Agent Manager until it responds.
+// Runs in background so the Go server can start accepting HTTP requests immediately.
+func waitForAgentManager(ac *agent.Client, logger *slog.Logger) {
+	for attempt := 1; attempt <= 30; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, err := ac.PodStatus(ctx)
+		cancel()
+		if err == nil {
+			logger.Info("python agent manager is healthy", "attempts", attempt)
+			return
+		}
+		logger.Warn("waiting for python agent manager",
+			"attempt", attempt, "error", err)
+		time.Sleep(2 * time.Second)
+	}
+	logger.Error("python agent manager not reachable after 30 attempts, continuing anyway")
 }
 
 func setupLogger(lc config.LoggingConfig) (*slog.Logger, error) {

@@ -1,0 +1,236 @@
+syntax = "proto3";
+package flux.v1;
+
+option go_package = "github.com/circle-oo/flux/gen/flux/v1;fluxv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ========================================================
+// Frontend <> Go Backend (Connect-RPC)
+// ========================================================
+
+service FluxService {
+  // Task CRUD
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+
+  // Real-time task event streaming (SSE via Connect)
+  rpc StreamTaskEvents(StreamTaskEventsRequest) returns (stream StreamTaskEventsResponse);
+
+  // Dashboard
+  rpc GetDashboard(GetDashboardRequest) returns (GetDashboardResponse);
+  rpc GetInsights(GetInsightsRequest) returns (GetInsightsResponse);
+
+  // Agent pod status
+  rpc GetAgentStatus(GetAgentStatusRequest) returns (GetAgentStatusResponse);
+}
+
+// --- Task Messages ---
+
+message CreateTaskRequest {
+  string agent_type = 1;          // "dev", "qa", "devops", "rnd"
+  string prompt = 2;
+  string working_directory = 3;
+  map<string, string> metadata = 4;
+  TaskPriority priority = 5;
+}
+
+message CreateTaskResponse {
+  Task task = 1;
+}
+
+message GetTaskRequest {
+  string task_id = 1;
+}
+
+message GetTaskResponse {
+  Task task = 1;
+  repeated TaskEvent recent_events = 2;
+}
+
+message ListTasksRequest {
+  TaskStatus status_filter = 1;
+  string agent_type_filter = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+message CancelTaskRequest {
+  string task_id = 1;
+}
+
+message CancelTaskResponse {
+  bool success = 1;
+}
+
+message StreamTaskEventsRequest {
+  string task_id = 1;
+}
+
+message StreamTaskEventsResponse {
+  TaskEvent event = 1;
+}
+
+message Task {
+  string id = 1;
+  string agent_type = 2;
+  string prompt = 3;
+  TaskStatus status = 4;
+  TaskPriority priority = 5;
+  string working_directory = 6;
+  map<string, string> metadata = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+  string result_summary = 11;
+  string error_message = 12;
+}
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_RUNNING = 2;
+  TASK_STATUS_COMPLETED = 3;
+  TASK_STATUS_FAILED = 4;
+  TASK_STATUS_CANCELLED = 5;
+}
+
+enum TaskPriority {
+  TASK_PRIORITY_UNSPECIFIED = 0;
+  TASK_PRIORITY_LOW = 1;
+  TASK_PRIORITY_NORMAL = 2;
+  TASK_PRIORITY_HIGH = 3;
+  TASK_PRIORITY_CRITICAL = 4;
+}
+
+// --- Dashboard Messages ---
+
+message GetDashboardRequest {}
+
+message GetDashboardResponse {
+  int32 total_tasks_today = 1;
+  int32 completed_tasks_today = 2;
+  int32 failed_tasks_today = 3;
+  int32 active_agents = 4;
+  repeated AgentSummary agent_summaries = 5;
+}
+
+message AgentSummary {
+  string agent_type = 1;
+  int32 tasks_completed = 2;
+  int32 tasks_failed = 3;
+  double avg_duration_seconds = 4;
+}
+
+message GetInsightsRequest {
+  string time_range = 1;         // "24h", "7d", "30d"
+}
+
+message GetInsightsResponse {
+  repeated DailyMetric daily_metrics = 1;
+  repeated ToolUsageStat tool_usage = 2;
+  repeated AgentPerformance agent_performance = 3;
+}
+
+message DailyMetric {
+  string date = 1;
+  int32 tasks_completed = 2;
+  int32 tasks_failed = 3;
+  double total_duration_seconds = 4;
+}
+
+message ToolUsageStat {
+  string tool_name = 1;
+  int32 invocation_count = 2;
+  double avg_duration_ms = 3;
+}
+
+message AgentPerformance {
+  string agent_type = 1;
+  double success_rate = 2;
+  double avg_turns = 3;
+  double avg_duration_seconds = 4;
+}
+
+// --- Agent Status Messages ---
+
+message GetAgentStatusRequest {}
+
+message GetAgentStatusResponse {
+  repeated AgentPod pods = 1;
+}
+
+message AgentPod {
+  string agent_type = 1;
+  string status = 2;              // "idle", "running", "error"
+  string current_task_id = 3;
+  int64 uptime_seconds = 4;
+  int32 tasks_completed = 5;
+}
+
+// ========================================================
+// Go Backend -> Python Agent Manager (gRPC)
+// Response streams from Python -> Go direction
+// ========================================================
+
+service AgentExecutionService {
+  // Go calls, Python returns TaskEvent as streaming response
+  rpc ExecuteTask(ExecuteTaskRequest) returns (stream ExecuteTaskResponse);
+  rpc CancelAgentTask(CancelAgentTaskRequest) returns (CancelAgentTaskResponse);
+  rpc GetPodStatus(GetPodStatusRequest) returns (GetPodStatusResponse);
+}
+
+message ExecuteTaskResponse {
+  TaskEvent event = 1;
+}
+
+message ExecuteTaskRequest {
+  string task_id = 1;
+  string agent_type = 2;
+  string prompt = 3;
+  string working_directory = 4;
+  repeated string allowed_tools = 5;
+  string system_prompt = 6;
+  int32 max_turns = 7;
+  map<string, string> metadata = 8;
+}
+
+message TaskEvent {
+  string task_id = 1;
+  TaskEventType type = 2;
+  string content = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  map<string, string> metadata = 5;
+
+  enum TaskEventType {
+    TASK_EVENT_TYPE_UNSPECIFIED = 0;
+    TASK_EVENT_TYPE_ASSISTANT_MESSAGE = 1;
+    TASK_EVENT_TYPE_TOOL_USE = 2;
+    TASK_EVENT_TYPE_TOOL_RESULT = 3;
+    TASK_EVENT_TYPE_TASK_COMPLETE = 4;
+    TASK_EVENT_TYPE_TASK_ERROR = 5;
+    TASK_EVENT_TYPE_PROGRESS = 6;
+  }
+}
+
+message CancelAgentTaskRequest {
+  string task_id = 1;
+}
+
+message CancelAgentTaskResponse {
+  bool success = 1;
+}
+
+message GetPodStatusRequest {}
+
+message GetPodStatusResponse {
+  repeated AgentPod pods = 1;
+}

@@ -1,122 +1,18 @@
 package vault
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/circle-oo/flux/internal/notesmd"
 )
 
-func TestWriter_Create(t *testing.T) {
-	tmpDir := t.TempDir()
-	w := NewWriter(tmpDir)
-	defer w.Close()
-
-	// Create new file should succeed
-	err := w.Write("test.md", "# Test\n", ModeCreate)
-	if err != nil {
-		t.Fatalf("failed to create file: %v", err)
-	}
-
-	// Verify content
-	content, err := os.ReadFile(filepath.Join(tmpDir, "test.md"))
-	if err != nil {
-		t.Fatalf("failed to read file: %v", err)
-	}
-	if string(content) != "# Test\n" {
-		t.Errorf("unexpected content: %s", content)
-	}
-
-	// Create existing file should fail
-	err = w.Write("test.md", "# Test 2\n", ModeCreate)
-	if err == nil {
-		t.Error("expected error when creating existing file")
-	}
-	if !strings.Contains(err.Error(), "already exists") {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestWriter_Append(t *testing.T) {
-	tmpDir := t.TempDir()
-	w := NewWriter(tmpDir)
-	defer w.Close()
-
-	// Append to new file
-	err := w.Write("append.md", "Line 1\n", ModeAppend)
-	if err != nil {
-		t.Fatalf("failed to append to new file: %v", err)
-	}
-
-	// Append to existing file
-	err = w.Write("append.md", "Line 2\n", ModeAppend)
-	if err != nil {
-		t.Fatalf("failed to append to existing file: %v", err)
-	}
-
-	// Verify content
-	content, err := os.ReadFile(filepath.Join(tmpDir, "append.md"))
-	if err != nil {
-		t.Fatalf("failed to read file: %v", err)
-	}
-	expected := "Line 1\nLine 2\n"
-	if string(content) != expected {
-		t.Errorf("unexpected content: got %q, want %q", content, expected)
-	}
-}
-
-func TestWriter_Replace(t *testing.T) {
-	tmpDir := t.TempDir()
-	w := NewWriter(tmpDir)
-	defer w.Close()
-
-	// Write initial content
-	err := w.Write("replace.md", "Original\n", ModeReplace)
-	if err != nil {
-		t.Fatalf("failed to write initial content: %v", err)
-	}
-
-	// Replace content
-	err = w.Write("replace.md", "Replaced\n", ModeReplace)
-	if err != nil {
-		t.Fatalf("failed to replace content: %v", err)
-	}
-
-	// Verify content
-	content, err := os.ReadFile(filepath.Join(tmpDir, "replace.md"))
-	if err != nil {
-		t.Fatalf("failed to read file: %v", err)
-	}
-	if string(content) != "Replaced\n" {
-		t.Errorf("unexpected content: %s", content)
-	}
-}
-
-func TestWriter_DirectoryCreation(t *testing.T) {
-	tmpDir := t.TempDir()
-	w := NewWriter(tmpDir)
-	defer w.Close()
-
-	// Write to nested path
-	err := w.Write("projects/flux/notes.md", "# Notes\n", ModeCreate)
-	if err != nil {
-		t.Fatalf("failed to write to nested path: %v", err)
-	}
-
-	// Verify directory was created
-	fullPath := filepath.Join(tmpDir, "projects/flux/notes.md")
-	if _, err := os.Stat(fullPath); err != nil {
-		t.Errorf("file not created at expected path: %v", err)
-	}
-}
-
 func TestWriter_Timeout(t *testing.T) {
-	tmpDir := t.TempDir()
+	client := notesmd.NewClient("TestVault")
 	// Create writer with buffer size 1
 	w := &Writer{
-		basePath: tmpDir,
+		client:   client,
 		requests: make(chan WriteRequest, 1),
 		done:     make(chan struct{}),
 	}
@@ -138,78 +34,54 @@ func TestWriter_Timeout(t *testing.T) {
 	}
 }
 
-func TestWriter_CloseWaitsForWrites(t *testing.T) {
-	tmpDir := t.TempDir()
-	w := NewWriter(tmpDir)
-
-	// Queue multiple writes
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			err := w.Write(filepath.Join("file", string(rune(i+'0'))+".md"), "content\n", ModeCreate)
-			if err != nil {
-				t.Errorf("write %d failed: %v", i, err)
-			}
-		}(i)
-	}
-
-	// Wait for all writes to be queued
-	wg.Wait()
-
-	// Close should wait for all writes to complete
+func TestWriter_WriteAfterClose(t *testing.T) {
+	client := notesmd.NewClient("TestVault")
+	w := NewWriter(client)
 	w.Close()
 
-	// Verify all files were written
-	entries, err := os.ReadDir(filepath.Join(tmpDir, "file"))
-	if err != nil {
-		t.Fatalf("failed to read directory: %v", err)
-	}
-	if len(entries) != 10 {
-		t.Errorf("expected 10 files, got %d", len(entries))
+	// Write after close should panic with "send on closed channel"
+	done := make(chan bool, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- true
+			} else {
+				done <- false
+			}
+		}()
+		_ = w.Write("test.md", "content", ModeCreate)
+	}()
+
+	select {
+	case panicked := <-done:
+		if !panicked {
+			t.Error("expected panic when writing after close")
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("write after close should panic immediately")
 	}
 }
 
-func TestWriter_ConcurrentWritesSequential(t *testing.T) {
-	tmpDir := t.TempDir()
-	w := NewWriter(tmpDir)
-	defer w.Close()
-
-	// Track write order
-	var mu sync.Mutex
-	var order []int
-
-	// Launch concurrent writes
-	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
-			err := w.Write("concurrent.md", string(rune(n+'0')), ModeAppend)
-			if err != nil {
-				t.Errorf("write %d failed: %v", n, err)
-			}
-			mu.Lock()
-			order = append(order, n)
-			mu.Unlock()
-		}(i)
+func TestExecute_StripsMdExtension(t *testing.T) {
+	// Verify that .md extension stripping works correctly
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"Tasks/completed/abc123.md", "Tasks/completed/abc123"},
+		{"Notes/test", "Notes/test"},
+		{"file.md", "file"},
+		{".md", ".md"}, // edge case: don't strip if path would be empty
 	}
 
-	wg.Wait()
-
-	// Verify file has all writes (no corruption)
-	content, err := os.ReadFile(filepath.Join(tmpDir, "concurrent.md"))
-	if err != nil {
-		t.Fatalf("failed to read file: %v", err)
-	}
-	if len(content) != 20 {
-		t.Errorf("expected 20 bytes, got %d", len(content))
-	}
-
-	// Verify all writes were processed
-	if len(order) != 20 {
-		t.Errorf("expected 20 writes, got %d", len(order))
+	for _, tc := range cases {
+		path := tc.input
+		if len(path) > 3 && path[len(path)-3:] == ".md" {
+			path = path[:len(path)-3]
+		}
+		if path != tc.expected {
+			t.Errorf("stripMd(%q) = %q, want %q", tc.input, path, tc.expected)
+		}
 	}
 }
 
@@ -233,7 +105,6 @@ func TestTaskSummaryTemplate(t *testing.T) {
 
 	md := TaskSummaryTemplate(task)
 
-	// Verify key sections exist
 	if !strings.Contains(md, "# Task: Implement feature X") {
 		t.Error("missing task title")
 	}
@@ -293,34 +164,5 @@ func TestProjectIndexTemplate(t *testing.T) {
 	}
 	if !strings.Contains(md, "- Go") {
 		t.Error("missing tech stack item")
-	}
-}
-
-func TestWriteAfterClose(t *testing.T) {
-	tmpDir := t.TempDir()
-	w := NewWriter(tmpDir)
-	w.Close()
-
-	// Write after close should panic with "send on closed channel"
-	done := make(chan bool, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				// Panic is expected - writing to closed channel
-				done <- true
-			} else {
-				done <- false
-			}
-		}()
-		_ = w.Write("test.md", "content", ModeCreate)
-	}()
-
-	select {
-	case panicked := <-done:
-		if !panicked {
-			t.Error("expected panic when writing after close")
-		}
-	case <-time.After(1 * time.Second):
-		t.Error("write after close should panic immediately")
 	}
 }

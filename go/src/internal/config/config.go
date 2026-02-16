@@ -57,6 +57,7 @@ type DatabaseConfig struct {
 }
 
 type VaultConfig struct {
+	Name string `yaml:"name"`
 	Path string `yaml:"path"`
 }
 

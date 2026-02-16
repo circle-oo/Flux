@@ -37,6 +37,13 @@ if ! command -v npm &>/dev/null; then
 fi
 
 echo "  npm: $(npm --version)"
+
+if ! command -v notesmd-cli &>/dev/null; then
+    echo ""
+    echo "Installing notesmd-cli..."
+    brew install yakitrak/yakitrak/notesmd-cli
+fi
+echo "  notesmd-cli: $(notesmd-cli --version 2>/dev/null || echo 'installed')"
 echo ""
 
 DEFAULT_CONFIG="$SCRIPT_DIR/config.yaml"
@@ -107,6 +114,14 @@ echo ""
 mkdir -p data logs
 echo "Created runtime directories (data/, logs/)."
 echo ""
+
+# 9. Register Obsidian vault with notesmd-cli
+if command -v notesmd-cli &>/dev/null; then
+    echo "Registering Obsidian vault with notesmd-cli..."
+    notesmd-cli set-default "Flux" 2>/dev/null || echo "  NOTE: Open the Flux vault in Obsidian at least once, then re-run setup."
+    echo "  Done."
+    echo ""
+fi
 
 echo "=== Setup Complete ==="
 echo ""

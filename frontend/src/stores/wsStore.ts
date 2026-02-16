@@ -1,3 +1,12 @@
+// DEPRECATED: WebSocket store — scheduled for removal once the UI fully
+// migrates to Connect-RPC SSE (useTaskStream hook).
+//
+// Still load-bearing for:
+//   - Dashboard: uses `wsConnected` and `wsReconnecting` for the connection badge
+//   - TaskDetail: uses `taskUpdateCounter` to trigger refresh on TASK_UPDATED events
+//   - authStore: calls `initializeWebSocket()` on login, `cleanupWebSocket()` on logout
+//
+// Do not add new consumers. New real-time features should use useTaskStream.
 import { create } from 'zustand'
 import { useGoalStore } from './goalStore'
 import { useTaskStore } from './taskStore'

@@ -19,14 +19,19 @@ type LogEntry struct {
 	Attrs map[string]any    `json:"attrs"`
 }
 
+// logBuffer is the shared ring buffer for log entries, protected by a mutex.
+type logBuffer struct {
+	entries []LogEntry
+	idx     int
+	full    bool
+	mu      sync.Mutex
+}
+
 // LogBroadcastHandler wraps an slog.Handler and broadcasts log entries to WebSocket clients.
 type LogBroadcastHandler struct {
 	inner  slog.Handler
 	hub    *WebSocketHub
-	buf    []LogEntry
-	bufIdx int
-	bufFull bool
-	mu     sync.Mutex
+	buf    *logBuffer
 	attrs  []slog.Attr
 	group  string
 }
@@ -36,7 +41,9 @@ func NewLogBroadcastHandler(inner slog.Handler, hub *WebSocketHub) *LogBroadcast
 	return &LogBroadcastHandler{
 		inner: inner,
 		hub:   hub,
-		buf:   make([]LogEntry, logRingBufferSize),
+		buf: &logBuffer{
+			entries: make([]LogEntry, logRingBufferSize),
+		},
 	}
 }
 
@@ -84,14 +91,14 @@ func (h *LogBroadcastHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	// Store in ring buffer.
-	h.mu.Lock()
-	h.buf[h.bufIdx] = entry
-	h.bufIdx++
-	if h.bufIdx >= logRingBufferSize {
-		h.bufIdx = 0
-		h.bufFull = true
+	h.buf.mu.Lock()
+	h.buf.entries[h.buf.idx] = entry
+	h.buf.idx++
+	if h.buf.idx >= logRingBufferSize {
+		h.buf.idx = 0
+		h.buf.full = true
 	}
-	h.mu.Unlock()
+	h.buf.mu.Unlock()
 
 	// Broadcast to WebSocket clients.
 	h.hub.Broadcast(Event{
@@ -110,7 +117,6 @@ func (h *LogBroadcastHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		inner: h.inner.WithAttrs(attrs),
 		hub:   h.hub,
 		buf:   h.buf,
-		mu:    h.mu,
 		attrs: newAttrs,
 		group: h.group,
 	}
@@ -127,7 +133,6 @@ func (h *LogBroadcastHandler) WithGroup(name string) slog.Handler {
 		inner: h.inner.WithGroup(name),
 		hub:   h.hub,
 		buf:   h.buf,
-		mu:    h.mu,
 		attrs: h.attrs,
 		group: g,
 	}
@@ -176,18 +181,18 @@ func inferComponent(pc uintptr) string {
 
 // GetRecentLogs returns the buffered log entries in chronological order.
 func (h *LogBroadcastHandler) GetRecentLogs() []LogEntry {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.buf.mu.Lock()
+	defer h.buf.mu.Unlock()
 
-	if !h.bufFull {
-		result := make([]LogEntry, h.bufIdx)
-		copy(result, h.buf[:h.bufIdx])
+	if !h.buf.full {
+		result := make([]LogEntry, h.buf.idx)
+		copy(result, h.buf.entries[:h.buf.idx])
 		return result
 	}
 
 	result := make([]LogEntry, logRingBufferSize)
-	// Oldest entries start at bufIdx (it wrapped around).
-	copy(result, h.buf[h.bufIdx:])
-	copy(result[logRingBufferSize-h.bufIdx:], h.buf[:h.bufIdx])
+	// Oldest entries start at idx (it wrapped around).
+	copy(result, h.buf.entries[h.buf.idx:])
+	copy(result[logRingBufferSize-h.buf.idx:], h.buf.entries[:h.buf.idx])
 	return result
 }

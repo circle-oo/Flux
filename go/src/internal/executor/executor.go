@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -15,8 +14,9 @@ import (
 	"sync"
 	"time"
 
+	fluxv1 "github.com/circle-oo/flux/gen/flux/v1"
+	"github.com/circle-oo/flux/internal/agent"
 	"github.com/circle-oo/flux/internal/apiclient"
-	"github.com/circle-oo/flux/internal/claudecli"
 	"github.com/circle-oo/flux/internal/config"
 	"github.com/circle-oo/flux/internal/executor/prompts"
 	"github.com/circle-oo/flux/internal/github"
@@ -32,12 +32,18 @@ var (
 	deletionsRe    = regexp.MustCompile(`(\d+)\s+deletions?\(-\)`)
 )
 
-// Executor is an autonomous execution pod that picks up tasks, runs Claude Code,
-// and produces PRs.
+// ExecutionResult holds the outcome of a task execution via the Python Agent Manager.
+type ExecutionResult struct {
+	Output   string        // accumulated agent output
+	Duration time.Duration // total execution time
+}
+
+// Executor is an autonomous execution pod that picks up tasks, delegates execution
+// to the Python Agent Manager via gRPC, and produces PRs.
 type Executor struct {
 	id                 string
 	config             *config.Config
-	claude             *claudecli.Runner
+	agentClient        *agent.Client
 	worktree           *WorktreeManager
 	manager            *apiclient.Client
 	github             *github.Client
@@ -60,11 +66,11 @@ type sensitiveFile struct {
 }
 
 // NewExecutor creates a new Executor pod.
-func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord, vw *vault.Writer) *Executor {
+func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord, vw *vault.Writer, ac *agent.Client) *Executor {
 	return &Executor{
 		id:                 id,
 		config:             cfg,
-		claude:             claudecli.NewRunner(&cfg.Executor),
+		agentClient:        ac,
 		worktree:           NewWorktreeManager(cfg.Orchestrator.WorkspaceBase, cfg.GitHub.Token, cfg.GitHub.Username),
 		manager:            apiclient.NewClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
 		github:             github.NewClient(cfg.GitHub.Token, cfg.GitHub.Username),
@@ -93,15 +99,6 @@ func (e *Executor) Run(ctx context.Context) {
 	if err := e.registerPod(); err != nil {
 		slog.Warn("failed to register pod", "id", e.id, "error", err)
 	}
-
-	// Run smoke test on startup
-	if err := e.claudeCodeSmokeTest(); err != nil {
-		slog.Error("claude code smoke test failed", "error", err)
-		_ = e.notifier.Send(notifier.LevelCritical,
-			fmt.Sprintf("Executor %s: Claude Code smoke test failed: %v", e.id, err))
-		return
-	}
-	slog.Info("claude code smoke test passed", "id", e.id)
 
 	for {
 		select {
@@ -161,18 +158,14 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	project, err := e.manager.GetProject(task.ProjectID)
 	if err != nil {
 		slog.Error("failed to get project", "task_id", task.ID, "project_id", task.ProjectID, "error", err)
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("failed to get project: %v", err), 0, 0); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, "", fmt.Sprintf("failed to get project: %v", err))
 		return
 	}
 
 	model, systemPrompt, err := e.prepareExecution(task, project)
 	if err != nil {
 		slog.Error("failed to prepare execution", "task_id", task.ID, "error", err)
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("preparation failed: %v", err), 0, 0); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, "", fmt.Sprintf("preparation failed: %v", err))
 		return
 	}
 
@@ -180,9 +173,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	worktreePath, err := e.setupWorktree(task, project)
 	if err != nil {
 		slog.Error("failed to setup worktree", "task_id", task.ID, "error", err)
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("worktree setup failed: %v", err), 0, 0); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, "", fmt.Sprintf("worktree setup failed: %v", err))
 		return
 	}
 
@@ -200,9 +191,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	result, err := e.runExecution(ctx, task, project, worktreePath, model, systemPrompt)
 	if err != nil {
 		slog.Error("execution failed", "task_id", task.ID, "error", err)
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("execution error: %v", err), 0, 0); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, "", fmt.Sprintf("execution error: %v", err))
 		return
 	}
 	if result == nil {
@@ -222,6 +211,14 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	e.mu.Unlock()
 	if err := e.updatePodStatus("idle", "", ""); err != nil {
 		slog.Warn("failed to update pod status to idle", "id", e.id, "error", err)
+	}
+}
+
+// reportFailure reports a task as failed to the manager. Consolidates the
+// repeated pattern of ReportTaskDone + warn-on-error logging.
+func (e *Executor) reportFailure(taskID string, task *models.Task, output, reason string) {
+	if err := e.manager.ReportTaskDone(taskID, task, models.TaskFailed, output, reason, 0, 0); err != nil {
+		slog.Warn("failed to report task done", "task_id", taskID, "error", err)
 	}
 }
 
@@ -268,33 +265,83 @@ func (e *Executor) setupWorktree(task *models.Task, project *models.Project) (st
 	return worktreePath, nil
 }
 
-// runExecution executes Claude Code and handles early exits (rate limit, decomposition).
+// mapAgentType maps a task's tags to a Python agent type.
+func mapAgentType(task *models.Task) string {
+	for _, tag := range task.Tags {
+		switch strings.ToLower(tag) {
+		case "research":
+			return "rnd"
+		case "deploy":
+			return "devops"
+		}
+	}
+	return "dev"
+}
+
+// runExecution delegates execution to the Python Agent Manager via gRPC.
 // Returns nil result if execution completed with early exit (caller should return).
-func (e *Executor) runExecution(ctx context.Context, task *models.Task, project *models.Project, worktreePath, model, systemPrompt string) (*claudecli.Result, error) {
+func (e *Executor) runExecution(ctx context.Context, task *models.Task, project *models.Project, worktreePath, model, systemPrompt string) (*ExecutionResult, error) {
+	if e.agentClient == nil {
+		return nil, fmt.Errorf("agent client not available (Python Agent Manager not connected)")
+	}
+
 	techStack := strings.Join(project.TechStack, ", ")
 	prompt := BuildAutopilotPrompt(task, project.Name, project.Description, techStack)
 
 	// Snapshot sensitive files before execution
 	preSnapshot := e.snapshotSensitiveFiles()
 
-	// Execute Claude Code
-	e.executionStartTime = time.Now()
-	result, err := e.claude.Run(ctx, claudecli.Opts{
-		Prompt:       prompt,
-		WorkDir:      worktreePath,
-		Model:        model,
-		SystemPrompt: systemPrompt,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("claude code failed: %w", err)
+	// Build gRPC request for Python Agent Manager
+	agentType := mapAgentType(task)
+	req := &fluxv1.ExecuteTaskRequest{
+		TaskId:           task.ID,
+		AgentType:        agentType,
+		Prompt:           prompt,
+		WorkingDirectory: worktreePath,
+		SystemPrompt:     systemPrompt,
+		Metadata: map[string]string{
+			"model":    model,
+			"executor": e.id,
+		},
 	}
 
-	// Check rate limit
-	if claudecli.IsRateLimited(result.ExitCode, result.Stderr) {
-		slog.Warn("rate limited, retrying task", "task_id", task.ID)
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskRetry, "", "rate limited", result.TokensUsed, result.CostUSD); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
+	// Execute via gRPC with timeout from config
+	execCtx, cancel := context.WithTimeout(ctx, e.config.Executor.MaxExecutionTime)
+	defer cancel()
+
+	e.executionStartTime = time.Now()
+	var output strings.Builder
+	var lastEventType fluxv1.TaskEvent_TaskEventType
+
+	err := e.agentClient.ExecuteTask(execCtx, req, func(event *fluxv1.TaskEvent) {
+		lastEventType = event.GetType()
+		if event.GetContent() != "" {
+			output.WriteString(event.GetContent())
+			output.WriteString("\n")
 		}
+		slog.Debug("agent event", "task_id", task.ID, "type", event.GetType().String())
+	})
+
+	duration := time.Since(e.executionStartTime)
+	result := &ExecutionResult{
+		Output:   output.String(),
+		Duration: duration,
+	}
+
+	if err != nil {
+		// Check if context deadline exceeded (timeout)
+		if errors.Is(err, context.DeadlineExceeded) {
+			slog.Warn("task execution timed out", "task_id", task.ID, "duration", duration)
+			e.reportFailure(task.ID, task, result.Output, "execution timed out")
+			return nil, nil
+		}
+		return nil, fmt.Errorf("agent execution failed: %w", err)
+	}
+
+	// Check if the agent reported an error event
+	if lastEventType == fluxv1.TaskEvent_TASK_EVENT_TYPE_TASK_ERROR {
+		slog.Warn("agent reported task error", "task_id", task.ID)
+		e.reportFailure(task.ID, task, result.Output, "agent reported error")
 		return nil, nil
 	}
 
@@ -302,48 +349,36 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 	if err := e.verifyWorktreeIntegrity(preSnapshot); err != nil {
 		_ = e.notifier.Send(notifier.LevelCritical,
 			fmt.Sprintf("INTEGRITY VIOLATION task %s: %v", task.ID, err))
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, "", fmt.Sprintf("integrity violation: %v", err), result.TokensUsed, result.CostUSD); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, "", fmt.Sprintf("integrity violation: %v", err))
 		return nil, fmt.Errorf("integrity violation: %w", err)
 	}
 
 	// Check subtask decomposition
-	parsed, parseErr := claudecli.ParseResponse(result.Stdout)
-	if parseErr != nil {
-		slog.Warn("failed to parse response for decomposition check", "task_id", task.ID, "error", parseErr)
-	} else {
-		slog.Debug("checking for decomposition", "task_id", task.ID, "result_text_length", len(parsed.ResultText))
-		if decomp := ParseDecomposition(parsed.ResultText); decomp != nil {
-			subtasks := ToSubtaskRequests(decomp)
-			slog.Info("task decomposed into subtasks", "task_id", task.ID, "subtask_count", len(subtasks))
-			if err := e.manager.CreateSubtasks(task.ID, subtasks, nil); err != nil {
-				slog.Error("failed to create subtasks", "task_id", task.ID, "error", err)
-				if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("subtask creation failed: %v", err), result.TokensUsed, result.CostUSD); reportErr != nil {
-					slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-				}
-				return nil, fmt.Errorf("subtask creation failed: %w", err)
-			}
-			if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskDecomposed, result.Stdout, "", result.TokensUsed, result.CostUSD); reportErr != nil {
-				slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-			}
-			return nil, nil
+	if decomp := ParseDecomposition(result.Output); decomp != nil {
+		subtasks := ToSubtaskRequests(decomp)
+		slog.Info("task decomposed into subtasks", "task_id", task.ID, "subtask_count", len(subtasks))
+		if err := e.manager.CreateSubtasks(task.ID, subtasks, nil); err != nil {
+			slog.Error("failed to create subtasks", "task_id", task.ID, "error", err)
+			e.reportFailure(task.ID, task, result.Output, fmt.Sprintf("subtask creation failed: %v", err))
+			return nil, fmt.Errorf("subtask creation failed: %w", err)
 		}
+		if err := e.manager.ReportTaskDone(task.ID, task, models.TaskDecomposed, result.Output, "", 0, 0); err != nil {
+			slog.Warn("failed to report task done", "task_id", task.ID, "error", err)
+		}
+		return nil, nil
 	}
 
 	return result, nil
 }
 
 // processResults handles build, test, commit, PR creation, and usage collection.
-func (e *Executor) processResults(task *models.Task, result *claudecli.Result, worktreePath string, project *models.Project) error {
+func (e *Executor) processResults(task *models.Task, result *ExecutionResult, worktreePath string, project *models.Project) error {
 	// Build verification
 	if task.RequiresTest() {
 		buildOK, buildOutput := e.runBuild(worktreePath)
 		if !buildOK {
 			slog.Warn("build failed for task", "task_id", task.ID)
-			if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("build failed: %s", buildOutput), result.TokensUsed, result.CostUSD); reportErr != nil {
-				slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-			}
+			e.reportFailure(task.ID, task, result.Output, fmt.Sprintf("build failed: %s", buildOutput))
 			return fmt.Errorf("build failed")
 		}
 	}
@@ -354,9 +389,7 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 		task.TestPassed = &passed
 		if !passed {
 			slog.Warn("tests failed for task", "task_id", task.ID)
-			if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, "tests failed", result.TokensUsed, result.CostUSD); reportErr != nil {
-				slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-			}
+			e.reportFailure(task.ID, task, result.Output, "tests failed")
 			return fmt.Errorf("tests failed")
 		}
 	}
@@ -368,15 +401,13 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 
 	if commitErr != nil {
 		if errors.Is(commitErr, ErrNoChanges) {
-			slog.Info("no changes produced by Claude Code, completing without PR", "task_id", task.ID)
-			if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD); reportErr != nil {
-				slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
+			slog.Info("no changes produced, completing without PR", "task_id", task.ID)
+			if err := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "", 0, 0); err != nil {
+				slog.Warn("failed to report task done", "task_id", task.ID, "error", err)
 			}
 			return nil
 		}
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("git failed: %v", commitErr), result.TokensUsed, result.CostUSD); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, result.Output, fmt.Sprintf("git failed: %v", commitErr))
 		return fmt.Errorf("commit failed: %w", commitErr)
 	}
 
@@ -389,9 +420,7 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 
 	// Rebase onto main
 	if err := e.worktree.RebaseOnMain(worktreePath); err != nil {
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("rebase conflict: %v", err), result.TokensUsed, result.CostUSD); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, result.Output, fmt.Sprintf("rebase conflict: %v", err))
 		return fmt.Errorf("rebase failed: %w", err)
 	}
 
@@ -399,31 +428,22 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 	forcePushCmd := exec.Command("git", "push", "-f", "origin", task.BranchName)
 	forcePushCmd.Dir = worktreePath
 	if output, err := forcePushCmd.CombinedOutput(); err != nil {
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, "force push failed after rebase", result.TokensUsed, result.CostUSD); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, result.Output, "force push failed after rebase")
 		return fmt.Errorf("force push failed: %s", string(output))
 	}
 
-	// Parse and populate task result for PR description
-	// First try to extract the structured "## Task Summary" section from the output
-	taskSummary := ExtractTaskSummary(result.Stdout)
+	// Extract task result for PR description
+	taskSummary := ExtractTaskSummary(result.Output)
 	if taskSummary != "" {
 		task.Result = taskSummary
-	} else {
-		// Fall back to the JSON result field if no structured summary found
-		parsed, parseErr := claudecli.ParseResponse(result.Stdout)
-		if parseErr == nil && parsed.ResultText != "" {
-			task.Result = parsed.ResultText
-		}
+	} else if result.Output != "" {
+		task.Result = result.Output
 	}
 
 	// Create PR
 	owner, repo := github.ExtractOwnerRepo(project.RepoURL)
 	if owner == "" || repo == "" {
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, "invalid repo URL", result.TokensUsed, result.CostUSD); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, result.Output, "invalid repo URL")
 		return fmt.Errorf("invalid repo URL: %s", project.RepoURL)
 	}
 
@@ -432,9 +452,7 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 	prTitle, prBody := prBuilder.Build()
 	prURL, prNumber, prErr := e.github.CreatePR(owner, repo, task.BranchName, defaultBranch, prTitle, prBody)
 	if prErr != nil {
-		if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("PR creation failed: %v", prErr), result.TokensUsed, result.CostUSD); reportErr != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
-		}
+		e.reportFailure(task.ID, task, result.Output, fmt.Sprintf("PR creation failed: %v", prErr))
 		return fmt.Errorf("PR creation failed: %w", prErr)
 	}
 	task.PRUrl = prURL
@@ -472,8 +490,8 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 	}
 
 	// Report completion
-	if reportErr := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Stdout, "", result.TokensUsed, result.CostUSD); reportErr != nil {
-		slog.Warn("failed to report task done", "task_id", task.ID, "error", reportErr)
+	if err := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "", 0, 0); err != nil {
+		slog.Warn("failed to report task done", "task_id", task.ID, "error", err)
 	}
 	slog.Info("task completed", "task_id", task.ID, "pr_url", prURL, "pr_status", task.PRStatus)
 
@@ -716,56 +734,6 @@ func hasTag(task *models.Task, tag string) bool {
 		}
 	}
 	return false
-}
-
-// claudeCodeSmokeTest verifies Claude Code CLI is available and functional.
-func (e *Executor) claudeCodeSmokeTest() error {
-	return SmokeTest(e.claude, "claude-sonnet-4-20250514")
-}
-
-// SmokeTest verifies the Claude CLI is available and responsive.
-// This is exported so it can be reused by other components (e.g., triager).
-func SmokeTest(runner *claudecli.Runner, model string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "claude",
-		"-p", "respond with exactly: SMOKE_TEST_OK",
-		"--max-turns", "1",
-		"--output-format", "json",
-	)
-
-	stdout := &claudecli.LimitedBuffer{MaxSize: 1 << 20}
-	stderr := &claudecli.LimitedBuffer{MaxSize: 1 << 20}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("smoke test command failed: %w (stderr: %s)", err, stderr.String())
-	}
-
-	output := stdout.String()
-
-	// Check for SMOKE_TEST_OK in the raw output or parsed response
-	if strings.Contains(output, "SMOKE_TEST_OK") {
-		return nil
-	}
-
-	// Try to parse JSON response
-	parsed, err := claudecli.ParseResponse(output)
-	if err == nil && strings.Contains(parsed.ResultText, "SMOKE_TEST_OK") {
-		return nil
-	}
-
-	// Scan line-by-line as fallback
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		if strings.Contains(scanner.Text(), "SMOKE_TEST_OK") {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("smoke test response did not contain SMOKE_TEST_OK")
 }
 
 // registerPod registers this executor with the server pod registry with exponential backoff retry.

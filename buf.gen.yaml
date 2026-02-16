@@ -1,0 +1,33 @@
+version: v2
+plugins:
+  # Go: protobuf messages
+  - remote: buf.build/protocolbuffers/go
+    out: go/src/gen
+    opt: paths=source_relative
+
+  # Go: gRPC server/client (for Python communication)
+  - remote: buf.build/grpc/go
+    out: go/src/gen
+    opt: paths=source_relative
+
+  # Go: Connect-RPC handlers (for Frontend communication)
+  - remote: buf.build/connectrpc/go
+    out: go/src/gen
+    opt: paths=source_relative
+
+  # TypeScript: protobuf messages
+  - remote: buf.build/bufbuild/es
+    out: gen/ts
+    opt: target=ts
+
+  # TypeScript: Connect-RPC client
+  - remote: buf.build/connectrpc/es
+    out: gen/ts
+    opt: target=ts
+
+  # Python: protobuf messages + gRPC
+  - remote: buf.build/protocolbuffers/python
+    out: gen/python
+
+  - remote: buf.build/grpc/python
+    out: gen/python

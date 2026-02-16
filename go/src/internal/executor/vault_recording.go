@@ -5,13 +5,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/circle-oo/flux/internal/claudecli"
 	"github.com/circle-oo/flux/internal/models"
 	"github.com/circle-oo/flux/internal/vault"
 )
 
 // RecordTaskCompletion records a completed task to the vault.
-func RecordTaskCompletion(vaultWriter *vault.Writer, task *models.Task, result *claudecli.Result) error {
+func RecordTaskCompletion(vaultWriter *vault.Writer, task *models.Task, result *ExecutionResult) error {
 	slog.Debug("building task summary for vault", "task_id", task.ID)
 	data := buildTaskSummaryData(task, result)
 	markdown := vault.TaskSummaryTemplate(data)
@@ -27,8 +26,8 @@ func RecordTaskCompletion(vaultWriter *vault.Writer, task *models.Task, result *
 	return nil
 }
 
-// buildTaskSummaryData maps Task and claudecli.Result to TaskSummaryData.
-func buildTaskSummaryData(task *models.Task, result *claudecli.Result) vault.TaskSummaryData {
+// buildTaskSummaryData maps Task and ExecutionResult to TaskSummaryData.
+func buildTaskSummaryData(task *models.Task, result *ExecutionResult) vault.TaskSummaryData {
 	duration := "unknown"
 	if result != nil && result.Duration > 0 {
 		duration = result.Duration.Round(time.Second).String()
@@ -46,7 +45,7 @@ func buildTaskSummaryData(task *models.Task, result *claudecli.Result) vault.Tas
 
 	resultText := task.Result
 	if resultText == "" && result != nil {
-		resultText = result.Stdout
+		resultText = result.Output
 	}
 	if resultText == "" {
 		resultText = "No result recorded"

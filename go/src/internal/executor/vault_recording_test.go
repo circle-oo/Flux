@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/circle-oo/flux/internal/claudecli"
 	"github.com/circle-oo/flux/internal/models"
 )
 
@@ -24,7 +23,7 @@ func TestBuildTaskSummaryData(t *testing.T) {
 		Result:       "Feature implemented successfully",
 	}
 
-	result := &claudecli.Result{
+	result := &ExecutionResult{
 		Duration: 30 * time.Minute,
 	}
 
@@ -80,7 +79,7 @@ func TestBuildTaskSummaryDataWithDefaults(t *testing.T) {
 		Model:    "opus",
 	}
 
-	result := &claudecli.Result{}
+	result := &ExecutionResult{}
 
 	data := buildTaskSummaryData(task, result)
 
@@ -98,24 +97,24 @@ func TestBuildTaskSummaryDataWithDefaults(t *testing.T) {
 	}
 }
 
-func TestBuildTaskSummaryDataUsesResultStdout(t *testing.T) {
+func TestBuildTaskSummaryDataUsesResultOutput(t *testing.T) {
 	task := &models.Task{
 		ID:       "task-ghi789",
-		Title:    "Task with stdout",
+		Title:    "Task with output",
 		Status:   models.TaskCompleted,
 		Priority: 5,
 		Model:    "sonnet",
 		Result:   "", // Empty Result field
 	}
 
-	result := &claudecli.Result{
-		Stdout:   "Claude Code output here",
+	result := &ExecutionResult{
+		Output:   "Agent execution output here",
 		Duration: 10 * time.Minute,
 	}
 
 	data := buildTaskSummaryData(task, result)
 
-	if data.Result != result.Stdout {
-		t.Errorf("Result should use stdout when Result is empty, got %s", data.Result)
+	if data.Result != result.Output {
+		t.Errorf("Result should use Output when Result is empty, got %s", data.Result)
 	}
 }

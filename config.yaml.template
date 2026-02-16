@@ -16,6 +16,7 @@ database:
   backup_retention_days: 7
 
 vault:
+  name: "Flux"
   path: "~/ObsidianVault/Flux"
 
 github:

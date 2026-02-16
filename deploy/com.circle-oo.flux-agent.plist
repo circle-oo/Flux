@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.circle-oo.flux-agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/Users/won.park/workspace/flux/deploy/run-flux-agent.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/won.park/workspace/flux</string>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/won.park/workspace/flux/logs/flux-agent-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/won.park/workspace/flux/logs/flux-agent-stderr.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>HOME</key>
+        <string>/Users/won.park</string>
+    </dict>
+</dict>
+</plist>
