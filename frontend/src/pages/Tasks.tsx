@@ -130,6 +130,10 @@ export default function Tasks() {
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
   const [loadedSubtasks, setLoadedSubtasks] = useState<Record<string, Task[]>>({})
   const [loadingSubtasks, setLoadingSubtasks] = useState<Set<string>>(new Set())
+  const [showSubtasksInList, setShowSubtasksInList] = useState<boolean>(() => {
+    const stored = localStorage.getItem('flux-show-subtasks-in-list')
+    return stored ? JSON.parse(stored) : false
+  })
 
   // Initialize filters from URL params on mount
   useEffect(() => {
@@ -177,19 +181,28 @@ export default function Tasks() {
 
     if (group && group.statuses.length > 0) {
       // Filter by group statuses
-      filtered = filtered.filter((t) => !t.parent_id && group.statuses.includes(t.status))
+      filtered = filtered.filter((t) => {
+        const matchesStatus = group.statuses.includes(t.status)
+        const isSubtask = !!t.parent_id
+        return matchesStatus && (showSubtasksInList || !isSubtask)
+      })
     } else if (filters.status) {
       // Individual status filter (detailed filter mode)
-      filtered = filtered.filter((t) => !t.parent_id && (
-        filters.status === 'ARCHIVED' || t.status === filters.status
-      ))
+      filtered = filtered.filter((t) => {
+        const matchesStatus = filters.status === 'ARCHIVED' || t.status === filters.status
+        const isSubtask = !!t.parent_id
+        return matchesStatus && (showSubtasksInList || !isSubtask)
+      })
     } else {
-      // 'All' group or no filter - hide archived by default, hide subtasks
-      filtered = filtered.filter((t) => !t.parent_id && t.status !== 'ARCHIVED')
+      // 'All' group or no filter - hide archived by default
+      filtered = filtered.filter((t) => {
+        const isSubtask = !!t.parent_id
+        return t.status !== 'ARCHIVED' && (showSubtasksInList || !isSubtask)
+      })
     }
 
     return filtered
-  }, [tasks, filters.status, activeFilterGroup])
+  }, [tasks, filters.status, activeFilterGroup, showSubtasksInList])
 
   const sortedTasks = useMemo(() => {
     const sorted = [...visibleTasks]
@@ -337,6 +350,12 @@ export default function Tasks() {
     setActiveFilterGroup('')
   }
 
+  const handleToggleSubtasks = () => {
+    const newValue = !showSubtasksInList
+    setShowSubtasksInList(newValue)
+    localStorage.setItem('flux-show-subtasks-in-list', JSON.stringify(newValue))
+  }
+
   const activeProjects = projects.filter((p) => p.status === 'ACTIVE')
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]))
 
@@ -444,6 +463,19 @@ export default function Tasks() {
               </button>
             ))}
           </div>
+
+          <div className="hidden sm:block w-px h-6 bg-slate-700" />
+
+          {/* Show Subtasks Toggle */}
+          <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={showSubtasksInList}
+              onChange={handleToggleSubtasks}
+              className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+            />
+            <span className="text-xs text-slate-400">Show subtasks</span>
+          </label>
         </div>
 
         {/* Result count */}
