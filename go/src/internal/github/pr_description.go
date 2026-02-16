@@ -2,8 +2,6 @@ package github
 
 import (
 	"fmt"
-	"os/exec"
-	"regexp"
 	"strings"
 
 	"github.com/circle-oo/flux/internal/models"
@@ -101,50 +99,12 @@ func (b *PRDescriptionBuilder) buildImplementationSection() string {
 	var sb strings.Builder
 	sb.WriteString("## 🔨 What Was Done in This PR\n\n")
 
-	// Implementation summary
-	summary := b.generateImplementationSummary()
-	if summary != "" {
-		sb.WriteString("### Summary\n\n")
-		sb.WriteString(summary)
-		sb.WriteString("\n\n")
-	}
-
-	// Get commit information
-	commits := b.getCommitSummary()
-	if len(commits) > 0 {
-		sb.WriteString("### Commits\n\n")
-		for _, commit := range commits {
-			sb.WriteString(fmt.Sprintf("- %s\n", commit))
-		}
+	// Show only the task result
+	if b.task.Result != "" {
+		sb.WriteString(b.task.Result)
 		sb.WriteString("\n")
-	}
-
-	// Get file changes
-	fileChanges := b.getFileChanges()
-	if len(fileChanges) > 0 {
-		sb.WriteString("### Files Changed\n\n")
-		for _, change := range fileChanges {
-			sb.WriteString(fmt.Sprintf("- %s\n", change))
-		}
-		sb.WriteString("\n")
-	}
-
-	// Statistics
-	if b.task.DiffLines > 0 || b.task.FilesChanged > 0 {
-		sb.WriteString("### Statistics\n\n")
-		if b.task.FilesChanged > 0 {
-			sb.WriteString(fmt.Sprintf("- **Files Changed:** %d\n", b.task.FilesChanged))
-		}
-		if b.task.DiffLines > 0 {
-			sb.WriteString(fmt.Sprintf("- **Lines Changed:** %d\n", b.task.DiffLines))
-		}
-	}
-
-	// Additional prompt if provided
-	if b.task.Prompt != "" {
-		sb.WriteString("\n### Additional Implementation Notes\n\n")
-		sb.WriteString(b.task.Prompt)
-		sb.WriteString("\n")
+	} else {
+		sb.WriteString("*No task result available*\n")
 	}
 
 	return sb.String()
@@ -263,167 +223,3 @@ func (b *PRDescriptionBuilder) buildFooter() string {
 	return sb.String()
 }
 
-// generateImplementationSummary creates a concise summary of the implementation.
-func (b *PRDescriptionBuilder) generateImplementationSummary() string {
-	var summary strings.Builder
-
-	// Line 1-2: What was changed
-	if b.task.Title != "" {
-		summary.WriteString(fmt.Sprintf("This PR implements **%s**.\n\n", b.task.Title))
-	}
-
-	// Line 3-5: Why the change was made
-	if b.task.Description != "" {
-		// Extract first 1-2 sentences from description as the "why"
-		desc := strings.TrimSpace(b.task.Description)
-		// Find first period or newline to limit verbosity
-		sentences := strings.SplitN(desc, ". ", 2)
-		why := sentences[0]
-		if len(sentences) > 1 && len(why) < 150 {
-			why += ". " + strings.SplitN(sentences[1], ". ", 2)[0]
-		}
-		summary.WriteString(fmt.Sprintf("**Why:** %s\n\n", why))
-	}
-
-	// Line 6-8: Key implementation details (commits and file changes)
-	commits := b.getCommitSummary()
-	fileChanges := b.getFileChanges()
-
-	if len(commits) > 0 || len(fileChanges) > 0 {
-		summary.WriteString("**Key Changes:**\n")
-		if len(commits) > 0 {
-			summary.WriteString(fmt.Sprintf("- Implemented across %d commit(s)\n", len(commits)))
-		}
-		if len(fileChanges) > 0 {
-			summary.WriteString(fmt.Sprintf("- Modified %d file(s)", len(fileChanges)))
-
-			// Categorize changes
-			added, modified, deleted := 0, 0, 0
-			for _, change := range fileChanges {
-				if strings.HasPrefix(change, "**Added**") {
-					added++
-				} else if strings.HasPrefix(change, "**Modified**") {
-					modified++
-				} else if strings.HasPrefix(change, "**Deleted**") {
-					deleted++
-				}
-			}
-			details := []string{}
-			if added > 0 {
-				details = append(details, fmt.Sprintf("%d added", added))
-			}
-			if modified > 0 {
-				details = append(details, fmt.Sprintf("%d modified", modified))
-			}
-			if deleted > 0 {
-				details = append(details, fmt.Sprintf("%d deleted", deleted))
-			}
-			if len(details) > 0 {
-				summary.WriteString(fmt.Sprintf(" (%s)", strings.Join(details, ", ")))
-			}
-			summary.WriteString("\n")
-		}
-		summary.WriteString("\n")
-	}
-
-	// Line 9-10: Impact or benefits
-	if b.task.Type != "" {
-		impact := ""
-		switch b.task.Type {
-		case models.TaskTypeCoding:
-			impact = "Adds new functionality to the codebase."
-		case models.TaskTypeBugfix:
-			impact = "Fixes a bug and improves system reliability."
-		case models.TaskTypeDocument:
-			impact = "Improves documentation and developer experience."
-		case models.TaskTypeMaintenance:
-			impact = "Maintains code quality and updates dependencies."
-		case models.TaskTypeResearch:
-			impact = "Documents research findings for future reference."
-		case models.TaskTypeDeploy:
-			impact = "Prepares deployment and operational improvements."
-		case models.TaskTypePlanning:
-			impact = "Provides planning and design documentation."
-		default:
-			impact = "Contributes to the project's goals."
-		}
-		summary.WriteString(fmt.Sprintf("**Impact:** %s", impact))
-	}
-
-	return summary.String()
-}
-
-// getCommitSummary retrieves commit messages from the current branch.
-func (b *PRDescriptionBuilder) getCommitSummary() []string {
-	cmd := exec.Command("git", "log", "--format=%s", fmt.Sprintf("%s..HEAD", b.baseBranch))
-	cmd.Dir = b.worktreePath
-	output, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	var commits []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			commits = append(commits, line)
-		}
-	}
-
-	return commits
-}
-
-// getFileChanges retrieves the list of files changed with their change type.
-func (b *PRDescriptionBuilder) getFileChanges() []string {
-	cmd := exec.Command("git", "diff", "--name-status", fmt.Sprintf("%s..HEAD", b.baseBranch))
-	cmd.Dir = b.worktreePath
-	output, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	var changes []string
-
-	changeTypeMap := map[string]string{
-		"A": "Added",
-		"M": "Modified",
-		"D": "Deleted",
-		"R": "Renamed",
-		"C": "Copied",
-	}
-
-	// Regex to match git diff --name-status output (e.g., "M\tfile.go" or "R100\told.go\tnew.go")
-	re := regexp.MustCompile(`^([AMDRC])(\d*)\s+(.+)$`)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		matches := re.FindStringSubmatch(line)
-		if len(matches) >= 4 {
-			changeType := matches[1]
-			fileName := matches[3]
-
-			// Handle renamed files (format: "old\tnew")
-			if changeType == "R" && strings.Contains(fileName, "\t") {
-				parts := strings.Split(fileName, "\t")
-				if len(parts) == 2 {
-					fileName = fmt.Sprintf("%s → %s", parts[0], parts[1])
-				}
-			}
-
-			typeLabel := changeTypeMap[changeType]
-			if typeLabel == "" {
-				typeLabel = "Modified"
-			}
-
-			changes = append(changes, fmt.Sprintf("**%s**: `%s`", typeLabel, fileName))
-		}
-	}
-
-	return changes
-}
