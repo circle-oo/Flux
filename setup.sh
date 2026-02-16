@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Flux Setup Script
+# Flux Setup Script — first-time dependency install + build.
 # Usage: bash setup.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -44,14 +44,20 @@ TEMPLATE_CONFIG="$SCRIPT_DIR/config.yaml.template"
 
 # 2. Create config from template
 if [ ! -f "$DEFAULT_CONFIG" ]; then
-    echo "Creating config.yaml from template..."
-    cp "$TEMPLATE_CONFIG" "$DEFAULT_CONFIG"
-    echo "  Created: $DEFAULT_CONFIG"
-    echo "  IMPORTANT: Edit config.yaml and set your environment variables:"
-    echo "    export FLUX_UI_PASSWORD='your-password'"
-    echo "    export GITHUB_TOKEN='your-github-token'"
-    echo "    export DISCORD_WEBHOOK_URL='your-webhook-url' (optional)"
-    echo ""
+    if [ -f "$TEMPLATE_CONFIG" ]; then
+        echo "Creating config.yaml from template..."
+        cp "$TEMPLATE_CONFIG" "$DEFAULT_CONFIG"
+        echo "  Created: $DEFAULT_CONFIG"
+        echo "  IMPORTANT: Edit config.yaml and set your environment variables:"
+        echo "    export FLUX_UI_PASSWORD='your-password'"
+        echo "    export GITHUB_TOKEN='your-github-token'"
+        echo "    export DISCORD_WEBHOOK_URL='your-webhook-url' (optional)"
+        echo ""
+    else
+        echo "WARNING: No config.yaml or config.yaml.template found."
+        echo "  Create config.yaml before running Flux."
+        echo ""
+    fi
 else
     echo "config.yaml already exists, skipping."
     echo ""
@@ -59,7 +65,7 @@ fi
 
 # 3. Install frontend dependencies
 echo "Installing frontend dependencies..."
-cd react/flux-ui
+cd frontend
 npm install --silent 2>&1 | tail -1
 cd "$SCRIPT_DIR"
 echo "  Done."
@@ -67,7 +73,7 @@ echo ""
 
 # 4. Build frontend
 echo "Building frontend..."
-cd react/flux-ui
+cd frontend
 npm run build 2>&1 | tail -3
 cd "$SCRIPT_DIR"
 echo "  Done."
@@ -76,7 +82,7 @@ echo ""
 # 5. Embed frontend into Go
 echo "Embedding frontend..."
 rm -rf go/src/web/dist
-cp -r react/flux-ui/dist go/src/web/dist
+cp -r frontend/dist go/src/web/dist
 echo "  Done."
 echo ""
 
@@ -108,7 +114,10 @@ echo "Before starting, set required environment variables:"
 echo "  export FLUX_UI_PASSWORD='your-password'"
 echo ""
 echo "To start Flux:"
-echo "  bash start-up.sh"
-echo "  # or: ./go/bin/flux --config config.yaml"
+echo "  bash startup-dev.sh           # dev — foreground, go run"
+echo "  bash startup-prod.sh          # prod — launchd service"
+echo ""
+echo "To stop production:"
+echo "  bash stop-prod.sh"
 echo ""
 echo "Then open http://localhost:8080 in your browser."
