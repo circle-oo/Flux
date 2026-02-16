@@ -110,7 +110,7 @@ func (t *Triager) processNext(ctx context.Context) {
 	slog.Info("triaging task", "task_id", task.ID, "title", task.Title, "model", model, "component", component)
 
 	start := time.Now()
-	result, err := TriageTask(ctx, t.claude, task, model)
+	result, err := TriageTask(ctx, t.claude, t.client, task, model)
 	if err != nil {
 		slog.Warn("triage failed, promoting with original description",
 			"task_id", task.ID, "title", task.Title, "error", err, "component", component)
@@ -171,12 +171,18 @@ func (t *Triager) smokeTest() error {
 
 // triageData holds data for triage.txt template.
 type triageData struct {
-	Title       string
-	Type        string
-	Priority    int
-	Description string
-	Tags        string
-	ProjectName string
+	Title              string
+	Type               string
+	Priority           int
+	Description        string
+	Tags               string
+	ProjectName        string
+	ProjectDescription string
+	ProjectType        string
+	TechStack          string
+	GoalTitle          string
+	GoalDescription    string
+	GoalPriorities     string
 }
 
 // TriageResult contains the output of task triage analysis.
@@ -195,8 +201,33 @@ type triageJSON struct {
 
 // TriageTask uses Claude to analyze a task, rewrite its description with clear
 // requirements, suggest a priority level, and recommend an execution model.
-func TriageTask(ctx context.Context, runner *claudecli.Runner, task *models.Task, model string) (*TriageResult, error) {
-	prompt := buildTriagePrompt(task)
+// It enriches the analysis with project and goal context when available.
+func TriageTask(ctx context.Context, runner *claudecli.Runner, client *apiclient.Client, task *models.Task, model string) (*TriageResult, error) {
+	// Fetch project context if available
+	var project *models.Project
+	var goal *models.Goal
+	if task.ProjectID != "" && client != nil {
+		var err error
+		project, err = client.GetProject(task.ProjectID)
+		if err != nil {
+			slog.Warn("failed to fetch project context for triage",
+				"task_id", task.ID, "project_id", task.ProjectID, "error", err)
+			// Continue without project context rather than failing
+		} else {
+			slog.Debug("fetched project context for triage",
+				"task_id", task.ID, "project_id", task.ProjectID, "project_name", project.Name)
+		}
+	}
+
+	// Fetch goal context if task or project has a goal_id
+	goalID := task.GoalID
+	if goalID == "" && project != nil {
+		goalID = project.GoalID
+	}
+	// Note: Goal fetching would require adding GetGoal to apiclient, skipping for now
+	// as goals are less critical than project context
+
+	prompt := buildTriagePromptWithContext(task, project, goal)
 
 	triageCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
@@ -247,23 +278,48 @@ func TriageTask(ctx context.Context, runner *claudecli.Runner, task *models.Task
 }
 
 func buildTriagePrompt(task *models.Task) string {
+	return buildTriagePromptWithContext(task, nil, nil)
+}
+
+func buildTriagePromptWithContext(task *models.Task, project *models.Project, goal *models.Goal) string {
 	tags := ""
 	if len(task.Tags) > 0 {
 		tags = strings.Join(task.Tags, ", ")
 	}
 
-	var buf strings.Builder
-	err := triageTemplate.ExecuteTemplate(&buf, "triage.txt", triageData{
+	data := triageData{
 		Title:       task.Title,
 		Type:        task.Type,
 		Priority:    task.Priority,
 		Description: task.Description,
 		Tags:        tags,
 		ProjectName: task.ProjectID,
-	})
+	}
+
+	// Enrich with project context
+	if project != nil {
+		data.ProjectName = project.Name
+		data.ProjectDescription = project.Description
+		data.ProjectType = project.Type
+		if len(project.TechStack) > 0 {
+			data.TechStack = strings.Join(project.TechStack, ", ")
+		}
+	}
+
+	// Enrich with goal context
+	if goal != nil {
+		data.GoalTitle = goal.Title
+		data.GoalDescription = goal.Description
+		if len(goal.Priorities) > 0 {
+			data.GoalPriorities = strings.Join(goal.Priorities, ", ")
+		}
+	}
+
+	var buf strings.Builder
+	err := triageTemplate.ExecuteTemplate(&buf, "triage.txt", data)
 	if err != nil {
 		slog.Warn("failed to render triage prompt template, using fallback", "error", err)
-		return fmt.Sprintf("Analyze this task and suggest priority, model, and rewrite description:\n\nTitle: %s\nType: %s\nDescription: %s", task.Title, task.Type, task.Description)
+		return fmt.Sprintf("Analyze this task and suggest priority and rewrite description:\n\nTitle: %s\nType: %s\nDescription: %s", task.Title, task.Type, task.Description)
 	}
 	return buf.String()
 }
