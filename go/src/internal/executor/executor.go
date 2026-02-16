@@ -46,6 +46,8 @@ type Executor struct {
 	vaultWriter        *vault.Writer
 	stopCh             chan struct{}
 	executionStartTime time.Time
+	currentTaskID      string
+	running            bool
 }
 
 // sensitiveFile tracks a file path and its mod time for integrity verification.
@@ -68,12 +70,18 @@ func NewExecutor(id string, cfg *config.Config, discord *notifier.Discord, vw *v
 		vaultWriter:        vw,
 		stopCh:             make(chan struct{}),
 		executionStartTime: time.Now(),
+		currentTaskID:      "",
+		running:            false,
 	}
 }
 
 // Run is the main execution loop. It polls for tasks and executes them.
 func (e *Executor) Run(ctx context.Context) {
 	slog.Info("executor started", "id", e.id)
+	e.running = true
+	defer func() {
+		e.running = false
+	}()
 
 	// Register with server
 	if err := e.registerPod(); err != nil {
@@ -92,8 +100,10 @@ func (e *Executor) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("executor stopping due to context cancellation", "id", e.id)
 			return
 		case <-e.stopCh:
+			slog.Info("executor stopping due to stop signal", "id", e.id)
 			return
 		default:
 			e.executeOnce(ctx)
@@ -122,6 +132,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 
 	slog.Info("picked up task", "task_id", task.ID, "title", task.Title, "type", task.Type)
 	task.ExecutorID = e.id
+	e.currentTaskID = task.ID
 
 	// 2. Prepare execution (model + prompt)
 	project, err := e.manager.GetProject(task.ProjectID)
@@ -175,6 +186,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 
 	// 6. Update pod status to idle after task completion
+	e.currentTaskID = ""
 	if err := e.updatePodStatus("idle", "", ""); err != nil {
 		slog.Warn("failed to update pod status to idle", "id", e.id, "error", err)
 	}
@@ -822,4 +834,17 @@ func (e *Executor) updatePodStatus(status, taskID, taskTitle string) error {
 	}
 
 	return e.manager.PostInternal("/internal/pods/status", payload, nil)
+}
+
+// IsRunning returns whether the executor is currently running.
+// Implements the shutdown.Pod interface.
+func (e *Executor) IsRunning() bool {
+	return e.running
+}
+
+// CurrentTaskID returns the ID of the task currently being executed.
+// Returns empty string if no task is active.
+// Implements the shutdown.Pod interface.
+func (e *Executor) CurrentTaskID() string {
+	return e.currentTaskID
 }

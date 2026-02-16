@@ -38,29 +38,37 @@ func init() {
 // Triage determines priority, analysis, rewritten description, and
 // the recommended model for task execution.
 type Triager struct {
-	id       string
-	config   *config.Config
-	claude   *claudecli.Runner
-	client   *apiclient.Client
-	notifier *notifier.Discord
-	stopCh   chan struct{}
+	id            string
+	config        *config.Config
+	claude        *claudecli.Runner
+	client        *apiclient.Client
+	notifier      *notifier.Discord
+	stopCh        chan struct{}
+	currentTaskID string
+	running       bool
 }
 
 // New creates a new Triager.
 func New(id string, cfg *config.Config, discord *notifier.Discord) *Triager {
 	return &Triager{
-		id:       id,
-		config:   cfg,
-		claude:   claudecli.NewRunner(&cfg.Executor),
-		client:   apiclient.NewClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
-		notifier: discord,
-		stopCh:   make(chan struct{}),
+		id:            id,
+		config:        cfg,
+		claude:        claudecli.NewRunner(&cfg.Executor),
+		client:        apiclient.NewClient(fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)),
+		notifier:      discord,
+		stopCh:        make(chan struct{}),
+		currentTaskID: "",
+		running:       false,
 	}
 }
 
 // Run is the main loop. It polls for PENDING tasks and triages them.
 func (t *Triager) Run(ctx context.Context) {
 	slog.Info("triager started", "id", t.id, "component", component)
+	t.running = true
+	defer func() {
+		t.running = false
+	}()
 
 	// Smoke test
 	if err := t.smokeTest(); err != nil {
@@ -101,6 +109,11 @@ func (t *Triager) processNext(ctx context.Context) {
 	if task == nil {
 		return
 	}
+
+	t.currentTaskID = task.ID
+	defer func() {
+		t.currentTaskID = ""
+	}()
 
 	model := t.config.Triager.Model
 	if model == "" {
@@ -462,4 +475,17 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// IsRunning returns whether the triager is currently running.
+// Implements the shutdown.Pod interface.
+func (t *Triager) IsRunning() bool {
+	return t.running
+}
+
+// CurrentTaskID returns the ID of the task currently being triaged.
+// Returns empty string if no task is active.
+// Implements the shutdown.Pod interface.
+func (t *Triager) CurrentTaskID() string {
+	return t.currentTaskID
 }

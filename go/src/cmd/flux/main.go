@@ -185,18 +185,28 @@ func main() {
 		autoUpdater.Stop()
 	}
 
-	// Stop executors and triager
-	ctxCancel()
+	// Build pod list for graceful shutdown
+	pods := make([]shutdown.Pod, 0, executorCount+1)
 	for _, exec := range executors {
-		exec.Stop()
+		pods = append(pods, exec)
 	}
 	if triage != nil {
-		triage.Stop()
+		pods = append(pods, triage)
 	}
 
+	// Initiate graceful shutdown with context and timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Shutdown.PodGracePeriod)
 	defer shutdownCancel()
 
+	// Cancel executor/triager context to signal them to stop accepting new work
+	ctxCancel()
+
+	// Use GracefulShutdown to coordinate pod termination
+	if err := shutdown.GracefulShutdown(shutdownCtx, &cfg.Shutdown, pods, database, discord); err != nil {
+		logger.Error("graceful shutdown error", "error", err)
+	}
+
+	// Shutdown HTTP server
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("server shutdown error", "error", err)
 	}
