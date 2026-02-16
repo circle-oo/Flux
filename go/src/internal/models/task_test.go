@@ -427,3 +427,84 @@ func TestTaskStore_List_ExcludeSubtasks(t *testing.T) {
 		t.Errorf("expected 2 top-level tasks, got %d", len(topLevel))
 	}
 }
+
+func TestTask_IsRetryable(t *testing.T) {
+	tests := []struct {
+		name     string
+		task     Task
+		expected bool
+	}{
+		{
+			name:     "failed with retries available",
+			task:     Task{Status: TaskFailed, RetryCount: 1, MaxRetries: 3},
+			expected: true,
+		},
+		{
+			name:     "failed with no retries left",
+			task:     Task{Status: TaskFailed, RetryCount: 3, MaxRetries: 3},
+			expected: false,
+		},
+		{
+			name:     "failed with retries exceeded",
+			task:     Task{Status: TaskFailed, RetryCount: 4, MaxRetries: 3},
+			expected: false,
+		},
+		{
+			name:     "completed task",
+			task:     Task{Status: TaskCompleted, RetryCount: 0, MaxRetries: 3},
+			expected: false,
+		},
+		{
+			name:     "running task",
+			task:     Task{Status: TaskRunning, RetryCount: 0, MaxRetries: 3},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.task.IsRetryable()
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestTask_HasRetriesExhausted(t *testing.T) {
+	tests := []struct {
+		name     string
+		task     Task
+		expected bool
+	}{
+		{
+			name:     "failed with retries exhausted",
+			task:     Task{Status: TaskFailed, RetryCount: 3, MaxRetries: 3},
+			expected: true,
+		},
+		{
+			name:     "failed with retries exceeded",
+			task:     Task{Status: TaskFailed, RetryCount: 4, MaxRetries: 3},
+			expected: true,
+		},
+		{
+			name:     "failed with retries available",
+			task:     Task{Status: TaskFailed, RetryCount: 1, MaxRetries: 3},
+			expected: false,
+		},
+		{
+			name:     "completed task",
+			task:     Task{Status: TaskCompleted, RetryCount: 3, MaxRetries: 3},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.task.HasRetriesExhausted()
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
