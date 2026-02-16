@@ -1093,6 +1093,94 @@ func TestInternal_CreateSubtasks_CountExceeded(t *testing.T) {
 	}
 }
 
+func TestInternal_CreateSubtasks_WithDependencies(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Create parent task
+	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title": "Parent task", "type": "CODING",
+	})
+	var created map[string]interface{}
+	parseResponse(t, rr, &created)
+	parentID := created["id"].(string)
+
+	// Create subtasks with dependencies
+	body, _ := json.Marshal(map[string]interface{}{
+		"parent_id": parentID,
+		"subtasks": []map[string]string{
+			{"title": "Sub 1", "description": "First subtask"},
+			{"title": "Sub 2", "description": "Second subtask"},
+			{"title": "Sub 3", "description": "Third subtask"},
+		},
+		"subtask_dependencies": []map[string]string{
+			{"dependent_id": "1", "dependency_id": "0"}, // Sub 2 depends on Sub 1
+			{"dependent_id": "2", "dependency_id": "1"}, // Sub 3 depends on Sub 2
+		},
+	})
+	req := httptest.NewRequest("POST", "/internal/subtasks", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+	tasks := resp["tasks"].([]interface{})
+	if len(tasks) != 3 {
+		t.Errorf("expected 3 subtasks, got %d", len(tasks))
+	}
+
+	// Verify dependencies were set
+	task2 := tasks[1].(map[string]interface{})
+	dependsOn := task2["depends_on"].([]interface{})
+	if len(dependsOn) != 1 {
+		t.Errorf("expected Sub 2 to have 1 dependency, got %d", len(dependsOn))
+	}
+}
+
+func TestInternal_CreateSubtasks_CircularDependency(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Create parent task
+	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
+		"title": "Parent task", "type": "CODING",
+	})
+	var created map[string]interface{}
+	parseResponse(t, rr, &created)
+	parentID := created["id"].(string)
+
+	// Create subtasks with circular dependency
+	body, _ := json.Marshal(map[string]interface{}{
+		"parent_id": parentID,
+		"subtasks": []map[string]string{
+			{"title": "Sub 1", "description": "First subtask"},
+			{"title": "Sub 2", "description": "Second subtask"},
+		},
+		"subtask_dependencies": []map[string]string{
+			{"dependent_id": "0", "dependency_id": "1"}, // Sub 1 depends on Sub 2
+			{"dependent_id": "1", "dependency_id": "0"}, // Sub 2 depends on Sub 1 (cycle!)
+		},
+	})
+	req := httptest.NewRequest("POST", "/internal/subtasks", bytes.NewBuffer(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	srv.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for circular dependency, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify error message mentions circular dependency
+	if !bytes.Contains(rr.Body.Bytes(), []byte("circular dependency")) {
+		t.Errorf("expected error message to mention circular dependency, got: %s", rr.Body.String())
+	}
+}
+
 func TestInternal_CreateTask(t *testing.T) {
 	srv, _ := setupTestServer(t)
 
