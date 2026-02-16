@@ -620,11 +620,11 @@ func (s *TaskStore) ValidateSubtaskDAGWithUpdate(parentID string, taskID string,
 
 	// Detect cycles using DFS
 	visited := make(map[string]bool)
-	inStack := make(map[string]bool)
+	recStack := make(map[string]bool)
 
 	for id := range taskIDs {
 		if !visited[id] {
-			if hasCycle(id, graph, visited, inStack) {
+			if hasCycle(id, graph, visited, recStack) {
 				return fmt.Errorf("adding dependencies would create a cycle in subtask DAG")
 			}
 		}

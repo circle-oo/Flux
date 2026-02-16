@@ -43,7 +43,6 @@ export default function TaskListItem({
               {task.triage_title || task.title}
             </h3>
             <StatusBadge status={task.status} />
-            <span className="badge-secondary shrink-0">{task.type}</span>
             {task.triage_analysis && (
               <span className="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0">
                 Triaged
@@ -176,7 +175,6 @@ export default function TaskListItem({
                         {subtask.triage_title || subtask.title}
                       </h4>
                       <StatusBadge status={subtask.status} size="sm" />
-                      <span className="badge-secondary shrink-0 text-[10px]">{subtask.type}</span>
                     </div>
                     <div className="flex items-center gap-2 text-[10px] text-slate-600">
                       <span>P{subtask.priority}</span>

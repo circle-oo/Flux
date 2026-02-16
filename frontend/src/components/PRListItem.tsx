@@ -9,7 +9,6 @@ interface PRListItemProps {
     description: string
     pr_status?: string
     pr_url?: string
-    type: string
     diff_lines?: number
     files_changed?: number
     branch_name?: string
@@ -42,7 +41,6 @@ export default function PRListItem({
           <div className="flex items-center gap-2 mb-1.5">
             <h3 className="text-base font-medium text-slate-100 truncate">{pr.title}</h3>
             <PRStatusBadge status={pr.pr_status} />
-            <span className="badge-secondary text-xs shrink-0">{pr.type}</span>
           </div>
 
           {/* Description (clamped, expandable) */}

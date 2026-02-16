@@ -16,7 +16,6 @@ export interface Task {
   id: string
   title: string
   description: string
-  type: 'CODING' | 'RESEARCH' | 'DOCUMENT' | 'MAINTENANCE' | 'DEPLOY' | 'BUGFIX' | 'PLANNING'
   status: 'PENDING' | 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'RETRY' | 'ARCHIVED' | 'DECOMPOSED'
   priority: number
   project_id: string
@@ -217,7 +216,6 @@ class APIClient {
   async createTask(task: {
     title: string
     description: string
-    type: Task['type']
     priority: number
     project_id: string
     goal_id?: string

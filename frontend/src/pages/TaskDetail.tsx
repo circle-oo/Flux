@@ -121,7 +121,6 @@ export default function TaskDetail() {
           <h1 className="text-2xl font-bold text-slate-100 mb-2">{task.title}</h1>
           <div className="flex items-center gap-2">
             <StatusBadge status={task.status} />
-            <span className="badge-secondary">{task.type}</span>
             <span className="text-sm text-slate-500 font-mono">{task.id.slice(0, 8)}</span>
           </div>
         </div>
