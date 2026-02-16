@@ -525,12 +525,6 @@ const TaskSelectSQL = `SELECT id, title, description, type, status, priority, so
 	created_at, updated_at, started_at, completed_at
 	FROM tasks`
 
-// SubtaskDependency represents a dependency relationship between subtasks.
-type SubtaskDependency struct {
-	DependentID  string `json:"dependent_id"`
-	DependencyID string `json:"dependency_id"`
-}
-
 // GetSubtaskDependencies retrieves all dependencies for subtasks of a given parent task.
 func (s *TaskStore) GetSubtaskDependencies(parentID string) ([]*SubtaskDependency, error) {
 	query := `
