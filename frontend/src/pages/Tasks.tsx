@@ -127,6 +127,9 @@ export default function Tasks() {
   const [formError, setFormError] = useState<string | null>(null)
 
   const [subtaskCounts, setSubtaskCounts] = useState<Record<string, number>>({})
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
+  const [loadedSubtasks, setLoadedSubtasks] = useState<Record<string, Task[]>>({})
+  const [loadingSubtasks, setLoadingSubtasks] = useState<Set<string>>(new Set())
 
   // Initialize filters from URL params on mount
   useEffect(() => {
@@ -280,6 +283,39 @@ export default function Tasks() {
         await archiveTask(id)
       } catch (error) {
         console.error('Failed to archive task:', error)
+      }
+    }
+  }
+
+  const toggleSubtasks = async (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+
+    if (expandedTasks.has(taskId)) {
+      // Collapse
+      const newExpanded = new Set(expandedTasks)
+      newExpanded.delete(taskId)
+      setExpandedTasks(newExpanded)
+    } else {
+      // Expand - fetch subtasks if not already loaded
+      const newExpanded = new Set(expandedTasks)
+      newExpanded.add(taskId)
+      setExpandedTasks(newExpanded)
+
+      if (!loadedSubtasks[taskId]) {
+        const newLoading = new Set(loadingSubtasks)
+        newLoading.add(taskId)
+        setLoadingSubtasks(newLoading)
+
+        try {
+          const subtasks = await api.listSubtasks(taskId)
+          setLoadedSubtasks({ ...loadedSubtasks, [taskId]: subtasks })
+        } catch (error) {
+          console.error('Failed to load subtasks:', error)
+        } finally {
+          const newLoading = new Set(loadingSubtasks)
+          newLoading.delete(taskId)
+          setLoadingSubtasks(newLoading)
+        }
       }
     }
   }
@@ -685,9 +721,15 @@ export default function Tasks() {
                           </span>
                         )}
                         {subtaskCounts[task.id] && (
-                          <span className="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded shrink-0">
+                          <button
+                            onClick={(e) => toggleSubtasks(task.id, e)}
+                            className="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded shrink-0 hover:bg-purple-900/50 transition-colors flex items-center gap-1"
+                          >
+                            <span className="text-[10px]">
+                              {expandedTasks.has(task.id) ? '▼' : '▶'}
+                            </span>
                             {subtaskCounts[task.id]} subtask{subtaskCounts[task.id] !== 1 ? 's' : ''}
-                          </span>
+                          </button>
                         )}
                       </div>
 
@@ -795,6 +837,74 @@ export default function Tasks() {
                   {task.error_log && (
                     <div className="mt-3 p-3 bg-red-900/30 border border-red-600 rounded text-sm text-red-200 line-clamp-3">
                       <strong>Error:</strong> {task.error_log}
+                    </div>
+                  )}
+
+                  {/* Subtasks */}
+                  {expandedTasks.has(task.id) && (
+                    <div className="mt-3 pl-4 border-l-2 border-purple-600/30 space-y-2">
+                      {loadingSubtasks.has(task.id) ? (
+                        <div className="text-xs text-slate-500">Loading subtasks...</div>
+                      ) : loadedSubtasks[task.id]?.length > 0 ? (
+                        loadedSubtasks[task.id].map((subtask) => (
+                          <div
+                            key={subtask.id}
+                            className="bg-slate-800/50 border border-slate-700 rounded p-3 cursor-pointer hover:border-slate-600 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigate(`/tasks/${subtask.id}`)
+                            }}
+                          >
+                            <div className="flex items-start gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h4 className="text-sm font-medium text-slate-300 truncate">
+                                    {subtask.triage_title || subtask.title}
+                                  </h4>
+                                  <span
+                                    className={`badge shrink-0 text-[10px] ${
+                                      subtask.status === 'COMPLETED'
+                                        ? 'badge-success'
+                                        : subtask.status === 'FAILED'
+                                        ? 'badge-danger'
+                                        : subtask.status === 'RUNNING'
+                                        ? 'badge-warning'
+                                        : subtask.status === 'READY'
+                                        ? 'badge-info'
+                                        : subtask.status === 'RETRY'
+                                        ? 'badge-warning'
+                                        : subtask.status === 'CANCELLED'
+                                        ? 'bg-slate-500 text-white px-1.5 py-0.5 rounded'
+                                        : 'badge-secondary'
+                                    }`}
+                                  >
+                                    {subtask.status}
+                                  </span>
+                                  <span className="badge-secondary shrink-0 text-[10px]">
+                                    {subtask.type}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] text-slate-600">
+                                  <span>P{subtask.priority}</span>
+                                  {subtask.started_at && (
+                                    <span>Started {timeAgo(subtask.started_at)}</span>
+                                  )}
+                                  {subtask.completed_at && (
+                                    <span>Done {timeAgo(subtask.completed_at)}</span>
+                                  )}
+                                  {subtask.started_at && subtask.completed_at && (
+                                    <span className="text-slate-500">
+                                      ({duration(subtask.started_at, subtask.completed_at)})
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-xs text-slate-500">No subtasks found</div>
+                      )}
                     </div>
                   )}
                 </div>
