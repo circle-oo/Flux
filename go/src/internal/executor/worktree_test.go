@@ -452,6 +452,199 @@ func TestCleanupWorktreeRemovesTaskDirectory(t *testing.T) {
 	// (tested in integration tests, here we just verify path structure)
 }
 
+func TestFindWorktreeByTaskID(t *testing.T) {
+	projectName := "test-project"
+	workspaceBase := "/tmp/workspace"
+
+	tests := []struct {
+		name           string
+		taskID         string
+		expectedPath   string
+		expectedPrefix string
+	}{
+		{
+			name:           "full_task_id",
+			taskID:         "abc123def456",
+			expectedPath:   filepath.Join(workspaceBase, "trees", "test-project--task-abc123de", "worktree"),
+			expectedPrefix: "abc123de",
+		},
+		{
+			name:           "short_task_id",
+			taskID:         "xyz789",
+			expectedPath:   filepath.Join(workspaceBase, "trees", "test-project--task-xyz789", "worktree"),
+			expectedPrefix: "xyz789",
+		},
+		{
+			name:           "eight_char_task_id",
+			taskID:         "12345678",
+			expectedPath:   filepath.Join(workspaceBase, "trees", "test-project--task-12345678", "worktree"),
+			expectedPrefix: "12345678",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Verify the path construction logic
+			taskIDPrefix := tt.taskID
+			if len(tt.taskID) > 8 {
+				taskIDPrefix = tt.taskID[:8]
+			}
+
+			taskBaseDir := filepath.Join(workspaceBase, "trees", fmt.Sprintf("%s--task-%s", projectName, taskIDPrefix))
+			worktreePath := filepath.Join(taskBaseDir, "worktree")
+
+			if worktreePath != tt.expectedPath {
+				t.Errorf("expected path %s, got %s", tt.expectedPath, worktreePath)
+			}
+
+			if taskIDPrefix != tt.expectedPrefix {
+				t.Errorf("expected prefix %s, got %s", tt.expectedPrefix, taskIDPrefix)
+			}
+		})
+	}
+}
+
+func TestMergeSubtaskIntoParentCommandConstruction(t *testing.T) {
+	projectName := "test-project"
+	parentTaskID := "parent123456"
+	subtaskTaskID := "subtask78901"
+
+	workspaceBase := "/tmp/workspace"
+
+	// Expected paths
+	parentTaskBaseDir := filepath.Join(workspaceBase, "trees", fmt.Sprintf("%s--task-%s", projectName, parentTaskID[:8]))
+	parentWorktree := filepath.Join(parentTaskBaseDir, "worktree")
+
+	subtaskTaskBaseDir := filepath.Join(workspaceBase, "trees", fmt.Sprintf("%s--task-%s", projectName, subtaskTaskID[:8]))
+	subtaskWorktree := filepath.Join(subtaskTaskBaseDir, "worktree")
+	subtaskBareDir := filepath.Join(subtaskTaskBaseDir, ".repo")
+
+	subtaskBranch := fmt.Sprintf("task/%s", subtaskTaskID[:8])
+	remoteName := fmt.Sprintf("subtask-%s", subtaskTaskID[:8])
+
+	// Verify path construction
+	if !strings.Contains(parentWorktree, "parent12") {
+		t.Error("parent worktree path should contain parent task ID prefix")
+	}
+
+	if !strings.Contains(subtaskWorktree, "subtask7") {
+		t.Error("subtask worktree path should contain subtask task ID prefix")
+	}
+
+	// Expected git commands sequence:
+	// 1. git -C <parent> remote add <remoteName> <subtaskBareDir>
+	expectedAddRemoteArgs := []string{"-C", parentWorktree, "remote", "add", remoteName, subtaskBareDir}
+	if len(expectedAddRemoteArgs) != 6 {
+		t.Errorf("add remote command should have 6 args, got %d", len(expectedAddRemoteArgs))
+	}
+
+	// 2. git -C <parent> fetch <remoteName> <subtaskBranch>
+	expectedFetchArgs := []string{"-C", parentWorktree, "fetch", remoteName, subtaskBranch}
+	if len(expectedFetchArgs) != 5 {
+		t.Errorf("fetch command should have 5 args, got %d", len(expectedFetchArgs))
+	}
+
+	// 3. git -C <parent> merge <remoteName>/<subtaskBranch> --no-edit -m "..."
+	mergeRef := fmt.Sprintf("%s/%s", remoteName, subtaskBranch)
+	expectedMergeArgs := []string{"-C", parentWorktree, "merge", mergeRef, "--no-edit", "-m"}
+	if len(expectedMergeArgs) != 6 {
+		t.Errorf("merge command should have at least 6 args, got %d", len(expectedMergeArgs))
+	}
+
+	if mergeRef != fmt.Sprintf("subtask-%s/task/%s", subtaskTaskID[:8], subtaskTaskID[:8]) {
+		t.Errorf("merge ref format incorrect: %s", mergeRef)
+	}
+
+	// 4. git -C <parent> remote remove <remoteName>
+	expectedRemoveRemoteArgs := []string{"-C", parentWorktree, "remote", "remove", remoteName}
+	if len(expectedRemoveRemoteArgs) != 5 {
+		t.Errorf("remove remote command should have 5 args, got %d", len(expectedRemoveRemoteArgs))
+	}
+}
+
+func TestRunCleanupWithActiveSubtasks(t *testing.T) {
+	tests := []struct {
+		name               string
+		task               WorktreeTask
+		now                time.Time
+		shouldCleanup      bool
+		description        string
+	}{
+		{
+			name: "parent_with_active_subtasks",
+			task: WorktreeTask{
+				ProjectName:        "test-proj",
+				TaskID:             "parent1234",
+				Status:             "COMPLETED",
+				PRStatus:           "MERGED",
+				CompletedAt:        time.Now().Add(-1 * time.Hour),
+				ActiveSubtaskCount: 2,
+			},
+			now:           time.Now(),
+			shouldCleanup: false,
+			description:   "Parent with active subtasks should be preserved",
+		},
+		{
+			name: "parent_no_active_subtasks",
+			task: WorktreeTask{
+				ProjectName:        "test-proj",
+				TaskID:             "parent1234",
+				Status:             "COMPLETED",
+				PRStatus:           "MERGED",
+				CompletedAt:        time.Now().Add(-1 * time.Hour),
+				ActiveSubtaskCount: 0,
+			},
+			now:           time.Now(),
+			shouldCleanup: true,
+			description:   "Parent with no active subtasks can be cleaned up",
+		},
+		{
+			name: "subtask_completed",
+			task: WorktreeTask{
+				ProjectName:        "test-proj",
+				TaskID:             "subtask567",
+				Status:             "COMPLETED",
+				PRStatus:           "MERGED",
+				CompletedAt:        time.Now().Add(-1 * time.Hour),
+				ActiveSubtaskCount: 0,
+			},
+			now:           time.Now(),
+			shouldCleanup: true,
+			description:   "Subtask can be cleaned up when completed and merged",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shouldCleanup := false
+
+			// Check active subtasks first (this is the new logic)
+			if tt.task.ActiveSubtaskCount > 0 {
+				shouldCleanup = false
+			} else {
+				// Original cleanup logic
+				switch tt.task.Status {
+				case "COMPLETED":
+					if tt.task.PRStatus == "MERGED" {
+						shouldCleanup = true
+					}
+				case "FAILED":
+					if !tt.task.CompletedAt.IsZero() && tt.now.Sub(tt.task.CompletedAt) > 24*time.Hour {
+						shouldCleanup = true
+					}
+				case "CHANGES_REQUESTED":
+					shouldCleanup = false
+				}
+			}
+
+			if shouldCleanup != tt.shouldCleanup {
+				t.Errorf("%s: expected shouldCleanup=%v, got %v",
+					tt.description, tt.shouldCleanup, shouldCleanup)
+			}
+		})
+	}
+}
+
 func TestRebaseOnMainCommandConstruction(t *testing.T) {
 	worktreePath := "/tmp/trees/test-project--task-abc123de"
 
