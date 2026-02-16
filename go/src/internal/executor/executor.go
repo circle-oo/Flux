@@ -130,7 +130,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		return
 	}
 
-	slog.Info("picked up task", "task_id", task.ID, "title", task.Title, "type", task.Type)
+	slog.Info("picked up task", "task_id", task.ID, "title", task.Title)
 	task.ExecutorID = e.id
 	e.currentTaskID = task.ID
 
@@ -300,7 +300,6 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 		buildOK, buildOutput := e.runBuild(worktreePath)
 		if !buildOK {
 			slog.Warn("build failed for task", "task_id", task.ID)
-			e.registerBuildFailureTask(task, buildOutput)
 			_ = e.manager.ReportTaskDone(task.ID, task, models.TaskFailed, result.Stdout, fmt.Sprintf("build failed: %s", buildOutput), result.TokensUsed, result.CostUSD)
 			return fmt.Errorf("build failed")
 		}
@@ -542,45 +541,6 @@ func (e *Executor) runBuild(worktreePath string) (bool, string) {
 	}
 
 	return runProjectCommand(worktreePath, buildCmds, "build")
-}
-
-// buildFailureTask constructs a BUGFIX task for a build failure.
-func buildFailureTask(failedTask *models.Task, buildOutput string) *models.Task {
-	// Truncate build output to keep the description manageable
-	const maxOutputLen = 2000
-	truncatedOutput := buildOutput
-	if len(truncatedOutput) > maxOutputLen {
-		truncatedOutput = truncatedOutput[len(truncatedOutput)-maxOutputLen:]
-	}
-
-	return &models.Task{
-		Title:       fmt.Sprintf("Fix build failure from: %s", failedTask.Title),
-		Description: fmt.Sprintf("The task %q (ID: %s) produced code that fails to build.\n\nBuild output:\n```\n%s\n```\n\nPlease fix the build errors in branch `%s`.", failedTask.Title, failedTask.ID, truncatedOutput, failedTask.BranchName),
-		Priority:    min(failedTask.Priority, 10), // High priority — build is broken
-		Source:      models.TaskSourceSystem,
-		ProjectID:   failedTask.ProjectID,
-		ParentID:    failedTask.ID,
-		Depth:       failedTask.Depth + 1,
-		GoalID:      failedTask.GoalID,
-		BranchName:  failedTask.BranchName, // Reuse the same branch
-		Tags:        []string{"bugfix", "build-failure", "auto-registered"},
-	}
-}
-
-// registerBuildFailureTask creates a follow-up BUGFIX task to fix the build failure.
-func (e *Executor) registerBuildFailureTask(failedTask *models.Task, buildOutput string) {
-	bugfixTask := buildFailureTask(failedTask, buildOutput)
-
-	if err := e.manager.CreateTask(bugfixTask); err != nil {
-		slog.Error("failed to register build failure task", "parent_task_id", failedTask.ID, "error", err)
-		_ = e.notifier.Send(notifier.LevelWarning,
-			fmt.Sprintf("Failed to auto-register build fix task for %s: %v", failedTask.ID, err))
-		return
-	}
-
-	slog.Info("registered build failure task", "parent_task_id", failedTask.ID, "bugfix_task_id", bugfixTask.ID)
-	_ = e.notifier.Send(notifier.LevelWarning,
-		fmt.Sprintf("Build failed for task %s — auto-registered bugfix task: %s", failedTask.ID, bugfixTask.Title))
 }
 
 // ErrNoChanges indicates Claude Code made no code changes.

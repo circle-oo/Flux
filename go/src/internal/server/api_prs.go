@@ -267,7 +267,6 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 	fixTask := &models.Task{
 		Title:       fmt.Sprintf("PR fix: %s", task.Title),
 		Description: commentSummary.String(),
-		Type:        task.Type,
 		Priority:    6,
 		Source:      models.TaskSourceOperator,
 		Status:      models.TaskReady,

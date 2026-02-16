@@ -47,10 +47,8 @@ func NewManager(db *sql.DB, cfg *config.Config) *Manager {
 	}
 }
 
-// PopNextTask atomically retrieves and claims the next READY task for the given pod type.
+// PopNextTask atomically retrieves and claims the next READY task.
 // Uses BEGIN IMMEDIATE transaction for SQLite to ensure exclusive access.
-// Executor pods: any type except RESEARCH.
-// Researcher pods: RESEARCH type only.
 // Retries up to 5 times on SQLITE_BUSY to handle concurrent access.
 func (m *Manager) PopNextTask(podType string) (*models.Task, error) {
 	slog.Debug("pop next task started", "pod_type", podType)
@@ -113,15 +111,8 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 				CASE WHEN goal_id = ? THEN 0 ELSE 1 END,
 				created_at ASC
 			LIMIT 10`
-	var query string
-	var args []interface{}
-	if podType == "RESEARCHER" {
-		query = models.TaskSelectSQL + " WHERE (status IN (?, ?) OR (status = ? AND retry_count < max_retries)) AND type = ?" + orderAndLimit
-		args = []interface{}{models.TaskReady, models.TaskRetry, models.TaskFailed, models.TaskTypeResearch, currentGoalID}
-	} else {
-		query = models.TaskSelectSQL + " WHERE (status IN (?, ?) OR (status = ? AND retry_count < max_retries)) AND type != ?" + orderAndLimit
-		args = []interface{}{models.TaskReady, models.TaskRetry, models.TaskFailed, models.TaskTypeResearch, currentGoalID}
-	}
+	query := models.TaskSelectSQL + " WHERE (status IN (?, ?) OR (status = ? AND retry_count < max_retries))" + orderAndLimit
+	args := []interface{}{models.TaskReady, models.TaskRetry, models.TaskFailed, currentGoalID}
 
 	// Query multiple candidates for dependency checking
 	var rows *sql.Rows

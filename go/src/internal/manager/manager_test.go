@@ -19,9 +19,9 @@ func TestPopNextTask_Priority(t *testing.T) {
 
 	// Create tasks with different priorities
 	tasks := []*models.Task{
-		{Title: "Low Priority", Type: models.TaskTypeCoding, Status: models.TaskReady, Priority: 50},
-		{Title: "High Priority", Type: models.TaskTypeCoding, Status: models.TaskReady, Priority: 10},
-		{Title: "Medium Priority", Type: models.TaskTypeCoding, Status: models.TaskReady, Priority: 30},
+		{Title: "Low Priority", Status: models.TaskReady, Priority: 50},
+		{Title: "High Priority", Status: models.TaskReady, Priority: 10},
+		{Title: "Medium Priority", Status: models.TaskReady, Priority: 30},
 	}
 
 	for _, task := range tasks {
@@ -70,7 +70,7 @@ func TestPopNextTask_Concurrent(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		task := &models.Task{
 			Title:    "Concurrent Task",
-			Type:     models.TaskTypeCoding,
+			
 			Status:   models.TaskReady,
 			Priority: 50,
 		}
@@ -123,58 +123,6 @@ func TestPopNextTask_Concurrent(t *testing.T) {
 	}
 }
 
-func TestPopNextTask_PodTypeFiltering(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	cfg := &config.Config{}
-	mgr := NewManager(db, cfg)
-
-	// Create RESEARCH task
-	researchTask := &models.Task{
-		Title:    "Research Task",
-		Type:     models.TaskTypeResearch,
-		Status:   models.TaskReady,
-		Priority: 10,
-	}
-	if err := mgr.CreateTask(researchTask); err != nil {
-		t.Fatalf("create research task: %v", err)
-	}
-
-	// Create CODING task
-	codingTask := &models.Task{
-		Title:    "Coding Task",
-		Type:     models.TaskTypeCoding,
-		Status:   models.TaskReady,
-		Priority: 20,
-	}
-	if err := mgr.CreateTask(codingTask); err != nil {
-		t.Fatalf("create coding task: %v", err)
-	}
-
-	// EXECUTOR should get coding task (not research)
-	execTask, err := mgr.PopNextTask("EXECUTOR")
-	if err != nil {
-		t.Fatalf("pop executor task: %v", err)
-	}
-	if execTask == nil {
-		t.Fatal("expected executor task, got nil")
-	}
-	if execTask.Type == models.TaskTypeResearch {
-		t.Error("executor should not get research tasks")
-	}
-
-	// RESEARCHER should get research task
-	resTask, err := mgr.PopNextTask("RESEARCHER")
-	if err != nil {
-		t.Fatalf("pop researcher task: %v", err)
-	}
-	if resTask == nil {
-		t.Fatal("expected researcher task, got nil")
-	}
-	if resTask.Type != models.TaskTypeResearch {
-		t.Errorf("researcher should get research tasks, got %s", resTask.Type)
-	}
-}
-
 func TestTransitionTask_ValidTransitions(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	cfg := &config.Config{}
@@ -182,7 +130,7 @@ func TestTransitionTask_ValidTransitions(t *testing.T) {
 
 	task := &models.Task{
 		Title:    "Test Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskPending,
 		Source:   models.TaskSourceOperator, // stays PENDING (awaiting triage)
 		Priority: 50,
@@ -226,7 +174,7 @@ func TestTransitionTask_RunningToRetry(t *testing.T) {
 
 	task := &models.Task{
 		Title:    "Rate Limited Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 	}
@@ -260,7 +208,7 @@ func TestTransitionTask_InvalidTransitions(t *testing.T) {
 
 	task := &models.Task{
 		Title:    "Test Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskPending,
 		Source:   models.TaskSourceOperator, // stays PENDING (awaiting triage)
 		Priority: 50,
@@ -289,7 +237,7 @@ func TestTransitionTask_RetryLimit(t *testing.T) {
 
 	task := &models.Task{
 		Title:      "Test Task",
-		Type:       models.TaskTypeCoding,
+		
 		Status:     models.TaskReady,
 		Priority:   50,
 		RetryCount: 0,
@@ -341,7 +289,7 @@ func TestTransitionTask_RetryCrashRecovery(t *testing.T) {
 
 	task := &models.Task{
 		Title:         "Test Task",
-		Type:          models.TaskTypeCoding,
+		
 		Status:        models.TaskFailed,
 		Priority:      50,
 		RetryCount:    2,
@@ -372,7 +320,7 @@ func TestTransitionTask_CancelledNoRetry(t *testing.T) {
 
 	task := &models.Task{
 		Title:      "Test Task",
-		Type:       models.TaskTypeCoding,
+		
 		Status:     models.TaskFailed,
 		Priority:   50,
 		ErrorLog:   "cancelled by operator",
@@ -399,7 +347,7 @@ func TestCountByStatus(t *testing.T) {
 	for _, status := range statuses {
 		task := &models.Task{
 			Title:    "Test Task",
-			Type:     models.TaskTypeCoding,
+			
 			Status:   status,
 			Priority: 50,
 		}
@@ -425,7 +373,7 @@ func TestCountByPriority(t *testing.T) {
 	for _, pri := range priorities {
 		task := &models.Task{
 			Title:    "Test Task",
-			Type:     models.TaskTypeCoding,
+			
 			Status:   models.TaskReady,
 			Priority: pri,
 		}
@@ -450,21 +398,21 @@ func TestListByPRStatus(t *testing.T) {
 	// Create tasks with different PR statuses
 	task1 := &models.Task{
 		Title:    "Task 1",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskCompleted,
 		Priority: 50,
 		PRStatus: "PENDING",
 	}
 	task2 := &models.Task{
 		Title:    "Task 2",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskCompleted,
 		Priority: 50,
 		PRStatus: "PENDING",
 	}
 	task3 := &models.Task{
 		Title:    "Task 3",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskCompleted,
 		Priority: 50,
 		PRStatus: "MERGED",
@@ -517,7 +465,7 @@ func TestPopNextTask_GoalBoost(t *testing.T) {
 	// Create non-goal task first (should have earlier created_at)
 	task1 := &models.Task{
 		Title:    "Non-Goal Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		GoalID:   "",
@@ -532,7 +480,7 @@ func TestPopNextTask_GoalBoost(t *testing.T) {
 	// Create goal task second (later created_at, but should still win due to boost)
 	task2 := &models.Task{
 		Title:    "Goal Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		GoalID:   goal.ID,
@@ -574,14 +522,14 @@ func TestPopNextTask_GoalBoostNoCrossPriority(t *testing.T) {
 	// Create high-priority non-goal task and lower-priority goal task
 	task1 := &models.Task{
 		Title:    "High Priority Non-Goal",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 48,
 		GoalID:   "",
 	}
 	task2 := &models.Task{
 		Title:    "Lower Priority Goal Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		GoalID:   goal.ID,
@@ -617,7 +565,7 @@ func TestPopNextTask_DependencyBlocking(t *testing.T) {
 	// Create dependency task (not completed)
 	depTask := &models.Task{
 		Title:    "Dependency Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskRunning,
 		Priority: 50,
 	}
@@ -628,7 +576,7 @@ func TestPopNextTask_DependencyBlocking(t *testing.T) {
 	// Create task that depends on the first
 	blockedTask := &models.Task{
 		Title:     "Blocked Task",
-		Type:      models.TaskTypeCoding,
+		
 		Status:    models.TaskReady,
 		Priority:  40,
 		DependsOn: []string{depTask.ID},
@@ -640,7 +588,7 @@ func TestPopNextTask_DependencyBlocking(t *testing.T) {
 	// Create independent task with lower priority
 	independentTask := &models.Task{
 		Title:    "Independent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 60,
 	}
@@ -671,7 +619,7 @@ func TestPopNextTask_DependencyResolved(t *testing.T) {
 	// Create dependency task and complete it
 	depTask := &models.Task{
 		Title:    "Dependency Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 	}
@@ -686,7 +634,7 @@ func TestPopNextTask_DependencyResolved(t *testing.T) {
 	// Create task that depends on the completed task
 	dependentTask := &models.Task{
 		Title:     "Dependent Task",
-		Type:      models.TaskTypeCoding,
+		
 		Status:    models.TaskReady,
 		Priority:  40,
 		DependsOn: []string{depTask.ID},
@@ -717,7 +665,7 @@ func TestTransitionTask_DecomposedTransitions(t *testing.T) {
 
 	task := &models.Task{
 		Title:    "Decompose me",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 	}
@@ -753,7 +701,7 @@ func TestTransitionTask_DecomposedInvalidTransition(t *testing.T) {
 
 	task := &models.Task{
 		Title:    "Decompose me",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 	}
@@ -779,7 +727,7 @@ func TestCheckParentCompletion_AllCompleted(t *testing.T) {
 	// Create parent task and transition to DECOMPOSED
 	parent := &models.Task{
 		Title:    "Parent",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 	}
@@ -793,7 +741,7 @@ func TestCheckParentCompletion_AllCompleted(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		sub := &models.Task{
 			Title:    "Subtask",
-			Type:     models.TaskTypeCoding,
+			
 			Status:   models.TaskCompleted,
 			Priority: 50,
 			ParentID: parent.ID,
@@ -822,7 +770,7 @@ func TestCheckParentCompletion_SomeFailed(t *testing.T) {
 
 	parent := &models.Task{
 		Title:    "Parent",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 	}
@@ -834,11 +782,11 @@ func TestCheckParentCompletion_SomeFailed(t *testing.T) {
 
 	// One completed, one failed with exhausted retries
 	mgr.CreateTask(&models.Task{
-		Title: "Sub OK", Type: models.TaskTypeCoding, Status: models.TaskCompleted,
+		Title: "Sub OK", Status: models.TaskCompleted,
 		Priority: 50, ParentID: parent.ID, Depth: 1,
 	})
 	mgr.CreateTask(&models.Task{
-		Title: "Sub Fail", Type: models.TaskTypeCoding, Status: models.TaskFailed,
+		Title: "Sub Fail", Status: models.TaskFailed,
 		Priority: 50, ParentID: parent.ID, Depth: 1,
 		RetryCount: 3, MaxRetries: 3, // Retries exhausted
 	})
@@ -860,7 +808,7 @@ func TestCheckParentCompletion_StillRunning(t *testing.T) {
 
 	parent := &models.Task{
 		Title:    "Parent",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 	}
@@ -871,11 +819,11 @@ func TestCheckParentCompletion_StillRunning(t *testing.T) {
 	mgr.TransitionTask(parent.ID, models.TaskDecomposed)
 
 	mgr.CreateTask(&models.Task{
-		Title: "Sub Done", Type: models.TaskTypeCoding, Status: models.TaskCompleted,
+		Title: "Sub Done", Status: models.TaskCompleted,
 		Priority: 50, ParentID: parent.ID, Depth: 1,
 	})
 	mgr.CreateTask(&models.Task{
-		Title: "Sub Running", Type: models.TaskTypeCoding, Status: models.TaskRunning,
+		Title: "Sub Running", Status: models.TaskRunning,
 		Priority: 50, ParentID: parent.ID, Depth: 1,
 	})
 
@@ -897,7 +845,7 @@ func TestPopNextPending(t *testing.T) {
 	// Create PENDING operator task
 	task := &models.Task{
 		Title:    "Needs triage",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskPending,
 		Source:   models.TaskSourceOperator,
 		Priority: 50,
@@ -936,7 +884,7 @@ func TestAreDependenciesMet(t *testing.T) {
 	// Create completed dependency
 	completedDep := &models.Task{
 		Title:    "Completed Dep",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskCompleted,
 		Priority: 50,
 	}
@@ -947,7 +895,7 @@ func TestAreDependenciesMet(t *testing.T) {
 	// Create running dependency
 	runningDep := &models.Task{
 		Title:    "Running Dep",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskRunning,
 		Priority: 50,
 	}
@@ -1006,7 +954,7 @@ func TestPopNextTask_RetryTasksAutomaticallyPicked(t *testing.T) {
 	// Create a RETRY task (simulating crash recovery or rate limit)
 	retryTask := &models.Task{
 		Title:         "Retry Task",
-		Type:          models.TaskTypeCoding,
+		
 		Status:        models.TaskRetry,
 		Priority:      30,
 		RetryCount:    1,
@@ -1019,7 +967,7 @@ func TestPopNextTask_RetryTasksAutomaticallyPicked(t *testing.T) {
 	// Create a READY task with lower priority
 	readyTask := &models.Task{
 		Title:    "Ready Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 	}
@@ -1065,10 +1013,10 @@ func TestPopNextTask_MixedReadyAndRetryTasks(t *testing.T) {
 
 	// Create multiple READY and RETRY tasks with different priorities
 	tasks := []*models.Task{
-		{Title: "Retry High", Type: models.TaskTypeCoding, Status: models.TaskRetry, Priority: 10, RetryCount: 1},
-		{Title: "Ready High", Type: models.TaskTypeCoding, Status: models.TaskReady, Priority: 20},
-		{Title: "Retry Low", Type: models.TaskTypeCoding, Status: models.TaskRetry, Priority: 60, RetryCount: 2},
-		{Title: "Ready Low", Type: models.TaskTypeCoding, Status: models.TaskReady, Priority: 70},
+		{Title: "Retry High", Status: models.TaskRetry, Priority: 10, RetryCount: 1},
+		{Title: "Ready High", Status: models.TaskReady, Priority: 20},
+		{Title: "Retry Low", Status: models.TaskRetry, Priority: 60, RetryCount: 2},
+		{Title: "Ready Low", Status: models.TaskReady, Priority: 70},
 	}
 
 	for _, task := range tasks {
@@ -1105,57 +1053,6 @@ func TestPopNextTask_MixedReadyAndRetryTasks(t *testing.T) {
 	}
 }
 
-func TestPopNextTask_ResearcherIncludesRetry(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	cfg := &config.Config{}
-	mgr := NewManager(db, cfg)
-
-	// Create RETRY research task
-	retryResearch := &models.Task{
-		Title:      "Retry Research",
-		Type:       models.TaskTypeResearch,
-		Status:     models.TaskRetry,
-		Priority:   30,
-		RetryCount: 1,
-	}
-	if err := mgr.CreateTask(retryResearch); err != nil {
-		t.Fatalf("create retry research task: %v", err)
-	}
-
-	// Create READY coding task (should be ignored by RESEARCHER)
-	readyCoding := &models.Task{
-		Title:    "Ready Coding",
-		Type:     models.TaskTypeCoding,
-		Status:   models.TaskReady,
-		Priority: 10,
-	}
-	if err := mgr.CreateTask(readyCoding); err != nil {
-		t.Fatalf("create ready coding task: %v", err)
-	}
-
-	// RESEARCHER pod should get the RETRY research task
-	next, err := mgr.PopNextTask("RESEARCHER")
-	if err != nil {
-		t.Fatalf("pop researcher task: %v", err)
-	}
-
-	if next == nil {
-		t.Fatal("expected task, got nil")
-	}
-
-	if next.Title != "Retry Research" {
-		t.Errorf("expected Retry Research, got %s", next.Title)
-	}
-
-	if next.Type != models.TaskTypeResearch {
-		t.Errorf("researcher should get research task, got %s", next.Type)
-	}
-
-	if next.Status != models.TaskRunning {
-		t.Errorf("expected status RUNNING, got %s", next.Status)
-	}
-}
-
 func TestAggregateSubtaskResults_AllCompleted(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	cfg := &config.Config{}
@@ -1164,7 +1061,7 @@ func TestAggregateSubtaskResults_AllCompleted(t *testing.T) {
 	// Create parent task
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1177,7 +1074,7 @@ func TestAggregateSubtaskResults_AllCompleted(t *testing.T) {
 		{
 			Title:       "Subtask 1",
 			Description: "First subtask description",
-			Type:        models.TaskTypeCoding,
+			
 			Status:      models.TaskCompleted,
 			Priority:    50,
 			ParentID:    parent.ID,
@@ -1187,7 +1084,7 @@ func TestAggregateSubtaskResults_AllCompleted(t *testing.T) {
 		{
 			Title:       "Subtask 2",
 			Description: "Second subtask description",
-			Type:        models.TaskTypeCoding,
+			
 			Status:      models.TaskCompleted,
 			Priority:    50,
 			ParentID:    parent.ID,
@@ -1196,7 +1093,7 @@ func TestAggregateSubtaskResults_AllCompleted(t *testing.T) {
 		},
 		{
 			Title:    "Subtask 3",
-			Type:     models.TaskTypeCoding,
+			
 			Status:   models.TaskCompleted,
 			Priority: 50,
 			ParentID: parent.ID,
@@ -1258,7 +1155,7 @@ func TestAggregateSubtaskResults_MixedStatus(t *testing.T) {
 
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1270,7 +1167,7 @@ func TestAggregateSubtaskResults_MixedStatus(t *testing.T) {
 	subtasks := []*models.Task{
 		{
 			Title:    "Completed Sub",
-			Type:     models.TaskTypeCoding,
+			
 			Status:   models.TaskCompleted,
 			Priority: 50,
 			ParentID: parent.ID,
@@ -1279,7 +1176,7 @@ func TestAggregateSubtaskResults_MixedStatus(t *testing.T) {
 		},
 		{
 			Title:    "Failed Sub",
-			Type:     models.TaskTypeCoding,
+			
 			Status:   models.TaskFailed,
 			Priority: 50,
 			ParentID: parent.ID,
@@ -1289,7 +1186,7 @@ func TestAggregateSubtaskResults_MixedStatus(t *testing.T) {
 		},
 		{
 			Title:    "Cancelled Sub",
-			Type:     models.TaskTypeCoding,
+			
 			Status:   models.TaskCancelled,
 			Priority: 50,
 			ParentID: parent.ID,
@@ -1335,7 +1232,7 @@ func TestAggregateSubtaskResults_NoSubtasks(t *testing.T) {
 
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1366,7 +1263,7 @@ func TestCheckParentCompletion_WithAggregation(t *testing.T) {
 	// Create parent and transition to DECOMPOSED
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 	}
@@ -1380,7 +1277,7 @@ func TestCheckParentCompletion_WithAggregation(t *testing.T) {
 	for i := 1; i <= 2; i++ {
 		sub := &models.Task{
 			Title:    fmt.Sprintf("Subtask %d", i),
-			Type:     models.TaskTypeCoding,
+			
 			Status:   models.TaskCompleted,
 			Priority: 50,
 			ParentID: parent.ID,
@@ -1431,7 +1328,7 @@ func TestPopNextTask_AutoRetryFailed(t *testing.T) {
 	// Create a FAILED task that is still retryable
 	task := &models.Task{
 		Title:      "Failed Task",
-		Type:       models.TaskTypeCoding,
+		
 		Status:     models.TaskFailed,
 		Priority:   50,
 		RetryCount: 1,
@@ -1475,7 +1372,7 @@ func TestPopNextTask_SkipExhaustedRetries(t *testing.T) {
 	// Create a FAILED task with exhausted retries
 	task1 := &models.Task{
 		Title:      "Exhausted Task",
-		Type:       models.TaskTypeCoding,
+		
 		Status:     models.TaskFailed,
 		Priority:   50,
 		RetryCount: 3,
@@ -1488,7 +1385,7 @@ func TestPopNextTask_SkipExhaustedRetries(t *testing.T) {
 	// Create a READY task
 	task2 := &models.Task{
 		Title:    "Ready Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 51,
 	}
@@ -1521,7 +1418,7 @@ func TestCheckParentCompletion_DeferFailureForRetryable(t *testing.T) {
 	// Create parent task
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1532,7 +1429,7 @@ func TestCheckParentCompletion_DeferFailureForRetryable(t *testing.T) {
 	// Create completed subtask
 	sub1 := &models.Task{
 		Title:    "Completed Subtask",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskCompleted,
 		Priority: 50,
 		ParentID: parent.ID,
@@ -1545,7 +1442,7 @@ func TestCheckParentCompletion_DeferFailureForRetryable(t *testing.T) {
 	// Create failed but retryable subtask
 	sub2 := &models.Task{
 		Title:      "Failed Retryable Subtask",
-		Type:       models.TaskTypeCoding,
+		
 		Status:     models.TaskFailed,
 		Priority:   50,
 		ParentID:   parent.ID,
@@ -1580,7 +1477,7 @@ func TestCheckParentCompletion_FailWhenRetriesExhausted(t *testing.T) {
 	// Create parent task
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1591,7 +1488,7 @@ func TestCheckParentCompletion_FailWhenRetriesExhausted(t *testing.T) {
 	// Create completed subtask
 	sub1 := &models.Task{
 		Title:    "Completed Subtask",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskCompleted,
 		Priority: 50,
 		ParentID: parent.ID,
@@ -1604,7 +1501,7 @@ func TestCheckParentCompletion_FailWhenRetriesExhausted(t *testing.T) {
 	// Create failed subtask with exhausted retries
 	sub2 := &models.Task{
 		Title:      "Failed Exhausted Subtask",
-		Type:       models.TaskTypeCoding,
+		
 		Status:     models.TaskFailed,
 		Priority:   50,
 		ParentID:   parent.ID,
@@ -1639,7 +1536,7 @@ func TestCheckParentCompletion_RevalidateAfterRetry(t *testing.T) {
 	// Create parent task
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1650,7 +1547,7 @@ func TestCheckParentCompletion_RevalidateAfterRetry(t *testing.T) {
 	// Create two subtasks
 	sub1 := &models.Task{
 		Title:    "Subtask 1",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskCompleted,
 		Priority: 50,
 		ParentID: parent.ID,
@@ -1662,7 +1559,7 @@ func TestCheckParentCompletion_RevalidateAfterRetry(t *testing.T) {
 
 	sub2 := &models.Task{
 		Title:      "Subtask 2",
-		Type:       models.TaskTypeCoding,
+		
 		Status:     models.TaskFailed,
 		Priority:   50,
 		ParentID:   parent.ID,
@@ -1707,7 +1604,7 @@ func TestPopNextTask_SubtaskDependencies(t *testing.T) {
 	// Create parent task
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1718,7 +1615,7 @@ func TestPopNextTask_SubtaskDependencies(t *testing.T) {
 	// Create subtask 1 (no dependencies)
 	sub1 := &models.Task{
 		Title:    "Subtask 1",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		ParentID: parent.ID,
@@ -1731,7 +1628,7 @@ func TestPopNextTask_SubtaskDependencies(t *testing.T) {
 	// Create subtask 2 (depends on subtask 1)
 	sub2 := &models.Task{
 		Title:     "Subtask 2",
-		Type:      models.TaskTypeCoding,
+		
 		Status:    models.TaskReady,
 		Priority:  50,
 		ParentID:  parent.ID,
@@ -1745,7 +1642,7 @@ func TestPopNextTask_SubtaskDependencies(t *testing.T) {
 	// Create subtask 3 (depends on subtask 2)
 	sub3 := &models.Task{
 		Title:     "Subtask 3",
-		Type:      models.TaskTypeCoding,
+		
 		Status:    models.TaskReady,
 		Priority:  50,
 		ParentID:  parent.ID,
@@ -1825,7 +1722,7 @@ func TestPopNextTask_SubtaskDependencies_TopologicalOrder(t *testing.T) {
 	// Create parent task
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1836,7 +1733,7 @@ func TestPopNextTask_SubtaskDependencies_TopologicalOrder(t *testing.T) {
 	// Create subtask A (no dependencies, priority 50)
 	subA := &models.Task{
 		Title:    "Subtask A",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		ParentID: parent.ID,
@@ -1852,7 +1749,7 @@ func TestPopNextTask_SubtaskDependencies_TopologicalOrder(t *testing.T) {
 	// Create subtask B (no dependencies, priority 50, created later)
 	subB := &models.Task{
 		Title:    "Subtask B",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		ParentID: parent.ID,
@@ -1895,7 +1792,7 @@ func TestPopNextTask_SubtaskDependencies_BackwardCompatibility(t *testing.T) {
 	// Create parent task
 	parent := &models.Task{
 		Title:    "Parent Task",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1906,7 +1803,7 @@ func TestPopNextTask_SubtaskDependencies_BackwardCompatibility(t *testing.T) {
 	// Create subtasks without dependencies (backward compatibility)
 	sub1 := &models.Task{
 		Title:    "Subtask 1",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		ParentID: parent.ID,
@@ -1918,7 +1815,7 @@ func TestPopNextTask_SubtaskDependencies_BackwardCompatibility(t *testing.T) {
 
 	sub2 := &models.Task{
 		Title:    "Subtask 2",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		ParentID: parent.ID,
@@ -1960,7 +1857,7 @@ func TestPopNextTask_SubtaskDependencies_MixedParents(t *testing.T) {
 	// Create parent 1
 	parent1 := &models.Task{
 		Title:    "Parent 1",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1971,7 +1868,7 @@ func TestPopNextTask_SubtaskDependencies_MixedParents(t *testing.T) {
 	// Create parent 2
 	parent2 := &models.Task{
 		Title:    "Parent 2",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskDecomposed,
 		Priority: 50,
 	}
@@ -1982,7 +1879,7 @@ func TestPopNextTask_SubtaskDependencies_MixedParents(t *testing.T) {
 	// Create subtask 1 for parent 1 (no dependencies)
 	sub1p1 := &models.Task{
 		Title:    "P1 Subtask 1",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		ParentID: parent1.ID,
@@ -1995,7 +1892,7 @@ func TestPopNextTask_SubtaskDependencies_MixedParents(t *testing.T) {
 	// Create subtask 2 for parent 1 (depends on sub1p1)
 	sub2p1 := &models.Task{
 		Title:     "P1 Subtask 2",
-		Type:      models.TaskTypeCoding,
+		
 		Status:    models.TaskReady,
 		Priority:  50,
 		ParentID:  parent1.ID,
@@ -2009,7 +1906,7 @@ func TestPopNextTask_SubtaskDependencies_MixedParents(t *testing.T) {
 	// Create subtask 1 for parent 2 (no dependencies)
 	sub1p2 := &models.Task{
 		Title:    "P2 Subtask 1",
-		Type:     models.TaskTypeCoding,
+		
 		Status:   models.TaskReady,
 		Priority: 50,
 		ParentID: parent2.ID,

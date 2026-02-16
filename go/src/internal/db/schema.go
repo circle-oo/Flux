@@ -58,7 +58,6 @@ var schemaStatements = []string{
 		id              TEXT PRIMARY KEY,
 		title           TEXT NOT NULL,
 		description     TEXT DEFAULT '',
-		type            TEXT NOT NULL,
 		status          TEXT NOT NULL DEFAULT 'PENDING',
 		priority        INTEGER NOT NULL DEFAULT 40,
 		source          TEXT NOT NULL DEFAULT 'SYSTEM',

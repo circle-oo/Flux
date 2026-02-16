@@ -25,7 +25,7 @@ func TestSelectModel_NormalTask(t *testing.T) {
 		Title:       "Normal coding task",
 		Description: "Implement a simple feature",
 		Priority:    10,
-		Type:        models.TaskTypeCoding,
+		
 	}
 
 	model := orc.SelectModel(task)
@@ -50,7 +50,7 @@ func TestSelectModel_OpusForHighPriority(t *testing.T) {
 		Title:       "Critical task",
 		Description: "High priority work",
 		Priority:    5, // Priority <= 5 triggers Opus
-		Type:        models.TaskTypeCoding,
+		
 	}
 
 	model := orc.SelectModel(task)
@@ -91,7 +91,7 @@ func TestSelectModel_OpusForComplexKeywords(t *testing.T) {
 				Description: tc.description,
 				Priority:    10,
 				Source:      models.TaskSourceOperator,
-				Type:        models.TaskTypeCoding,
+				
 			}
 
 			model := orc.SelectModel(task)
@@ -119,7 +119,7 @@ func TestSelectModel_OpusForInitialDesignTag(t *testing.T) {
 		Description: "Initial design phase",
 		Priority:    10,
 		Tags:        []string{"initial-design"},
-		Type:        models.TaskTypePlanning,
+		
 	}
 
 	model := orc.SelectModel(task)
@@ -145,7 +145,7 @@ func TestSelectModel_OpusForGoalStrategyTag(t *testing.T) {
 		Description: "Strategic planning",
 		Priority:    10,
 		Tags:        []string{"goal-strategy"},
-		Type:        models.TaskTypePlanning,
+		
 	}
 
 	model := orc.SelectModel(task)
@@ -179,7 +179,7 @@ func TestSelectModel_SonnetWhenRecentlyLimited(t *testing.T) {
 		Priority:    3, // Would normally trigger Opus
 		Source:      models.TaskSourceOperator,
 		Tags:        []string{"initial-design", "goal-strategy"},
-		Type:        models.TaskTypePlanning,
+		
 	}
 
 	model := orc.SelectModel(task)

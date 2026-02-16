@@ -86,9 +86,9 @@ func TestRecoverFromCrash_RecoversRunningTasks(t *testing.T) {
 
 	for _, task := range tasks {
 		_, err := db.Exec(`
-			INSERT INTO tasks (id, title, type, status)
-			VALUES (?, ?, ?, ?)
-		`, task.id, "Test Task", "IMPLEMENTATION", task.status)
+			INSERT INTO tasks (id, title, status)
+			VALUES (?, ?, ?)
+		`, task.id, "Test Task", task.status)
 		if err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
@@ -126,9 +126,9 @@ func TestRecoverFromCrash_SetsCrashRecoveryFlag(t *testing.T) {
 
 	taskID := uuid.New().String()
 	_, err := db.Exec(`
-		INSERT INTO tasks (id, title, type, status, crash_recovery)
-		VALUES (?, ?, ?, ?, ?)
-	`, taskID, "Test Task", "IMPLEMENTATION", "RUNNING", false)
+		INSERT INTO tasks (id, title, status, crash_recovery)
+		VALUES (?, ?, ?, ?)
+	`, taskID, "Test Task", "RUNNING", false)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
@@ -187,9 +187,9 @@ func TestGracefulShutdown_ForceKillAfterGracePeriod(t *testing.T) {
 
 	for _, taskID := range []string{taskID1, taskID2} {
 		_, err := db.Exec(`
-			INSERT INTO tasks (id, title, type, status)
-			VALUES (?, ?, ?, ?)
-		`, taskID, "Test Task", "IMPLEMENTATION", "RUNNING")
+			INSERT INTO tasks (id, title, status)
+			VALUES (?, ?, ?)
+		`, taskID, "Test Task", "RUNNING")
 		if err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
@@ -258,9 +258,9 @@ func TestGracefulShutdown_ContextCanceled(t *testing.T) {
 
 	taskID := uuid.New().String()
 	_, err := db.Exec(`
-		INSERT INTO tasks (id, title, type, status)
-		VALUES (?, ?, ?, ?)
-	`, taskID, "Test Task", "IMPLEMENTATION", "RUNNING")
+		INSERT INTO tasks (id, title, status)
+		VALUES (?, ?, ?)
+	`, taskID, "Test Task", "RUNNING")
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
@@ -305,9 +305,9 @@ func TestGracefulShutdown_MixedPodTypes(t *testing.T) {
 
 	for _, taskID := range []string{taskID1, taskID2, taskID3} {
 		_, err := db.Exec(`
-			INSERT INTO tasks (id, title, type, status)
-			VALUES (?, ?, ?, ?)
-		`, taskID, "Test Task", "IMPLEMENTATION", "RUNNING")
+			INSERT INTO tasks (id, title, status)
+			VALUES (?, ?, ?)
+		`, taskID, "Test Task", "RUNNING")
 		if err != nil {
 			t.Fatalf("insert task: %v", err)
 		}
@@ -316,8 +316,8 @@ func TestGracefulShutdown_MixedPodTypes(t *testing.T) {
 	// Create mix of pods: some that stop gracefully, some that don't
 	pods := []Pod{
 		newMockPod(taskID1, 100*time.Millisecond), // stops quickly
-		newMockPod(taskID2, 50*time.Millisecond),  // stops quickly
-		newMockPod(taskID3, 999*time.Hour),        // never stops
+		newMockPod(taskID2, 50*time.Millisecond), // stops quickly
+		newMockPod(taskID3, 999*time.Hour),       // never stops
 	}
 
 	cfg := &config.ShutdownConfig{
@@ -385,9 +385,9 @@ func TestCleanupIncompleteWorktrees_RemovesRunningTaskDirs(t *testing.T) {
 	taskID := uuid.New().String()
 	branchName := "task/" + taskID[:8]
 	_, err = db.Exec(`
-		INSERT INTO tasks (id, title, type, status, project_id, branch_name)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, taskID, "Test Task", "IMPLEMENTATION", "RUNNING", projectID, branchName)
+		INSERT INTO tasks (id, title, status, project_id, branch_name)
+		VALUES (?, ?, ?, ?, ?)
+	`, taskID, "Test Task", "RUNNING", projectID, branchName)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
@@ -442,9 +442,9 @@ func TestCleanupIncompleteWorktrees_PreservesCompletedTaskDirs(t *testing.T) {
 	taskID := uuid.New().String()
 	branchName := "task/" + taskID[:8]
 	_, err = db.Exec(`
-		INSERT INTO tasks (id, title, type, status, project_id, branch_name)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, taskID, "Test Task", "IMPLEMENTATION", "COMPLETED", projectID, branchName)
+		INSERT INTO tasks (id, title, status, project_id, branch_name)
+		VALUES (?, ?, ?, ?, ?)
+	`, taskID, "Test Task", "COMPLETED", projectID, branchName)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
 	}
@@ -493,9 +493,9 @@ func TestCleanupIncompleteWorktrees_HandlesRetryTasks(t *testing.T) {
 	taskID := uuid.New().String()
 	branchName := "task/" + taskID[:8]
 	_, err = db.Exec(`
-		INSERT INTO tasks (id, title, type, status, project_id, branch_name, crash_recovery)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, taskID, "Test Task", "IMPLEMENTATION", "RETRY", projectID, branchName, true)
+		INSERT INTO tasks (id, title, status, project_id, branch_name, crash_recovery)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, taskID, "Test Task", "RETRY", projectID, branchName, true)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
 	}

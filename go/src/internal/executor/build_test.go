@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/circle-oo/flux/internal/models"
 )
 
 func TestRunBuild_GoProject(t *testing.T) {
@@ -122,93 +120,5 @@ func TestRunBuild_MakefileProject_Failure(t *testing.T) {
 	passed, _ := e.runBuild(tmpDir)
 	if passed {
 		t.Error("expected Makefile build to fail")
-	}
-}
-
-func TestRegisterBuildFailureTask_Fields(t *testing.T) {
-	// Verify the bugfix task is constructed with correct fields.
-	// We use a mock ManagerClient to capture the created task.
-	failedTask := &models.Task{
-		ID:         "task-123",
-		Title:      "Original Task",
-		Priority:   30,
-		Source:     models.TaskSourceOperator,
-		ProjectID:  "project-abc",
-		GoalID:     "goal-xyz",
-		BranchName: "task/task-123",
-	}
-
-	buildOutput := "main.go:5:2: undefined: foo"
-
-	// Test the task construction logic directly
-	bugfixTask := buildFailureTask(failedTask, buildOutput)
-
-	// Check that bugfix tag is present
-	hasBugfixTag := false
-	for _, tag := range bugfixTask.Tags {
-		if tag == "bugfix" {
-			hasBugfixTag = true
-			break
-		}
-	}
-	if !hasBugfixTag {
-		t.Errorf("expected bugfix tag, got tags: %v", bugfixTask.Tags)
-	}
-	if bugfixTask.Priority != 10 {
-		t.Errorf("expected priority 10 (capped), got %d", bugfixTask.Priority)
-	}
-	if bugfixTask.Source != models.TaskSourceSystem {
-		t.Errorf("expected source SYSTEM, got %s", bugfixTask.Source)
-	}
-	if bugfixTask.ProjectID != failedTask.ProjectID {
-		t.Errorf("expected project_id %s, got %s", failedTask.ProjectID, bugfixTask.ProjectID)
-	}
-	if bugfixTask.GoalID != failedTask.GoalID {
-		t.Errorf("expected goal_id %s, got %s", failedTask.GoalID, bugfixTask.GoalID)
-	}
-	if bugfixTask.BranchName != failedTask.BranchName {
-		t.Errorf("expected branch_name %s, got %s", failedTask.BranchName, bugfixTask.BranchName)
-	}
-	if len(bugfixTask.Tags) != 3 {
-		t.Errorf("expected 3 tags, got %d: %v", len(bugfixTask.Tags), bugfixTask.Tags)
-	}
-
-	// Check that build output is included in description
-	if bugfixTask.Description == "" {
-		t.Error("expected non-empty description")
-	}
-}
-
-func TestRegisterBuildFailureTask_PriorityAlreadyHigh(t *testing.T) {
-	failedTask := &models.Task{
-		ID:       "task-456",
-		Title:    "High Priority Task",
-		Priority: 5, // Already higher than 10
-	}
-
-	bugfixTask := buildFailureTask(failedTask, "error")
-
-	if bugfixTask.Priority != 5 {
-		t.Errorf("expected priority 5 (preserved), got %d", bugfixTask.Priority)
-	}
-}
-
-func TestRegisterBuildFailureTask_OutputTruncation(t *testing.T) {
-	failedTask := &models.Task{
-		ID:    "task-789",
-		Title: "Task With Long Output",
-	}
-
-	// Create output longer than maxOutputLen (2000)
-	longOutput := ""
-	for i := 0; i < 300; i++ {
-		longOutput += "error: something went wrong on this line\n"
-	}
-
-	bugfixTask := buildFailureTask(failedTask, longOutput)
-
-	// Description should contain truncated output, not the full thing
-	if len(bugfixTask.Description) > 3000 {
-		t.Errorf("description too long (%d chars), expected truncation", len(bugfixTask.Description))
 	}
 }

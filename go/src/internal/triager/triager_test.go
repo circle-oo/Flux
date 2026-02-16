@@ -415,7 +415,6 @@ func TestParseTriageResponse_WrappedJSON(t *testing.T) {
 func TestBuildTriagePrompt(t *testing.T) {
 	task := &models.Task{
 		Title:       "Fix login bug",
-		Type:        models.TaskTypeBugfix,
 		Priority:    20,
 		Description: "Users cannot log in after password reset",
 		Tags:        []string{"auth", "urgent"},
@@ -462,7 +461,6 @@ func TestBuildTriagePrompt(t *testing.T) {
 func TestBuildTriagePrompt_EmptyTags(t *testing.T) {
 	task := &models.Task{
 		Title:       "Simple task",
-		Type:        models.TaskTypeCoding,
 		Priority:    50,
 		Description: "A simple coding task",
 	}
@@ -525,7 +523,6 @@ func TestParseTriageResponse_SanityGuard(t *testing.T) {
 func TestBuildTriagePrompt_ProjectName(t *testing.T) {
 	task := &models.Task{
 		Title:       "Add feature",
-		Type:        models.TaskTypeCoding,
 		Priority:    50,
 		Description: "Add a new feature",
 		ProjectID:   "my-project",
@@ -540,7 +537,6 @@ func TestBuildTriagePrompt_ProjectName(t *testing.T) {
 func TestBuildTriagePromptWithContext_ProjectInfo(t *testing.T) {
 	task := &models.Task{
 		Title:       "Add authentication",
-		Type:        models.TaskTypeCoding,
 		Priority:    50,
 		Description: "Add JWT authentication to the API",
 		ProjectID:   "api-service",
@@ -574,7 +570,6 @@ func TestBuildTriagePromptWithContext_ProjectInfo(t *testing.T) {
 func TestBuildTriagePromptWithContext_GoalInfo(t *testing.T) {
 	task := &models.Task{
 		Title:       "Optimize query performance",
-		Type:        models.TaskTypeCoding,
 		Priority:    50,
 		Description: "Reduce API latency",
 		ProjectID:   "api-service",
@@ -613,7 +608,6 @@ func TestBuildTriagePromptWithContext_GoalInfo(t *testing.T) {
 func TestBuildTriagePromptWithContext_NoContext(t *testing.T) {
 	task := &models.Task{
 		Title:       "Fix bug",
-		Type:        models.TaskTypeBugfix,
 		Priority:    50,
 		Description: "Fix the thing",
 	}
@@ -637,7 +631,6 @@ func TestBuildTriagePromptWithContext_NoContext(t *testing.T) {
 func TestBuildTriagePrompt_NoProjectName(t *testing.T) {
 	task := &models.Task{
 		Title:       "Add feature",
-		Type:        models.TaskTypeCoding,
 		Priority:    50,
 		Description: "Add a new feature",
 	}
@@ -652,7 +645,6 @@ func TestBuildTriagePrompt_NoProjectName(t *testing.T) {
 func TestBuildTriagePromptWithContext_FullContext(t *testing.T) {
 	task := &models.Task{
 		Title:       "Implement rate limiting",
-		Type:        models.TaskTypeCoding,
 		Priority:    50,
 		Description: "Add rate limiting to prevent abuse",
 		ProjectID:   "api-service",

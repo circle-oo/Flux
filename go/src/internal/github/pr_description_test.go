@@ -13,7 +13,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			ID:           "task-123",
 			Title:        "Add user authentication",
 			Description:  "Implement JWT-based authentication for the API",
-			Type:         models.TaskTypeCoding,
+			
 			Priority:     5,
 			Source:       models.TaskSourceOperator,
 			DiffLines:    150,
@@ -64,7 +64,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			ID:          "task-456",
 			Title:       "Fix login bug",
 			Description: "Fix issue where users can't log in",
-			Type:        models.TaskTypeBugfix,
+			
 			Priority:    3,
 			Result:      "", // No result
 		}
@@ -83,7 +83,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			ID:          "task-456",
 			Title:       "Fix login bug",
 			Description: "Fix issue where users can't log in",
-			Type:        models.TaskTypeBugfix,
+			
 			Priority:    3,
 			TestPassed:  &testPassed,
 			Result:      "Fixed authentication issue",
@@ -102,7 +102,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			ID:          "task-789",
 			Title:       "Refactor database layer",
 			Description: "Improve database connection pooling",
-			Type:        models.TaskTypeMaintenance,
+			
 			Priority:    10,
 			Tags:        []string{"refactor", "database", "performance"},
 			GoalID:      "goal-1",
@@ -133,7 +133,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			ID:           "task-large",
 			Title:        "Large refactor",
 			Description:  "Major refactoring of core modules",
-			Type:         models.TaskTypeCoding,
+			
 			Priority:     5,
 			DiffLines:    2500,
 			FilesChanged: 25,
@@ -158,7 +158,7 @@ func TestPRDescriptionBuilder_GenerateReviewPoints(t *testing.T) {
 		ID:          "task-test",
 		Title:       "Test task",
 		Description: "Test description",
-		Type:        models.TaskTypeCoding,
+		
 		Priority:    5,
 	}
 
@@ -194,7 +194,7 @@ func TestPRDescriptionBuilder_BaseBranch(t *testing.T) {
 			ID:          "task-base",
 			Title:       "Test base branch",
 			Description: "Testing base branch parameter",
-			Type:        models.TaskTypeCoding,
+			
 			Priority:    5,
 		}
 
@@ -209,7 +209,7 @@ func TestPRDescriptionBuilder_BaseBranch(t *testing.T) {
 			ID:          "task-default",
 			Title:       "Test default branch",
 			Description: "Testing default base branch",
-			Type:        models.TaskTypeCoding,
+			
 			Priority:    5,
 		}
 
@@ -225,7 +225,7 @@ func TestPRDescriptionBuilder_BuildFooter(t *testing.T) {
 		ID:          "task-footer",
 		Title:       "Test footer",
 		Description: "Testing footer generation",
-		Type:        models.TaskTypeCoding,
+		
 		Priority:    5,
 		Model:       "sonnet",
 	}

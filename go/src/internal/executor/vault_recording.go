@@ -55,7 +55,7 @@ func buildTaskSummaryData(task *models.Task, result *claudecli.Result) vault.Tas
 	return vault.TaskSummaryData{
 		ID:           task.ID,
 		Title:        task.Title,
-		Type:         task.Type,
+		Type:         "",
 		Status:       task.Status,
 		Priority:     task.Priority,
 		Model:        task.Model,

@@ -113,10 +113,10 @@ func TestSubtaskDependencies(t *testing.T) {
 	}
 
 	// Insert test tasks
-	_, err = database.Exec(`INSERT INTO tasks (id, title, type, status, priority, source) VALUES
-		('task-1', 'Task 1', 'CODING', 'PENDING', 40, 'SYSTEM'),
-		('task-2', 'Task 2', 'CODING', 'PENDING', 40, 'SYSTEM'),
-		('task-3', 'Task 3', 'CODING', 'PENDING', 40, 'SYSTEM')`)
+	_, err = database.Exec(`INSERT INTO tasks (id, title, status, priority, source) VALUES
+		('task-1', 'Task 1', 'PENDING', 40, 'SYSTEM'),
+		('task-2', 'Task 2', 'PENDING', 40, 'SYSTEM'),
+		('task-3', 'Task 3', 'PENDING', 40, 'SYSTEM')`)
 	if err != nil {
 		t.Fatalf("insert tasks: %v", err)
 	}
@@ -182,10 +182,10 @@ func TestSubtaskDependencies_Indexes(t *testing.T) {
 	}
 
 	// Insert test data
-	_, err = database.Exec(`INSERT INTO tasks (id, title, type, status, priority, source) VALUES
-		('task-1', 'Task 1', 'CODING', 'PENDING', 40, 'SYSTEM'),
-		('task-2', 'Task 2', 'CODING', 'PENDING', 40, 'SYSTEM'),
-		('task-3', 'Task 3', 'CODING', 'PENDING', 40, 'SYSTEM')`)
+	_, err = database.Exec(`INSERT INTO tasks (id, title, status, priority, source) VALUES
+		('task-1', 'Task 1', 'PENDING', 40, 'SYSTEM'),
+		('task-2', 'Task 2', 'PENDING', 40, 'SYSTEM'),
+		('task-3', 'Task 3', 'PENDING', 40, 'SYSTEM')`)
 	if err != nil {
 		t.Fatalf("insert tasks: %v", err)
 	}

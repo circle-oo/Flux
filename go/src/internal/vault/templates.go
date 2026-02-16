@@ -29,7 +29,9 @@ func TaskSummaryTemplate(task TaskSummaryData) string {
 
 	b.WriteString(fmt.Sprintf("# Task: %s\n\n", task.Title))
 	b.WriteString(fmt.Sprintf("**ID**: %s\n", task.ID))
-	b.WriteString(fmt.Sprintf("**Type**: %s\n", task.Type))
+	if task.Type != "" {
+		b.WriteString(fmt.Sprintf("**Type**: %s\n", task.Type))
+	}
 	b.WriteString(fmt.Sprintf("**Status**: %s\n", task.Status))
 	b.WriteString(fmt.Sprintf("**Priority**: %d\n", task.Priority))
 	b.WriteString(fmt.Sprintf("**Model**: %s\n", task.Model))

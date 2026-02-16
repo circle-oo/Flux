@@ -9,17 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// Task type constants
-const (
-	TaskTypeCoding      = "CODING"
-	TaskTypeResearch    = "RESEARCH"
-	TaskTypeDocument    = "DOCUMENT"
-	TaskTypeMaintenance = "MAINTENANCE"
-	TaskTypeDeploy      = "DEPLOY"
-	TaskTypeBugfix      = "BUGFIX"
-	TaskTypePlanning    = "PLANNING"
-)
-
 // Task status constants
 const (
 	TaskPending    = "PENDING"
@@ -46,7 +35,6 @@ type Task struct {
 	ID            string   `json:"id"`
 	Title         string   `json:"title"`
 	Description   string   `json:"description"`
-	Type          string   `json:"type"`
 	Status        string   `json:"status"`
 	Priority      int      `json:"priority"`
 	Source        string   `json:"source"`
@@ -193,13 +181,13 @@ func (s *TaskStore) Create(t *Task) error {
 	}
 
 	_, err = s.DB.Exec(
-		`INSERT INTO tasks (id, title, description, type, status, priority, source,
+		`INSERT INTO tasks (id, title, description, status, priority, source,
 		 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 		 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
 		 diff_lines, files_changed, triage_analysis, triage_description, triage_title, plan, test_passed,
 		 retry_count, max_retries, crash_recovery, tokens_used, cost_usd, started_at, completed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Title, t.Description, t.Type, t.Status, t.Priority, t.Source,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Title, t.Description, t.Status, t.Priority, t.Source,
 		t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
 		dependsOnJSON, tagsJSON, t.Prompt,
 		t.Result, t.ErrorLog, t.ExecutorID, t.Model, t.BranchName,
@@ -291,7 +279,7 @@ func (s *TaskStore) Update(t *Task) error {
 	}
 
 	_, err = s.DB.Exec(
-		`UPDATE tasks SET title = ?, description = ?, type = ?, status = ?, priority = ?,
+		`UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?,
 		 source = ?, project_id = ?, parent_id = ?, depth = ?, alert_id = ?, goal_id = ?,
 		 depends_on = ?, tags = ?, prompt = ?, result = ?, error_log = ?, executor_id = ?,
 		 model = ?, branch_name = ?, pr_url = ?, pr_status = ?, diff_lines = ?,
@@ -299,7 +287,7 @@ func (s *TaskStore) Update(t *Task) error {
 		 test_passed = ?, retry_count = ?, max_retries = ?, crash_recovery = ?,
 		 tokens_used = ?, cost_usd = ?, updated_at = CURRENT_TIMESTAMP,
 		 started_at = ?, completed_at = ? WHERE id = ?`,
-		t.Title, t.Description, t.Type, t.Status, t.Priority,
+		t.Title, t.Description, t.Status, t.Priority,
 		t.Source, t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
 		dependsOnJSON, tagsJSON, t.Prompt, t.Result, t.ErrorLog,
 		t.ExecutorID, t.Model, t.BranchName, t.PRUrl, t.PRStatus, t.DiffLines,
@@ -517,7 +505,7 @@ func (s *TaskStore) ListByPRStatus(prStatus string) ([]*Task, error) {
 // All queries that read full task rows should use this constant to avoid
 // column-list drift (the root cause of PR #23 where triage_analysis was
 // missing from manager queries).
-const TaskSelectSQL = `SELECT id, title, description, type, status, priority, source,
+const TaskSelectSQL = `SELECT id, title, description, status, priority, source,
 	project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
 	result, error_log, executor_id, model, branch_name, pr_url, pr_status,
 	diff_lines, files_changed, triage_analysis, triage_description, triage_title, plan,
@@ -558,7 +546,7 @@ func ScanTask(scanner interface{ Scan(...interface{}) error }) (*Task, error) {
 	var t Task
 	var dependsOnJSON, tagsJSON string
 	err := scanner.Scan(
-		&t.ID, &t.Title, &t.Description, &t.Type, &t.Status, &t.Priority, &t.Source,
+		&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.Source,
 		&t.ProjectID, &t.ParentID, &t.Depth, &t.AlertID, &t.GoalID,
 		&dependsOnJSON, &tagsJSON, &t.Prompt,
 		&t.Result, &t.ErrorLog, &t.ExecutorID, &t.Model, &t.BranchName,
