@@ -98,6 +98,18 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_tasks_pr_status ON tasks(pr_status)`,
 	`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,
 
+	`CREATE TABLE IF NOT EXISTS subtask_dependencies (
+		dependent_id  TEXT NOT NULL,
+		dependency_id TEXT NOT NULL,
+		created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (dependent_id, dependency_id),
+		FOREIGN KEY (dependent_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (dependency_id) REFERENCES tasks(id) ON DELETE CASCADE
+	)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_subtask_deps_dependent ON subtask_dependencies(dependent_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_subtask_deps_dependency ON subtask_dependencies(dependency_id)`,
+
 	`CREATE TABLE IF NOT EXISTS alerts (
 		id           TEXT PRIMARY KEY,
 		service_name TEXT NOT NULL,
