@@ -226,13 +226,35 @@ export default function TaskDetail() {
 
       {/* Description */}
       <div className="card p-6">
-        <h2 className="text-lg font-semibold text-slate-200 mb-3">Description</h2>
+        <div className="flex items-center gap-2 mb-3">
+          <h2 className="text-lg font-semibold text-slate-200">Description</h2>
+          {task.triage_description && (
+            <span className="bg-slate-600/40 text-slate-400 border border-slate-600/30 px-2 py-0.5 rounded text-xs font-medium">
+              User
+            </span>
+          )}
+        </div>
         {task.description ? (
           <MarkdownRenderer content={task.description} />
         ) : (
           <p className="text-slate-400">—</p>
         )}
       </div>
+
+      {/* Triage Description */}
+      {task.triage_description && (
+        <div className="card p-6 border border-cyan-600/30">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-lg font-semibold text-cyan-400">Triage Description</h2>
+            <span className="bg-cyan-600/20 text-cyan-400 border border-cyan-600/30 px-2 py-0.5 rounded text-xs font-medium">
+              AI
+            </span>
+          </div>
+          <div className="text-sm text-slate-300 leading-relaxed">
+            <MarkdownRenderer content={task.triage_description} />
+          </div>
+        </div>
+      )}
 
       {/* Overview */}
       <div className="card p-6">

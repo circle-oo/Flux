@@ -665,14 +665,14 @@ export default function Tasks() {
                         )}
                       </div>
 
-                      {/* Triage Analysis (preview) */}
-                      {task.triage_analysis && (
+                      {/* Triage Description (preview) */}
+                      {task.triage_description && (
                         <p className="text-sm text-cyan-400/80 mb-1.5 line-clamp-2 border-l-2 border-cyan-600/40 pl-2">
-                          {task.triage_analysis}
+                          {task.triage_description}
                         </p>
                       )}
 
-                      {/* Description (clamped) */}
+                      {/* User Description (clamped) */}
                       <p className="text-sm text-slate-400 mb-2 line-clamp-2">
                         {task.description}
                       </p>

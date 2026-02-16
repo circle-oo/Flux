@@ -47,6 +47,7 @@ type SystemPromptData struct {
 type AutopilotData struct {
 	Title              string
 	Description        string
+	TriageDescription  string
 	TriageAnalysis     string
 	Prompt             string
 	ProjectName        string

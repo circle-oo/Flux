@@ -271,12 +271,12 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update triage results
+	// Update triage results — store triage description separately to preserve user-provided description
 	if req.Analysis != "" {
 		task.TriageAnalysis = req.Analysis
 	}
-	if req.Description != "" && req.Description != task.Description {
-		task.Description = req.Description
+	if req.Description != "" {
+		task.TriageDescription = req.Description
 	}
 	if req.Priority > 0 && req.Priority != task.Priority {
 		slog.Info("triage adjusted priority", "task_id", id, "old", task.Priority, "new", req.Priority)
