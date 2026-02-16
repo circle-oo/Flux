@@ -538,6 +538,103 @@ func TestBuildTriagePrompt_ProjectName(t *testing.T) {
 	}
 }
 
+func TestBuildTriagePromptWithContext_ProjectInfo(t *testing.T) {
+	task := &models.Task{
+		Title:       "Add authentication",
+		Type:        models.TaskTypeCoding,
+		Priority:    50,
+		Description: "Add JWT authentication to the API",
+		ProjectID:   "api-service",
+	}
+
+	project := &models.Project{
+		ID:          "api-service",
+		Name:        "API Service",
+		Description: "Core REST API for the platform",
+		Type:        models.ProjectTypeService,
+		TechStack:   []string{"Go", "PostgreSQL", "Redis"},
+	}
+
+	prompt := buildTriagePromptWithContext(task, project, nil)
+
+	checks := []string{
+		"API Service",
+		"Core REST API for the platform",
+		"SERVICE",
+		"Go, PostgreSQL, Redis",
+		"Project Context",
+	}
+
+	for _, check := range checks {
+		if !contains(prompt, check) {
+			t.Errorf("prompt missing expected project context: %q", check)
+		}
+	}
+}
+
+func TestBuildTriagePromptWithContext_GoalInfo(t *testing.T) {
+	task := &models.Task{
+		Title:       "Optimize query performance",
+		Type:        models.TaskTypeCoding,
+		Priority:    50,
+		Description: "Reduce API latency",
+		ProjectID:   "api-service",
+		GoalID:      "perf-goal",
+	}
+
+	project := &models.Project{
+		ID:     "api-service",
+		Name:   "API Service",
+		GoalID: "perf-goal",
+	}
+
+	goal := &models.Goal{
+		ID:          "perf-goal",
+		Title:       "Improve System Performance",
+		Description: "Reduce p99 latency below 100ms",
+		Priorities:  []string{"database optimization", "caching strategy"},
+	}
+
+	prompt := buildTriagePromptWithContext(task, project, goal)
+
+	checks := []string{
+		"Improve System Performance",
+		"Reduce p99 latency below 100ms",
+		"database optimization, caching strategy",
+		"Goal Context",
+	}
+
+	for _, check := range checks {
+		if !contains(prompt, check) {
+			t.Errorf("prompt missing expected goal context: %q", check)
+		}
+	}
+}
+
+func TestBuildTriagePromptWithContext_NoContext(t *testing.T) {
+	task := &models.Task{
+		Title:       "Fix bug",
+		Type:        models.TaskTypeBugfix,
+		Priority:    50,
+		Description: "Fix the thing",
+	}
+
+	prompt := buildTriagePromptWithContext(task, nil, nil)
+
+	// Should still work without context
+	if prompt == "" {
+		t.Fatal("prompt should not be empty")
+	}
+
+	// Should not contain context sections
+	forbidden := []string{"Project Context", "Goal Context"}
+	for _, check := range forbidden {
+		if contains(prompt, check) {
+			t.Errorf("prompt should NOT contain context section when no context provided: %q", check)
+		}
+	}
+}
+
 func TestBuildTriagePrompt_NoProjectName(t *testing.T) {
 	task := &models.Task{
 		Title:       "Add feature",
@@ -550,6 +647,64 @@ func TestBuildTriagePrompt_NoProjectName(t *testing.T) {
 	// Just verify it doesn't crash and produces output
 	if prompt == "" {
 		t.Fatal("prompt should not be empty")
+	}
+}
+
+func TestBuildTriagePromptWithContext_FullContext(t *testing.T) {
+	task := &models.Task{
+		Title:       "Implement rate limiting",
+		Type:        models.TaskTypeCoding,
+		Priority:    50,
+		Description: "Add rate limiting to prevent abuse",
+		ProjectID:   "api-service",
+		GoalID:      "security-goal",
+		Tags:        []string{"security", "performance"},
+	}
+
+	project := &models.Project{
+		ID:          "api-service",
+		Name:        "API Service",
+		Description: "Production REST API serving 10M requests/day",
+		Type:        models.ProjectTypeService,
+		TechStack:   []string{"Go", "Redis", "PostgreSQL"},
+		GoalID:      "security-goal",
+	}
+
+	goal := &models.Goal{
+		ID:          "security-goal",
+		Title:       "Enhance Platform Security",
+		Description: "Implement security best practices across all services",
+		Priorities:  []string{"authentication", "rate limiting", "input validation"},
+	}
+
+	prompt := buildTriagePromptWithContext(task, project, goal)
+
+	// Verify all context is included
+	checks := []string{
+		// Task info
+		"Implement rate limiting",
+		"Add rate limiting to prevent abuse",
+		"security, performance",
+		// Project context
+		"Project Context",
+		"API Service",
+		"Production REST API serving 10M requests/day",
+		"SERVICE",
+		"Go, Redis, PostgreSQL",
+		// Goal context
+		"Goal Context",
+		"Enhance Platform Security",
+		"Implement security best practices across all services",
+		"authentication, rate limiting, input validation",
+		// Analysis instructions should reference context
+		"How this aligns with the project's stated goals",
+		"How this relates to the current goal priorities",
+	}
+
+	for _, check := range checks {
+		if !contains(prompt, check) {
+			t.Errorf("prompt missing expected context: %q", check)
+		}
 	}
 }
 
