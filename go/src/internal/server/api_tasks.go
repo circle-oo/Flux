@@ -260,6 +260,14 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		slog.Info("cascade cancelled subtasks", "parent_id", id, "count", cancelled)
 	}
 
+	// Archive all subtasks after cancelling
+	archived, err := s.tasks.ArchiveChildren(id)
+	if err != nil {
+		slog.Error("failed to archive subtasks", "task_id", id, "error", err)
+	} else if archived > 0 {
+		slog.Info("archived subtasks after cancel", "parent_id", id, "count", archived)
+	}
+
 	if s.notifier != nil {
 		s.notifier.Send("info", fmt.Sprintf("Task cancelled: %s", task.Title))
 	}
@@ -304,6 +312,14 @@ func (s *Server) promoteToReady(taskID string) {
 // handleRetryTask handles POST /api/tasks/{id}/retry
 func (s *Server) handleRetryTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+
+	// Archive all previous subtasks before retrying
+	archived, err := s.tasks.ArchiveChildren(id)
+	if err != nil {
+		slog.Error("failed to archive subtasks before retry", "task_id", id, "error", err)
+	} else if archived > 0 {
+		slog.Info("archived subtasks before retry", "parent_id", id, "count", archived)
+	}
 
 	if err := s.tasks.Retry(id); err != nil {
 		slog.Error("failed to retry task", "id", id, "error", err)

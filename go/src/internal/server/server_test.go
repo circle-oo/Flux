@@ -1533,15 +1533,15 @@ func TestTasks_CancelCascade(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	// Verify subtasks are cancelled
+	// Verify subtasks are cancelled and archived
 	rr = doAuthRequest(t, srv, "GET", "/api/tasks/"+parentID+"/subtasks", nil)
 	var resp map[string]interface{}
 	parseResponse(t, rr, &resp)
 	tasks := resp["tasks"].([]interface{})
 	for _, st := range tasks {
 		sub := st.(map[string]interface{})
-		if sub["status"] != "CANCELLED" {
-			t.Errorf("expected subtask CANCELLED, got %v", sub["status"])
+		if sub["status"] != "ARCHIVED" {
+			t.Errorf("expected subtask ARCHIVED (after cancel), got %v", sub["status"])
 		}
 	}
 }

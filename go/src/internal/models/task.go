@@ -417,6 +417,20 @@ func (s *TaskStore) CancelChildren(parentID string) (int64, error) {
 	return result.RowsAffected()
 }
 
+// ArchiveChildren archives all subtasks of a parent task, regardless of their current status.
+// This is used when a parent task is cancelled or retried to clear out stale subtask data.
+func (s *TaskStore) ArchiveChildren(parentID string) (int64, error) {
+	result, err := s.DB.Exec(
+		`UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE parent_id = ? AND status != ?`,
+		TaskArchived, parentID, TaskArchived,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("archive children: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 // CountByStatus returns the number of tasks with the given status.
 func (s *TaskStore) CountByStatus(status string) (int, error) {
 	var count int
