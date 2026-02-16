@@ -29,6 +29,7 @@ export interface Task {
   prompt?: string
   triage_analysis?: string
   triage_description?: string
+  triage_title?: string
   plan?: string
   executor_id?: string
   model?: string
