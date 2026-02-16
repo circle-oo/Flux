@@ -19,7 +19,7 @@ const componentColors: Record<string, string> = {
   github: 'text-pink-400',
 }
 
-function levelBadge(level: string) {
+function LevelBadge({ level }: { level: string }) {
   const cls = levelColors[level] || 'bg-slate-600 text-slate-200'
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-mono font-semibold ${cls}`}>
@@ -28,7 +28,7 @@ function levelBadge(level: string) {
   )
 }
 
-function formatTime(iso: string) {
+function formatLogTime(iso: string): string {
   try {
     const d = new Date(iso)
     const hh = String(d.getHours()).padStart(2, '0')
@@ -75,6 +75,84 @@ function AttrCell({ attrs }: { attrs: Record<string, unknown> }) {
   )
 }
 
+function LogToolbar({
+  filter,
+  autoScroll,
+  onFilterChange,
+  onAutoScrollChange,
+}: {
+  filter: { level: string; search: string }
+  autoScroll: boolean
+  onFilterChange: (filter: Partial<{ level: string; search: string }>) => void
+  onAutoScrollChange: (enabled: boolean) => void
+}) {
+  const levels = ['', 'DEBUG', 'INFO', 'WARN', 'ERROR']
+
+  return (
+    <div className="card p-4 flex items-center gap-4 mb-4">
+      <div className="flex items-center gap-1">
+        {levels.map((lvl) => (
+          <button
+            key={lvl || 'ALL'}
+            onClick={() => onFilterChange({ level: lvl })}
+            className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
+              filter.level === lvl
+                ? lvl === ''
+                  ? 'bg-blue-600 text-white'
+                  : (levelColors[lvl] || 'bg-slate-600 text-white')
+                : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+            }`}
+          >
+            {lvl || 'ALL'}
+          </button>
+        ))}
+      </div>
+
+      <input
+        type="text"
+        placeholder="Search logs..."
+        value={filter.search}
+        onChange={(e) => onFilterChange({ search: e.target.value })}
+        className="input flex-1"
+      />
+
+      <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={autoScroll}
+          onChange={(e) => onAutoScrollChange(e.target.checked)}
+          className="rounded border-slate-600"
+        />
+        Auto-scroll
+      </label>
+    </div>
+  )
+}
+
+function LogRow({ entry }: { entry: LogEntry }) {
+  return (
+    <tr
+      className={`border-b border-slate-700/50 hover:bg-slate-700/30 ${
+        entry.level === 'ERROR'
+          ? 'bg-red-900/10'
+          : entry.level === 'WARN'
+          ? 'bg-amber-900/10'
+          : ''
+      }`}
+    >
+      <td className="px-4 py-1.5 text-slate-500 whitespace-nowrap">
+        {formatLogTime(entry.time)}
+      </td>
+      <td className="px-4 py-1.5"><LevelBadge level={entry.level} /></td>
+      <td className={`px-4 py-1.5 font-mono text-xs font-semibold ${componentColors[entry.attrs.component as string] || 'text-slate-500'}`}>
+        {(entry.attrs.component as string) || '—'}
+      </td>
+      <td className="px-4 py-1.5 text-slate-200">{entry.msg}</td>
+      <td className="px-4 py-1.5"><AttrCell attrs={entry.attrs} /></td>
+    </tr>
+  )
+}
+
 export default function Logs() {
   const {
     logs,
@@ -94,7 +172,6 @@ export default function Logs() {
     fetchRecentLogs()
   }, [fetchRecentLogs])
 
-  // Auto-scroll on new logs
   useEffect(() => {
     if (autoScroll && !paused) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -113,8 +190,6 @@ export default function Logs() {
       return true
     })
   }, [logs, filter])
-
-  const levels = ['', 'DEBUG', 'INFO', 'WARN', 'ERROR']
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 flex flex-col h-full">
@@ -146,47 +221,12 @@ export default function Logs() {
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="card p-4 flex items-center gap-4 mb-4">
-        {/* Level filter buttons */}
-        <div className="flex items-center gap-1">
-          {levels.map((lvl) => (
-            <button
-              key={lvl || 'ALL'}
-              onClick={() => setFilter({ level: lvl })}
-              className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
-                filter.level === lvl
-                  ? lvl === ''
-                    ? 'bg-blue-600 text-white'
-                    : (levelColors[lvl] || 'bg-slate-600 text-white')
-                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-              }`}
-            >
-              {lvl || 'ALL'}
-            </button>
-          ))}
-        </div>
-
-        {/* Search */}
-        <input
-          type="text"
-          placeholder="Search logs..."
-          value={filter.search}
-          onChange={(e) => setFilter({ search: e.target.value })}
-          className="input flex-1"
-        />
-
-        {/* Auto-scroll toggle */}
-        <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={autoScroll}
-            onChange={(e) => setAutoScroll(e.target.checked)}
-            className="rounded border-slate-600"
-          />
-          Auto-scroll
-        </label>
-      </div>
+      <LogToolbar
+        filter={filter}
+        autoScroll={autoScroll}
+        onFilterChange={setFilter}
+        onAutoScrollChange={setAutoScroll}
+      />
 
       {/* Log table */}
       <div className="card flex-1 overflow-auto min-h-0">
@@ -211,28 +251,7 @@ export default function Logs() {
               </tr>
             ) : (
               filteredLogs.map((entry, i) => (
-                <tr
-                  key={i}
-                  className={`border-b border-slate-700/50 hover:bg-slate-700/30 ${
-                    entry.level === 'ERROR'
-                      ? 'bg-red-900/10'
-                      : entry.level === 'WARN'
-                      ? 'bg-amber-900/10'
-                      : ''
-                  }`}
-                >
-                  <td className="px-4 py-1.5 text-slate-500 whitespace-nowrap">
-                    {formatTime(entry.time)}
-                  </td>
-                  <td className="px-4 py-1.5">{levelBadge(entry.level)}</td>
-                  <td className={`px-4 py-1.5 font-mono text-xs font-semibold ${componentColors[entry.attrs.component as string] || 'text-slate-500'}`}>
-                    {(entry.attrs.component as string) || '—'}
-                  </td>
-                  <td className="px-4 py-1.5 text-slate-200">{entry.msg}</td>
-                  <td className="px-4 py-1.5">
-                    <AttrCell attrs={entry.attrs} />
-                  </td>
-                </tr>
+                <LogRow key={i} entry={entry} />
               ))
             )}
           </tbody>

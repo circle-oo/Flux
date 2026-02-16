@@ -4,27 +4,8 @@ import { useProjectStore } from '../stores/projectStore'
 import { useTaskStore } from '../stores/taskStore'
 import { useGoalStore } from '../stores/goalStore'
 import { Project } from '../lib/api'
-
-const statusColor: Record<string, string> = {
-  PENDING: 'badge-secondary',
-  READY: 'badge-info',
-  RUNNING: 'badge-warning',
-  COMPLETED: 'badge-success',
-  FAILED: 'badge-danger',
-  RETRY: 'badge-warning',
-  ARCHIVED: 'badge-secondary',
-  DECOMPOSED: 'bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold',
-  CANCELLED: 'bg-slate-500 text-white px-2 py-1 rounded text-xs font-semibold',
-}
-
-function formatDate(iso?: string) {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
-  }
-}
+import { StatusBadge } from '../components/StatusBadge'
+import { formatDate } from '../lib/utils'
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
@@ -297,9 +278,7 @@ export default function ProjectDetail() {
                       <h3 className="text-sm font-medium text-slate-100 truncate">
                         {task.title}
                       </h3>
-                      <span className={statusColor[task.status]}>
-                        {task.status}
-                      </span>
+                      <StatusBadge status={task.status} size="sm" />
                     </div>
                     <p className="text-xs text-slate-400 line-clamp-2">
                       {task.description}

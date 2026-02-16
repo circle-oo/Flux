@@ -3,6 +3,7 @@ import { useGoalStore } from './goalStore'
 import { useTaskStore } from './taskStore'
 import { useLogStore } from './logStore'
 import { useDeployStore } from './deployStore'
+import type { UpdaterStatus } from '../lib/api'
 import type {} from './projectStore' // available for future PR_STATUS handling
 
 type EventType = 'TASK_UPDATED' | 'GOAL_CHANGED' | 'PR_STATUS' | 'POD_STATUS' | 'LOG_ENTRY' | 'DEPLOY_STATUS'
@@ -11,9 +12,11 @@ interface TaskUpdatedData { task_id: string; status: string }
 interface GoalChangedData { goal_id: string; status: string }
 interface PRStatusData { task_id: string; pr_status: string }
 interface PodStatusData { pod_id: string; status: string }
-interface DeployStatusData { updater: any }
+interface DeployStatusData { updater: UpdaterStatus }
 
-type WSEventData = TaskUpdatedData | GoalChangedData | PRStatusData | PodStatusData | DeployStatusData
+interface LogEntryData { time: string; level: string; msg: string; attrs: Record<string, unknown> }
+
+type WSEventData = TaskUpdatedData | GoalChangedData | PRStatusData | PodStatusData | DeployStatusData | LogEntryData
 
 interface WSEvent {
   type: EventType
@@ -172,7 +175,7 @@ function handleEvent(event: WSEvent) {
       break
 
     case 'LOG_ENTRY':
-      useLogStore.getState().addLog(event.data as any)
+      useLogStore.getState().addLog(event.data as LogEntryData)
       break
 
     case 'DEPLOY_STATUS':
