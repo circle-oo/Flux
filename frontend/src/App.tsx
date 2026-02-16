@@ -11,6 +11,7 @@ import PRs from './pages/PRs'
 import Logs from './pages/Logs'
 import Settings from './pages/Settings'
 import TaskDetail from './pages/TaskDetail'
+import ProjectDetail from './pages/ProjectDetail'
 
 function App() {
   const { isAuthenticated, authEnabled, checkAuthConfig } = useAuthStore()
@@ -43,6 +44,7 @@ function App() {
         <Route path="tasks" element={<Tasks />} />
         <Route path="tasks/:id" element={<TaskDetail />} />
         <Route path="projects" element={<Projects />} />
+        <Route path="projects/:id" element={<ProjectDetail />} />
         <Route path="prs" element={<PRs />} />
         <Route path="logs" element={<Logs />} />
         <Route path="settings" element={<Settings />} />

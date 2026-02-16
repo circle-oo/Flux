@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useProjectStore } from '../stores/projectStore'
 import { useGoalStore } from '../stores/goalStore'
 import { Project } from '../lib/api'
 
 export default function Projects() {
+  const navigate = useNavigate()
   const {
     projects,
     isLoading,
@@ -301,7 +303,11 @@ export default function Projects() {
         ) : (
           <div className="space-y-3">
             {activeProjects.map((project) => (
-              <div key={project.id} className="card p-6">
+              <div
+                key={project.id}
+                className="card p-6 cursor-pointer hover:border-slate-600 transition-colors"
+                onClick={() => navigate(`/projects/${project.id}`)}
+              >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
@@ -321,6 +327,7 @@ export default function Projects() {
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-400 hover:underline text-sm"
+                          onClick={(e) => e.stopPropagation()}
                         >
                           {project.repo_url}
                         </a>
@@ -351,7 +358,11 @@ export default function Projects() {
           </h2>
           <div className="space-y-3">
             {otherProjects.map((project) => (
-              <div key={project.id} className="card p-6 opacity-75">
+              <div
+                key={project.id}
+                className="card p-6 opacity-75 cursor-pointer hover:opacity-100 hover:border-slate-600 transition-all"
+                onClick={() => navigate(`/projects/${project.id}`)}
+              >
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
