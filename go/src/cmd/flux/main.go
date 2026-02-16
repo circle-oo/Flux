@@ -206,6 +206,11 @@ func main() {
 		logger.Error("graceful shutdown error", "error", err)
 	}
 
+	// Clean up incomplete worktrees to prevent disk space leaks
+	if err := shutdown.CleanupIncompleteWorktrees(cfg.Orchestrator.WorkspaceBase, database); err != nil {
+		logger.Error("worktree cleanup error", "error", err)
+	}
+
 	// Shutdown HTTP server
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("server shutdown error", "error", err)
