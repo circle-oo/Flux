@@ -79,3 +79,76 @@ func TestHandleDeployStatus_WithUpdater(t *testing.T) {
 		t.Error("expected updater to be enabled")
 	}
 }
+
+func TestHandleDeploy_NoUpdater(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// POST /api/system/deploy without an updater configured
+	// Should fall back to legacy restart behavior
+	rr := doAuthRequest(t, srv, "POST", "/api/system/deploy", nil)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+
+	// Should have status field
+	status, ok := resp["status"].(string)
+	if !ok {
+		t.Error("expected 'status' field in response")
+	}
+
+	// When no updater configured, should say "restarting"
+	if status != "restarting" && status != "deploying" {
+		t.Errorf("expected status 'restarting' or 'deploying', got %q", status)
+	}
+
+	// Should have message field
+	if _, ok := resp["message"]; !ok {
+		t.Error("expected 'message' field in response")
+	}
+
+	t.Logf("deploy response: %+v", resp)
+}
+
+func TestHandleDeploy_WithUpdater(t *testing.T) {
+	srv, _ := setupTestServer(t)
+
+	// Create a mock updater
+	mockUpdater := updater.New(config.AutoUpdateConfig{
+		Enabled:       true,
+		Branch:        "main",
+		CheckInterval: 5 * time.Minute,
+	}, ".")
+	srv.SetUpdater(mockUpdater)
+
+	// POST /api/system/deploy
+	rr := doAuthRequest(t, srv, "POST", "/api/system/deploy", nil)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]interface{}
+	parseResponse(t, rr, &resp)
+
+	// Should have status field
+	status, ok := resp["status"].(string)
+	if !ok {
+		t.Error("expected 'status' field in response")
+	}
+
+	// When updater is configured, should say "deploying"
+	if status != "deploying" {
+		t.Errorf("expected status 'deploying', got %q", status)
+	}
+
+	// Should have message field
+	if _, ok := resp["message"]; !ok {
+		t.Error("expected 'message' field in response")
+	}
+
+	t.Logf("deploy response: %+v", resp)
+}

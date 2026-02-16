@@ -84,7 +84,9 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 		if err := s.updater.TriggerUpdate(ctx); err != nil {
 			slog.Error("manual deploy failed", "error", err)
-			s.notifier.Send("error", "Manual deploy failed: "+err.Error())
+			if s.notifier != nil {
+				s.notifier.Send("error", "Manual deploy failed: "+err.Error())
+			}
 		}
 	}()
 }
