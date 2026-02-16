@@ -106,22 +106,25 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 	defer tx.Rollback()
 
 	// Build query based on pod type with goal boost and extended limit for dependency checking
+	// Include both READY and RETRY tasks for automatic retry on restart
 	orderAndLimit := `
 			ORDER BY priority ASC,
 				CASE WHEN goal_id = ? THEN 0 ELSE 1 END,
 				created_at ASC
 			LIMIT 10`
 	var query string
+	var args []interface{}
 	if podType == "RESEARCHER" {
-		query = models.TaskSelectSQL + " WHERE status = ? AND type = ?" + orderAndLimit
+		query = models.TaskSelectSQL + " WHERE status IN (?, ?) AND type = ?" + orderAndLimit
+		args = []interface{}{models.TaskReady, models.TaskRetry, models.TaskTypeResearch, currentGoalID}
 	} else {
-		query = models.TaskSelectSQL + " WHERE status = ? AND type != ?" + orderAndLimit
+		query = models.TaskSelectSQL + " WHERE status IN (?, ?) AND type != ?" + orderAndLimit
+		args = []interface{}{models.TaskReady, models.TaskRetry, models.TaskTypeResearch, currentGoalID}
 	}
 
 	// Query multiple candidates for dependency checking
-	// Note: query was already branched at lines 114-119 based on pod type
 	var rows *sql.Rows
-	rows, err = tx.Query(query, models.TaskReady, models.TaskTypeResearch, currentGoalID)
+	rows, err = tx.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query tasks: %w", err)
 	}

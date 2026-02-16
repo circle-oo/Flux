@@ -994,3 +994,161 @@ func TestAreDependenciesMet(t *testing.T) {
 		t.Error("expected dependencies not met with running deps")
 	}
 }
+
+func TestPopNextTask_RetryTasksAutomaticallyPicked(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create a RETRY task (simulating crash recovery or rate limit)
+	retryTask := &models.Task{
+		Title:         "Retry Task",
+		Type:          models.TaskTypeCoding,
+		Status:        models.TaskRetry,
+		Priority:      30,
+		RetryCount:    1,
+		CrashRecovery: true,
+	}
+	if err := mgr.CreateTask(retryTask); err != nil {
+		t.Fatalf("create retry task: %v", err)
+	}
+
+	// Create a READY task with lower priority
+	readyTask := &models.Task{
+		Title:    "Ready Task",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 50,
+	}
+	if err := mgr.CreateTask(readyTask); err != nil {
+		t.Fatalf("create ready task: %v", err)
+	}
+
+	// Pop next task - should get RETRY task due to higher priority
+	next, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop next task: %v", err)
+	}
+
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+
+	if next.Title != "Retry Task" {
+		t.Errorf("expected Retry Task, got %s", next.Title)
+	}
+
+	if next.Status != models.TaskRunning {
+		t.Errorf("expected status RUNNING after pop, got %s", next.Status)
+	}
+
+	// Verify the task was transitioned from RETRY to RUNNING
+	updated, err := mgr.GetTask(retryTask.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.Status != models.TaskRunning {
+		t.Errorf("expected task status RUNNING in DB, got %s", updated.Status)
+	}
+	if updated.StartedAt == "" {
+		t.Error("expected started_at to be set")
+	}
+}
+
+func TestPopNextTask_MixedReadyAndRetryTasks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create multiple READY and RETRY tasks with different priorities
+	tasks := []*models.Task{
+		{Title: "Retry High", Type: models.TaskTypeCoding, Status: models.TaskRetry, Priority: 10, RetryCount: 1},
+		{Title: "Ready High", Type: models.TaskTypeCoding, Status: models.TaskReady, Priority: 20},
+		{Title: "Retry Low", Type: models.TaskTypeCoding, Status: models.TaskRetry, Priority: 60, RetryCount: 2},
+		{Title: "Ready Low", Type: models.TaskTypeCoding, Status: models.TaskReady, Priority: 70},
+	}
+
+	for _, task := range tasks {
+		if err := mgr.CreateTask(task); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+	}
+
+	// Pop tasks one by one, verify priority ordering regardless of READY/RETRY status
+	expectedOrder := []string{"Retry High", "Ready High", "Retry Low", "Ready Low"}
+	for i, expectedTitle := range expectedOrder {
+		next, err := mgr.PopNextTask("EXECUTOR")
+		if err != nil {
+			t.Fatalf("pop task %d: %v", i, err)
+		}
+		if next == nil {
+			t.Fatalf("pop task %d: expected task, got nil", i)
+		}
+		if next.Title != expectedTitle {
+			t.Errorf("pop task %d: expected %s, got %s", i, expectedTitle, next.Title)
+		}
+		if next.Status != models.TaskRunning {
+			t.Errorf("pop task %d: expected status RUNNING, got %s", i, next.Status)
+		}
+	}
+
+	// Verify no more tasks
+	next, err := mgr.PopNextTask("EXECUTOR")
+	if err != nil {
+		t.Fatalf("pop final task: %v", err)
+	}
+	if next != nil {
+		t.Errorf("expected no more tasks, got %s", next.Title)
+	}
+}
+
+func TestPopNextTask_ResearcherIncludesRetry(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := &config.Config{}
+	mgr := NewManager(db, cfg)
+
+	// Create RETRY research task
+	retryResearch := &models.Task{
+		Title:      "Retry Research",
+		Type:       models.TaskTypeResearch,
+		Status:     models.TaskRetry,
+		Priority:   30,
+		RetryCount: 1,
+	}
+	if err := mgr.CreateTask(retryResearch); err != nil {
+		t.Fatalf("create retry research task: %v", err)
+	}
+
+	// Create READY coding task (should be ignored by RESEARCHER)
+	readyCoding := &models.Task{
+		Title:    "Ready Coding",
+		Type:     models.TaskTypeCoding,
+		Status:   models.TaskReady,
+		Priority: 10,
+	}
+	if err := mgr.CreateTask(readyCoding); err != nil {
+		t.Fatalf("create ready coding task: %v", err)
+	}
+
+	// RESEARCHER pod should get the RETRY research task
+	next, err := mgr.PopNextTask("RESEARCHER")
+	if err != nil {
+		t.Fatalf("pop researcher task: %v", err)
+	}
+
+	if next == nil {
+		t.Fatal("expected task, got nil")
+	}
+
+	if next.Title != "Retry Research" {
+		t.Errorf("expected Retry Research, got %s", next.Title)
+	}
+
+	if next.Type != models.TaskTypeResearch {
+		t.Errorf("researcher should get research task, got %s", next.Type)
+	}
+
+	if next.Status != models.TaskRunning {
+		t.Errorf("expected status RUNNING, got %s", next.Status)
+	}
+}
