@@ -117,7 +117,7 @@ export default function TaskDetail() {
   useEffect(() => {
     if (!id || loading) return
     refreshTask()
-  }, [taskUpdateCounter]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [taskUpdateCounter, id, loading, refreshTask])
 
   // Auto-refresh running/pending/decomposed tasks every 5s
   useEffect(() => {
