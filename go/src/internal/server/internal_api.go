@@ -360,7 +360,6 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 		task := &models.Task{
 			Title:       sub.Title,
 			Description: sub.Description,
-			Type:        parent.Type,
 			Priority:    parent.Priority,
 			Source:      models.TaskSourceSelf,
 			ProjectID:   parent.ProjectID,
@@ -464,7 +463,6 @@ func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request
 	var req struct {
 		Title       string   `json:"title"`
 		Description string   `json:"description"`
-		Type        string   `json:"type"`
 		Priority    int      `json:"priority"`
 		Source      string   `json:"source"`
 		ProjectID   string   `json:"project_id"`
@@ -481,10 +479,6 @@ func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
 	}
-	if req.Type == "" {
-		writeError(w, http.StatusBadRequest, "type is required")
-		return
-	}
 
 	// Validate input for security
 	if err := ValidateTaskInput(req.Title, req.Description); err != nil {
@@ -495,7 +489,6 @@ func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request
 	task := &models.Task{
 		Title:       req.Title,
 		Description: req.Description,
-		Type:        req.Type,
 		Priority:    req.Priority,
 		Source:      req.Source,
 		ProjectID:   req.ProjectID,

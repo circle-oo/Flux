@@ -398,7 +398,6 @@ func TestTasks_Create(t *testing.T) {
 
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
 		"title": "Implement feature",
-		"type":  "CODING",
 	})
 
 	if rr.Code != http.StatusCreated {
@@ -419,33 +418,24 @@ func TestTasks_Create_MissingTitle(t *testing.T) {
 	srv, _ := setupTestServer(t)
 
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"type": "CODING",
+		"description": "task without title",
 	})
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
 	}
 }
 
-func TestTasks_Create_MissingType(t *testing.T) {
-	srv, _ := setupTestServer(t)
-
-	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "No type",
-	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
-	}
-}
+// TestTasks_Create_MissingType removed - type field no longer exists
 
 func TestTasks_ListWithFilters(t *testing.T) {
 	srv, _ := setupTestServer(t)
 
 	// Create tasks
 	doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Task A", "type": "CODING", "source": "OPERATOR",
+		"title": "Task A", "source": "OPERATOR",
 	})
 	doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Task B", "type": "RESEARCH", "source": "SYSTEM",
+		"title": "Task B", "source": "SYSTEM",
 	})
 
 	// List all
@@ -485,7 +475,7 @@ func TestTasks_GetByID(t *testing.T) {
 	srv, _ := setupTestServer(t)
 
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Get me", "type": "CODING",
+		"title": "Get me",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -516,7 +506,7 @@ func TestTasks_Update(t *testing.T) {
 	srv, _ := setupTestServer(t)
 
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Original", "type": "CODING",
+		"title": "Original",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -544,7 +534,7 @@ func TestTasks_Delete(t *testing.T) {
 	srv, _ := setupTestServer(t)
 
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Delete me", "type": "CODING",
+		"title": "Delete me",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -566,7 +556,7 @@ func TestTasks_Cancel(t *testing.T) {
 	srv, _ := setupTestServer(t)
 
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Cancel me", "type": "CODING",
+		"title": "Cancel me",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -793,7 +783,7 @@ func TestInternal_TaskDone(t *testing.T) {
 
 	// Create a task first
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Complete me", "type": "CODING",
+		"title": "Complete me",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -833,7 +823,7 @@ func TestInternal_TaskDone_ExecutionDetails(t *testing.T) {
 
 	// Create a task first
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Exec details", "type": "CODING",
+		"title": "Exec details",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -912,7 +902,7 @@ func TestInternal_TaskDone_CancelledTask(t *testing.T) {
 
 	// Create a task and transition it to RUNNING
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Running task", "type": "CODING",
+		"title": "Running task",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -987,7 +977,7 @@ func TestInternal_CreateSubtasks(t *testing.T) {
 
 	// Create parent task
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Parent task", "type": "CODING",
+		"title": "Parent task",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -1024,7 +1014,7 @@ func TestInternal_CreateSubtasks_DepthExceeded(t *testing.T) {
 
 	// Create parent task
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Parent", "type": "CODING",
+		"title": "Parent",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -1098,7 +1088,7 @@ func TestInternal_CreateSubtasks_WithDependencies(t *testing.T) {
 
 	// Create parent task
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Parent task", "type": "CODING",
+		"title": "Parent task",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -1147,7 +1137,7 @@ func TestInternal_CreateSubtasks_CircularDependency(t *testing.T) {
 
 	// Create parent task
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Parent task", "type": "CODING",
+		"title": "Parent task",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -1212,9 +1202,6 @@ func TestInternal_CreateTask(t *testing.T) {
 	if resp["title"] != "Fix build failure from: Original Task" {
 		t.Errorf("expected title, got %v", resp["title"])
 	}
-	if resp["type"] != "BUGFIX" {
-		t.Errorf("expected BUGFIX, got %v", resp["type"])
-	}
 	if resp["source"] != "SYSTEM" {
 		t.Errorf("expected SYSTEM, got %v", resp["source"])
 	}
@@ -1228,7 +1215,7 @@ func TestAPI_ListSubtasks(t *testing.T) {
 
 	// Create parent task
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Parent task", "type": "CODING",
+		"title": "Parent task",
 	})
 	var created map[string]interface{}
 	parseResponse(t, rr, &created)
@@ -1300,9 +1287,9 @@ func TestInternal_NextPending(t *testing.T) {
 
 	// Create a PENDING operator task directly in DB
 	_, err := database.Exec(
-		`INSERT INTO tasks (id, title, type, status, priority, source, depends_on, tags)
-		 VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')`,
-		"test-pending-001", "Pending task", "CODING", "PENDING", 50, "OPERATOR",
+		`INSERT INTO tasks (id, title, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, '[]', '[]')`,
+		"test-pending-001", "Pending task", "PENDING", 50, "OPERATOR",
 	)
 	if err != nil {
 		t.Fatalf("insert pending task: %v", err)
@@ -1376,9 +1363,9 @@ func TestInternal_Triaged(t *testing.T) {
 
 	// Create a PENDING task with a user-provided description
 	_, err := database.Exec(
-		`INSERT INTO tasks (id, title, description, type, status, priority, source, depends_on, tags)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '[]')`,
-		"test-triage-001", "Triage me", "User provided description", "CODING", "PENDING", 50, "OPERATOR",
+		`INSERT INTO tasks (id, title, description, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"test-triage-001", "Triage me", "User provided description", "PENDING", 50, "OPERATOR",
 	)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
@@ -1437,9 +1424,9 @@ func TestTriageAnalysis_FullLifecycle(t *testing.T) {
 
 	// Step 1: Create a PENDING operator task directly in DB with user description
 	_, err := database.Exec(
-		`INSERT INTO tasks (id, title, description, type, status, priority, source, depends_on, tags)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, '[]', '[]')`,
-		"triage-lifecycle-001", "Full lifecycle test", "Original user description", "CODING", "PENDING", 50, "OPERATOR",
+		`INSERT INTO tasks (id, title, description, status, priority, source, depends_on, tags)
+		 VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')`,
+		"triage-lifecycle-001", "Full lifecycle test", "Original user description", "PENDING", 50, "OPERATOR",
 	)
 	if err != nil {
 		t.Fatalf("insert task: %v", err)
@@ -1595,7 +1582,7 @@ func TestTasks_CancelCascade(t *testing.T) {
 
 	// Create parent task
 	rr := doAuthRequest(t, srv, "POST", "/api/tasks", map[string]interface{}{
-		"title": "Parent", "type": "CODING",
+		"title": "Parent",
 	})
 	var parent map[string]interface{}
 	parseResponse(t, rr, &parent)
@@ -1651,22 +1638,7 @@ func TestInternal_CreateTask_MissingTitle(t *testing.T) {
 	}
 }
 
-func TestInternal_CreateTask_MissingType(t *testing.T) {
-	srv, _ := setupTestServer(t)
-
-	body, _ := json.Marshal(map[string]interface{}{
-		"title": "No type",
-	})
-	req := httptest.NewRequest("POST", "/internal/tasks", bytes.NewBuffer(body))
-	req.RemoteAddr = "127.0.0.1:12345"
-	req.Header.Set("Content-Type", "application/json")
-	rr := httptest.NewRecorder()
-	srv.mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
+// TestInternal_CreateTask_MissingType removed - type field no longer exists
 
 func TestInternal_CreateTask_DefaultValues(t *testing.T) {
 	srv, _ := setupTestServer(t)

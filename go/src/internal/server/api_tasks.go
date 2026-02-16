@@ -16,7 +16,6 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title       string   `json:"title"`
 		Description string   `json:"description"`
-		Type        string   `json:"type"`
 		Priority    int      `json:"priority"`
 		Source      string   `json:"source"`
 		ProjectID   string   `json:"project_id"`
@@ -32,10 +31,6 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
-		return
-	}
-	if req.Type == "" {
-		writeError(w, http.StatusBadRequest, "type is required")
 		return
 	}
 
@@ -56,7 +51,6 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	task := &models.Task{
 		Title:       req.Title,
 		Description: req.Description,
-		Type:        req.Type,
 		Priority:    req.Priority,
 		Source:      req.Source,
 		ProjectID:   req.ProjectID,
@@ -156,7 +150,6 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title       *string  `json:"title"`
 		Description *string  `json:"description"`
-		Type        *string  `json:"type"`
 		Status      *string  `json:"status"`
 		Priority    *int     `json:"priority"`
 		ProjectID   *string  `json:"project_id"`
@@ -182,9 +175,6 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("task update validation failed", "task_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
-	}
-	if req.Type != nil {
-		task.Type = *req.Type
 	}
 	if req.Status != nil {
 		task.Status = *req.Status
