@@ -1,9 +1,6 @@
 package github
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,16 +8,17 @@ import (
 )
 
 func TestPRDescriptionBuilder_Build(t *testing.T) {
-	t.Run("basic PR description", func(t *testing.T) {
+	t.Run("basic PR description with result", func(t *testing.T) {
 		task := &models.Task{
-			ID:          "task-123",
-			Title:       "Add user authentication",
-			Description: "Implement JWT-based authentication for the API",
-			Type:        models.TaskTypeCoding,
-			Priority:    5,
-			Source:      models.TaskSourceOperator,
-			DiffLines:   150,
+			ID:           "task-123",
+			Title:        "Add user authentication",
+			Description:  "Implement JWT-based authentication for the API",
+			Type:         models.TaskTypeCoding,
+			Priority:     5,
+			Source:       models.TaskSourceOperator,
+			DiffLines:    150,
 			FilesChanged: 3,
+			Result:       "Successfully implemented JWT authentication with token validation and user login endpoints.",
 		}
 
 		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-1", "main")
@@ -34,7 +32,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 		requiredSections := []string{
 			"📋 Requirements / Problem / Issues",
 			"🔨 What Was Done in This PR",
-			"### Summary",
+			"Successfully implemented JWT authentication", // Task result
 			"👀 Review Points",
 			"**Task Type:** CODING",
 			"**Priority:** 5",
@@ -47,6 +45,37 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 				t.Errorf("expected body to contain '%s', but it's missing.\nFull body:\n%s", section, body)
 			}
 		}
+
+		// Verify that commits and file changes are NOT present
+		unwantedSections := []string{
+			"### Commits",
+			"### Files Changed",
+			"### Summary",
+		}
+
+		for _, section := range unwantedSections {
+			if strings.Contains(body, section) {
+				t.Errorf("expected body NOT to contain '%s', but it's present.\nFull body:\n%s", section, body)
+			}
+		}
+	})
+
+	t.Run("handles missing result", func(t *testing.T) {
+		task := &models.Task{
+			ID:          "task-456",
+			Title:       "Fix login bug",
+			Description: "Fix issue where users can't log in",
+			Type:        models.TaskTypeBugfix,
+			Priority:    3,
+			Result:      "", // No result
+		}
+
+		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-2", "main")
+		_, body := builder.Build()
+
+		if !strings.Contains(body, "*No task result available*") {
+			t.Errorf("expected body to contain fallback message for missing result")
+		}
 	})
 
 	t.Run("includes test status when available", func(t *testing.T) {
@@ -58,6 +87,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			Type:        models.TaskTypeBugfix,
 			Priority:    3,
 			TestPassed:  &testPassed,
+			Result:      "Fixed authentication issue",
 		}
 
 		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-2", "main")
@@ -79,6 +109,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			GoalID:      "goal-1",
 			AlertID:     "alert-5",
 			Model:       "opus",
+			Result:      "Refactored database connection pooling",
 		}
 
 		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-3", "main")
@@ -107,6 +138,7 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			Priority:     5,
 			DiffLines:    2500,
 			FilesChanged: 25,
+			Result:       "Completed large refactoring",
 		}
 
 		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-4", "main")
@@ -197,239 +229,6 @@ func TestPRDescriptionBuilder_GenerateReviewPoints(t *testing.T) {
 	}
 }
 
-func TestPRDescriptionBuilder_GetCommitSummary(t *testing.T) {
-	t.Run("parses commit messages", func(t *testing.T) {
-		// Create a temporary git repo for testing
-		tmpDir := t.TempDir()
-
-		// Initialize git repo
-		initCmd := exec.Command("git", "init")
-		initCmd.Dir = tmpDir
-		if err := initCmd.Run(); err != nil {
-			t.Skip("git not available, skipping test")
-		}
-
-		// Configure git user
-		configCmd1 := exec.Command("git", "config", "user.name", "Test User")
-		configCmd1.Dir = tmpDir
-		configCmd1.Run()
-		configCmd2 := exec.Command("git", "config", "user.email", "test@example.com")
-		configCmd2.Dir = tmpDir
-		configCmd2.Run()
-
-		// Create main branch with initial commit
-		readmePath := filepath.Join(tmpDir, "README.md")
-		os.WriteFile(readmePath, []byte("# Test"), 0644)
-		addCmd1 := exec.Command("git", "add", "README.md")
-		addCmd1.Dir = tmpDir
-		addCmd1.Run()
-		commitCmd1 := exec.Command("git", "commit", "-m", "Initial commit")
-		commitCmd1.Dir = tmpDir
-		commitCmd1.Run()
-		branchCmd := exec.Command("git", "branch", "-M", "main")
-		branchCmd.Dir = tmpDir
-		branchCmd.Run()
-
-		// Create a new branch
-		checkoutCmd := exec.Command("git", "checkout", "-b", "feature")
-		checkoutCmd.Dir = tmpDir
-		checkoutCmd.Run()
-
-		// Add commits to feature branch
-		file1Path := filepath.Join(tmpDir, "file1.txt")
-		os.WriteFile(file1Path, []byte("content1"), 0644)
-		addCmd2 := exec.Command("git", "add", "file1.txt")
-		addCmd2.Dir = tmpDir
-		addCmd2.Run()
-		commitCmd2 := exec.Command("git", "commit", "-m", "Add authentication module")
-		commitCmd2.Dir = tmpDir
-		commitCmd2.Run()
-
-		file2Path := filepath.Join(tmpDir, "file2.txt")
-		os.WriteFile(file2Path, []byte("content2"), 0644)
-		addCmd3 := exec.Command("git", "add", "file2.txt")
-		addCmd3.Dir = tmpDir
-		addCmd3.Run()
-		commitCmd3 := exec.Command("git", "commit", "-m", "Add JWT token validation")
-		commitCmd3.Dir = tmpDir
-		commitCmd3.Run()
-
-		// Test the commit summary
-		task := &models.Task{
-			ID:          "task-git",
-			Title:       "Test git operations",
-			Description: "Testing git commit parsing",
-			Type:        models.TaskTypeCoding,
-			Priority:    5,
-		}
-
-		builder := NewPRDescriptionBuilder(task, tmpDir, "executor-test", "main")
-		commits := builder.getCommitSummary()
-
-		if len(commits) != 2 {
-			t.Errorf("expected 2 commits, got %d", len(commits))
-		}
-
-		expectedCommits := []string{
-			"Add JWT token validation",
-			"Add authentication module",
-		}
-
-		for i, expected := range expectedCommits {
-			if i < len(commits) && commits[i] != expected {
-				t.Errorf("expected commit[%d] to be '%s', got '%s'", i, expected, commits[i])
-			}
-		}
-	})
-}
-
-func TestPRDescriptionBuilder_GetFileChanges(t *testing.T) {
-	t.Run("parses file changes with status", func(t *testing.T) {
-		// Create a temporary git repo for testing
-		tmpDir := t.TempDir()
-
-		// Initialize git repo
-		initCmd := exec.Command("git", "init")
-		initCmd.Dir = tmpDir
-		if err := initCmd.Run(); err != nil {
-			t.Skip("git not available, skipping test")
-		}
-
-		// Configure git user
-		configCmd1 := exec.Command("git", "config", "user.name", "Test User")
-		configCmd1.Dir = tmpDir
-		configCmd1.Run()
-		configCmd2 := exec.Command("git", "config", "user.email", "test@example.com")
-		configCmd2.Dir = tmpDir
-		configCmd2.Run()
-
-		// Create main branch with initial commit
-		readmePath := filepath.Join(tmpDir, "README.md")
-		os.WriteFile(readmePath, []byte("# Test"), 0644)
-		existingPath := filepath.Join(tmpDir, "existing.txt")
-		os.WriteFile(existingPath, []byte("existing content"), 0644)
-		addCmd1 := exec.Command("git", "add", ".")
-		addCmd1.Dir = tmpDir
-		addCmd1.Run()
-		commitCmd1 := exec.Command("git", "commit", "-m", "Initial commit")
-		commitCmd1.Dir = tmpDir
-		commitCmd1.Run()
-		branchCmd := exec.Command("git", "branch", "-M", "main")
-		branchCmd.Dir = tmpDir
-		branchCmd.Run()
-
-		// Create a new branch
-		checkoutCmd := exec.Command("git", "checkout", "-b", "feature")
-		checkoutCmd.Dir = tmpDir
-		checkoutCmd.Run()
-
-		// Add new file
-		newFilePath := filepath.Join(tmpDir, "new.txt")
-		os.WriteFile(newFilePath, []byte("new content"), 0644)
-		addCmd2 := exec.Command("git", "add", "new.txt")
-		addCmd2.Dir = tmpDir
-		addCmd2.Run()
-
-		// Modify existing file
-		os.WriteFile(existingPath, []byte("modified content"), 0644)
-		addCmd3 := exec.Command("git", "add", "existing.txt")
-		addCmd3.Dir = tmpDir
-		addCmd3.Run()
-
-		commitCmd2 := exec.Command("git", "commit", "-m", "Add and modify files")
-		commitCmd2.Dir = tmpDir
-		commitCmd2.Run()
-
-		// Test file changes
-		task := &models.Task{
-			ID:          "task-files",
-			Title:       "Test file changes",
-			Description: "Testing file change parsing",
-			Type:        models.TaskTypeCoding,
-			Priority:    5,
-		}
-
-		builder := NewPRDescriptionBuilder(task, tmpDir, "executor-test", "main")
-		changes := builder.getFileChanges()
-
-		if len(changes) < 2 {
-			t.Errorf("expected at least 2 file changes, got %d", len(changes))
-		}
-
-		// Check that changes contain expected patterns
-		changesStr := strings.Join(changes, " ")
-		if !strings.Contains(changesStr, "new.txt") {
-			t.Errorf("expected changes to contain new.txt")
-		}
-		if !strings.Contains(changesStr, "existing.txt") {
-			t.Errorf("expected changes to contain existing.txt")
-		}
-	})
-}
-
-func TestPRDescriptionBuilder_GenerateImplementationSummary(t *testing.T) {
-	t.Run("generates complete summary", func(t *testing.T) {
-		task := &models.Task{
-			ID:          "task-summary",
-			Title:       "Add user authentication",
-			Description: "Implement JWT-based authentication for the API to secure user access and protect sensitive endpoints",
-			Type:        models.TaskTypeCoding,
-			Priority:    5,
-		}
-
-		builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test", "main")
-		summary := builder.generateImplementationSummary()
-
-		// Check that summary contains key elements (Key Changes is optional if no commits/files)
-		expectedElements := []string{
-			"Add user authentication",
-			"**Why:**",
-			"**Impact:**",
-		}
-
-		for _, element := range expectedElements {
-			if !strings.Contains(summary, element) {
-				t.Errorf("expected summary to contain '%s', but it's missing.\nFull summary:\n%s", element, summary)
-			}
-		}
-
-		// Impact should mention functionality
-		if !strings.Contains(summary, "functionality") {
-			t.Errorf("expected summary to mention functionality for CODING task")
-		}
-	})
-
-	t.Run("includes task-specific impact", func(t *testing.T) {
-		tests := []struct {
-			taskType      string
-			expectedImpact string
-		}{
-			{models.TaskTypeCoding, "Adds new functionality"},
-			{models.TaskTypeBugfix, "Fixes a bug"},
-			{models.TaskTypeDocument, "Improves documentation"},
-			{models.TaskTypeMaintenance, "Maintains code quality"},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.taskType, func(t *testing.T) {
-				task := &models.Task{
-					ID:          "task-test",
-					Title:       "Test task",
-					Description: "Test description",
-					Type:        tt.taskType,
-					Priority:    5,
-				}
-
-				builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test", "main")
-				summary := builder.generateImplementationSummary()
-
-				if !strings.Contains(summary, tt.expectedImpact) {
-					t.Errorf("expected summary to contain impact '%s' for task type %s", tt.expectedImpact, tt.taskType)
-				}
-			})
-		}
-	})
-}
 
 func TestPRDescriptionBuilder_BaseBranch(t *testing.T) {
 	t.Run("uses provided base branch", func(t *testing.T) {
