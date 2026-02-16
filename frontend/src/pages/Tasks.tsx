@@ -31,11 +31,11 @@ function duration(startIso: string, endIso: string): string {
 }
 
 const priorityPresets = [
-  { value: 1, label: 'Critical', color: 'text-red-400' },
-  { value: 10, label: 'High', color: 'text-amber-400' },
-  { value: 30, label: 'Medium', color: 'text-blue-400' },
-  { value: 50, label: 'Normal', color: 'text-slate-400' },
-  { value: 80, label: 'Low', color: 'text-slate-500' },
+  { value: 10, label: 'Critical', color: 'text-red-400' },
+  { value: 25, label: 'High', color: 'text-amber-400' },
+  { value: 40, label: 'Normal', color: 'text-blue-400' },
+  { value: 65, label: 'Low', color: 'text-slate-400' },
+  { value: 85, label: 'Backlog', color: 'text-slate-500' },
 ]
 
 const typeDescriptions: Record<string, string> = {
@@ -115,7 +115,7 @@ export default function Tasks() {
     title: '',
     description: '',
     type: 'CODING' as Task['type'],
-    priority: 50,
+    priority: 40,
     project_id: '',
     goal_id: '',
     tags: '',
@@ -229,7 +229,7 @@ export default function Tasks() {
         title: '',
         description: '',
         type: 'CODING',
-        priority: 50,
+        priority: 40,
         project_id: '',
         goal_id: '',
         tags: '',

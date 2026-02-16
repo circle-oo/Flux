@@ -665,7 +665,7 @@ func ShouldAutoMerge(task *models.Task, diffLines, filesChanged int) (bool, stri
 	}
 
 	// Bugfix with high priority (low number): auto-merge
-	if task.Type == models.TaskTypeBugfix && task.Priority <= 10 {
+	if task.Type == models.TaskTypeBugfix && task.Priority <= 15 {
 		return true, fmt.Sprintf("✅ **Auto-merged**: High-priority bugfix (P:%d, %d lines, %d files)", task.Priority, diffLines, filesChanged)
 	}
 

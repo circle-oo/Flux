@@ -226,7 +226,7 @@ func detectSecondarySignals(task *models.Task, analysis *DecompositionAnalysis) 
 	}
 
 	// High-value coding tasks
-	if task.Type == models.TaskTypeCoding && task.Priority <= 20 {
+	if task.Type == models.TaskTypeCoding && task.Priority <= 25 {
 		analysis.Signals = append(analysis.Signals, DecompositionSignal{
 			Name:        "High-Value Feature",
 			Description: "High-priority coding task may benefit from phased approach",

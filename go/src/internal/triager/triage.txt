@@ -64,20 +64,21 @@ Format your analysis like this:
 If the task title or description is unclear, nonsensical, or appears to be a test input (e.g. random characters, placeholder text), state that the task needs clarification and cannot be meaningfully analyzed.
 
 ### Priority
-Suggest a priority number from 1-100. IMPORTANT: most tasks should fall in the 31-50 range.
+Suggest a priority number from 1-100. IMPORTANT: most tasks should fall in the 31-55 range.
 
 Priority scale:
-- 1-10: Production emergency ONLY (active outage, data loss, security breach in progress)
-- 11-30: High priority (blocking bugs, important security fixes, critical features)
-- 31-50: Normal priority (standard features, improvements, most bug fixes) — THIS IS THE DEFAULT RANGE
-- 51-70: Low priority (nice-to-have, minor improvements, non-blocking issues)
-- 71-100: Backlog (cosmetic, documentation, minor cleanup)
+- 1-15: CRITICAL (active production outage, data loss in progress, security breach actively exploited)
+- 16-30: HIGH (blocking bugs affecting users, important security fixes, critical features with deadlines)
+- 31-55: NORMAL (standard features, improvements, most bug fixes, refactoring) — THIS IS THE DEFAULT RANGE
+- 56-75: LOW (nice-to-have features, minor improvements, non-blocking issues, optimizations)
+- 76-100: BACKLOG (cosmetic changes, documentation updates, minor cleanup, ideas for future)
 
 Rules:
-- When in doubt, assign priority 50.
-- If the task is unclear, nonsensical, or a test input, assign priority 50.
-- Priority 1-10 requires evidence of active production impact. Do NOT assign 1-10 for general bug fixes or features, no matter how important they sound.
-- Priority 11-30 requires a clear blocking issue or security vulnerability. Most bug fixes belong in 31-50.
+- When in doubt, assign priority 40 (middle of NORMAL range).
+- If the task is unclear, nonsensical, or a test input, assign priority 40.
+- Priority 1-15 requires evidence of ACTIVE production impact happening RIGHT NOW. Do NOT assign 1-15 for bugs that "could" cause issues or "important" features.
+- Priority 16-30 requires clear evidence that work is blocked or users are actively affected. Most bug fixes belong in 31-55.
+- The vast majority of development work (features, refactoring, testing, improvements) should be in the 31-55 NORMAL range.
 
 ### Description
 Rewrite the task description as a clear, actionable specification with:

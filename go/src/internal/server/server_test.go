@@ -1570,9 +1570,9 @@ func TestInternal_CreateTask_DefaultValues(t *testing.T) {
 
 	var resp map[string]interface{}
 	parseResponse(t, rr, &resp)
-	// Priority defaults to 50
-	if int(resp["priority"].(float64)) != 50 {
-		t.Errorf("expected default priority 50, got %v", resp["priority"])
+	// Priority defaults to 40
+	if int(resp["priority"].(float64)) != 40 {
+		t.Errorf("expected default priority 40, got %v", resp["priority"])
 	}
 	// Source defaults to SYSTEM
 	if resp["source"] != "SYSTEM" {

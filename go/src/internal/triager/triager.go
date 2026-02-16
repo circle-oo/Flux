@@ -449,8 +449,8 @@ func parseTriageResponse(text string, task *models.Task) *TriageResult {
 	// override to default. This catches garbage/test inputs that the model may
 	// incorrectly triage as critical.
 	inputLen := len(strings.TrimSpace(task.Title)) + len(strings.TrimSpace(task.Description))
-	if inputLen < 10 && result.Priority < 10 {
-		result.Priority = 50
+	if inputLen < 10 && result.Priority < 20 {
+		result.Priority = 40
 	}
 
 	return result
