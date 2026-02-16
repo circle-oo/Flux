@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/circle-oo/flux/internal/config"
+	"github.com/circle-oo/flux/internal/executor"
 	"github.com/circle-oo/flux/internal/models"
 )
 
@@ -380,8 +381,8 @@ func (m *Manager) popNextPendingOnce(triagerID string) (*models.Task, error) {
 	return task, nil
 }
 
-// CheckParentCompletion checks if all subtasks of a parent are done
-// and auto-transitions the parent accordingly.
+// CheckParentCompletion checks if all subtasks of a parent are done,
+// merges their branches into the parent branch, and auto-transitions the parent accordingly.
 func (m *Manager) CheckParentCompletion(parentID string) error {
 	parent, err := m.tasks.GetByID(parentID)
 	if err != nil {
@@ -401,12 +402,20 @@ func (m *Manager) CheckParentCompletion(parentID string) error {
 		return nil
 	}
 
+	// Check completion status and merge completed subtasks
 	allDone := true
 	anyFailed := false
 	for _, sub := range subtasks {
 		switch sub.Status {
 		case models.TaskCompleted, models.TaskArchived:
-			// done
+			// Merge completed subtask branch into parent branch
+			if err := m.MergeCompletedSubtask(parent, sub); err != nil {
+				slog.Error("failed to merge subtask into parent",
+					"parent_id", parentID,
+					"subtask_id", sub.ID,
+					"error", err)
+				// Continue processing other subtasks even if one merge fails
+			}
 		case models.TaskFailed:
 			anyFailed = true
 		case models.TaskCancelled:
@@ -420,7 +429,7 @@ func (m *Manager) CheckParentCompletion(parentID string) error {
 		return nil
 	}
 
-	// Aggregate subtask results before transitioning parent
+	// Aggregate subtask results after merging
 	if err := m.AggregateSubtaskResults(parentID); err != nil {
 		slog.Error("failed to aggregate subtask results", "parent_id", parentID, "error", err)
 		// Continue with transition even if aggregation fails
@@ -508,6 +517,55 @@ func (m *Manager) AggregateSubtaskResults(parentID string) error {
 		"completed", completedCount,
 		"failed", failedCount,
 		"cancelled", cancelledCount)
+
+	return nil
+}
+
+// MergeCompletedSubtask merges a completed subtask's branch into the parent task's branch.
+// This function ensures that subtask work is integrated into the parent before the parent creates a PR.
+func (m *Manager) MergeCompletedSubtask(parent, subtask *models.Task) error {
+	// Skip merge if subtask didn't produce a branch (decomposed tasks, for example)
+	if subtask.BranchName == "" {
+		slog.Debug("subtask has no branch, skipping merge", "subtask_id", subtask.ID)
+		return nil
+	}
+
+	// Skip merge if parent has no branch yet
+	if parent.BranchName == "" {
+		slog.Warn("parent has no branch, cannot merge subtask",
+			"parent_id", parent.ID,
+			"subtask_id", subtask.ID)
+		return fmt.Errorf("parent task has no branch")
+	}
+
+	// Get parent project to construct project name
+	project, err := m.projects.GetByID(parent.ProjectID)
+	if err != nil {
+		return fmt.Errorf("failed to get parent project: %w", err)
+	}
+
+	// Create worktree manager to perform the merge
+	wm := executor.NewWorktreeManager(
+		m.config.Orchestrator.WorkspaceBase,
+		m.config.GitHub.Token,
+		m.config.GitHub.Username,
+	)
+
+	slog.Info("merging subtask branch into parent",
+		"parent_id", parent.ID,
+		"parent_branch", parent.BranchName,
+		"subtask_id", subtask.ID,
+		"subtask_branch", subtask.BranchName,
+		"project", project.Name)
+
+	// Perform the merge
+	if err := wm.MergeSubtaskIntoParent(project.Name, parent.ID, subtask.ID); err != nil {
+		return fmt.Errorf("worktree merge failed: %w", err)
+	}
+
+	slog.Info("successfully merged subtask into parent",
+		"parent_id", parent.ID,
+		"subtask_id", subtask.ID)
 
 	return nil
 }
