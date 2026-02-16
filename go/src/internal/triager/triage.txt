@@ -80,6 +80,14 @@ Rules:
 - Priority 16-30 requires clear evidence that work is blocked or users are actively affected. Most bug fixes belong in 31-55.
 - The vast majority of development work (features, refactoring, testing, improvements) should be in the 31-55 NORMAL range.
 
+### Title
+Propose an improved task title that is:
+- Clear and specific (not vague like "Fix bug" or "Update code")
+- Actionable and concise (50-70 characters ideal, max 100)
+- Descriptive of the actual change (e.g., "Add user authentication to API endpoints" instead of "Add auth")
+
+Only suggest a new title if the original is unclear, too vague, or could be more specific. If the original title is already clear and specific, you may output an empty string for the title field.
+
 ### Description
 Rewrite the task description as a clear, actionable specification with:
 - **Problem statement**: What needs to be implemented, fixed, or changed
@@ -118,6 +126,7 @@ Output ONLY a JSON object with these fields:
 {
   "analysis": "your analysis text here",
   "priority": <number between 1-100>,
+  "title": "improved title (or empty string if original is good)",
   "description": "rewritten description here"
 }
 

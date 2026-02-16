@@ -128,7 +128,7 @@ func (t *Triager) processNext(ctx context.Context) {
 		slog.Warn("triage failed, promoting with original description",
 			"task_id", task.ID, "title", task.Title, "error", err, "component", component)
 		// Even on failure, promote to READY so the task doesn't get stuck
-		if reportErr := t.client.ReportTriaged(task.ID, "", "", 0); reportErr != nil {
+		if reportErr := t.client.ReportTriaged(task.ID, "", "", "", 0); reportErr != nil {
 			slog.Error("failed to promote task after triage failure",
 				"task_id", task.ID, "error", reportErr, "component", component)
 		}
@@ -141,9 +141,9 @@ func (t *Triager) processNext(ctx context.Context) {
 	slog.Info("reporting triage results",
 		"task_id", task.ID, "has_analysis", result.Analysis != "",
 		"analysis_len", len(result.Analysis), "priority", result.Priority,
-		"component", component)
+		"has_title", result.Title != "", "component", component)
 
-	if reportErr := t.client.ReportTriaged(task.ID, result.Analysis, result.Description, result.Priority); reportErr != nil {
+	if reportErr := t.client.ReportTriaged(task.ID, result.Analysis, result.Description, result.Title, result.Priority); reportErr != nil {
 		slog.Error("failed to report triage results",
 			"task_id", task.ID, "error", reportErr, "component", component)
 		return
@@ -202,6 +202,7 @@ type triageData struct {
 type TriageResult struct {
 	Analysis    string // Structured analysis of the task
 	Priority    int    // Suggested priority (1-100)
+	Title       string // Suggested improved title (optional)
 	Description string // Rewritten description with clear requirements
 }
 
@@ -209,6 +210,7 @@ type TriageResult struct {
 type triageJSON struct {
 	Analysis    string `json:"analysis"`
 	Priority    int    `json:"priority"`
+	Title       string `json:"title"`
 	Description string `json:"description"`
 }
 
@@ -428,6 +430,9 @@ func parseTriageResponse(text string, task *models.Task) *TriageResult {
 		}
 		if tj.Priority >= 1 && tj.Priority <= 100 {
 			result.Priority = tj.Priority
+		}
+		if tj.Title != "" {
+			result.Title = tj.Title
 		}
 		if tj.Description != "" {
 			result.Description = tj.Description

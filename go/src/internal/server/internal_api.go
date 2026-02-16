@@ -249,13 +249,14 @@ func (s *Server) handleInternalNextPending(w http.ResponseWriter, r *http.Reques
 }
 
 // handleInternalTriaged handles POST /internal/tasks/{id}/triaged
-// Triager reports triage completion — updates analysis/priority/description and promotes to READY.
+// Triager reports triage completion — updates analysis/priority/title/description and promotes to READY.
 func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	var req struct {
 		Analysis    string `json:"analysis"`
 		Description string `json:"description"`
+		Title       string `json:"title"`
 		Priority    int    `json:"priority"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
@@ -263,7 +264,7 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("internal API: triage result reported", "task_id", id)
+	slog.Info("internal API: triage result reported", "task_id", id, "has_title", req.Title != "")
 
 	task, err := s.tasks.GetByID(id)
 	if err != nil {
@@ -271,12 +272,15 @@ func (s *Server) handleInternalTriaged(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update triage results — store triage description separately to preserve user-provided description
+	// Update triage results — store triage fields separately to preserve user-provided originals
 	if req.Analysis != "" {
 		task.TriageAnalysis = req.Analysis
 	}
 	if req.Description != "" {
 		task.TriageDescription = req.Description
+	}
+	if req.Title != "" {
+		task.TriageTitle = req.Title
 	}
 	if req.Priority > 0 && req.Priority != task.Priority {
 		slog.Info("triage adjusted priority", "task_id", id, "old", task.Priority, "new", req.Priority)

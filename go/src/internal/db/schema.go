@@ -144,4 +144,5 @@ var schemaStatements = []string{
 // Each migration is idempotent — it silently ignores "duplicate column" errors.
 var migrations = []string{
 	`ALTER TABLE tasks ADD COLUMN triage_description TEXT DEFAULT ''`,
+	`ALTER TABLE tasks ADD COLUMN triage_title TEXT DEFAULT ''`,
 }
