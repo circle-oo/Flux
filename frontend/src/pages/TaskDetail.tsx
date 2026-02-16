@@ -91,6 +91,7 @@ export default function TaskDetail() {
   const [subtasks, setSubtasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [subtasksExpanded, setSubtasksExpanded] = useState(true)
 
   const refreshTask = useCallback(() => {
     if (!id) return
@@ -224,6 +225,70 @@ export default function TaskDetail() {
         </div>
       )}
 
+      {/* Subtasks */}
+      {subtasks.length > 0 && (
+        <div className="card p-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-slate-200">
+              Subtasks
+              <span className="ml-2 text-sm font-normal text-slate-400">
+                ({subtasks.filter((s) => s.status === 'COMPLETED').length}/{subtasks.length} completed)
+              </span>
+            </h2>
+            <button
+              onClick={() => setSubtasksExpanded(!subtasksExpanded)}
+              className="text-slate-400 hover:text-slate-200 transition-colors"
+              aria-label={subtasksExpanded ? 'Collapse subtasks' : 'Expand subtasks'}
+            >
+              <svg
+                className={`w-5 h-5 transition-transform ${subtasksExpanded ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+          </div>
+          {subtasksExpanded ? (
+            <>
+              {/* Progress bar */}
+              <div className="w-full bg-slate-700 rounded-full h-2 mb-4">
+                <div
+                  className="bg-green-500 h-2 rounded-full transition-all"
+                  style={{
+                    width: `${(subtasks.filter((s) => s.status === 'COMPLETED').length / subtasks.length) * 100}%`,
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                {subtasks.map((sub) => (
+                  <div
+                    key={sub.id}
+                    className="flex items-center justify-between p-3 bg-slate-800 rounded-lg hover:bg-slate-750 cursor-pointer transition-colors"
+                    onClick={() => navigate(`/tasks/${sub.id}`)}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`badge shrink-0 ${subtaskStatusColor[sub.status] || 'badge-secondary'}`}>
+                        {sub.status}
+                      </span>
+                      <span className="text-sm text-slate-200 truncate">{sub.title}</span>
+                    </div>
+                    <span className="text-xs text-slate-500 shrink-0 ml-2">P{sub.priority}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-slate-400">
+              {subtasks.filter((s) => s.status === 'COMPLETED').length} completed,{' '}
+              {subtasks.filter((s) => s.status === 'RUNNING').length} running,{' '}
+              {subtasks.filter((s) => s.status === 'PENDING' || s.status === 'READY').length} pending
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Description */}
       <div className="card p-6">
         <div className="flex items-center gap-2 mb-3">
@@ -307,44 +372,6 @@ export default function TaskDetail() {
           </InfoRow>
         )}
       </div>
-
-      {/* Subtasks */}
-      {subtasks.length > 0 && (
-        <div className="card p-6">
-          <h2 className="text-lg font-semibold text-slate-200 mb-3">
-            Subtasks
-            <span className="ml-2 text-sm font-normal text-slate-400">
-              ({subtasks.filter((s) => s.status === 'COMPLETED').length}/{subtasks.length} completed)
-            </span>
-          </h2>
-          {/* Progress bar */}
-          <div className="w-full bg-slate-700 rounded-full h-2 mb-4">
-            <div
-              className="bg-green-500 h-2 rounded-full transition-all"
-              style={{
-                width: `${(subtasks.filter((s) => s.status === 'COMPLETED').length / subtasks.length) * 100}%`,
-              }}
-            />
-          </div>
-          <div className="space-y-2">
-            {subtasks.map((sub) => (
-              <div
-                key={sub.id}
-                className="flex items-center justify-between p-3 bg-slate-800 rounded-lg hover:bg-slate-750 cursor-pointer transition-colors"
-                onClick={() => navigate(`/tasks/${sub.id}`)}
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`badge shrink-0 ${subtaskStatusColor[sub.status] || 'badge-secondary'}`}>
-                    {sub.status}
-                  </span>
-                  <span className="text-sm text-slate-200 truncate">{sub.title}</span>
-                </div>
-                <span className="text-xs text-slate-500 shrink-0 ml-2">P{sub.priority}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Execution */}
       <div className="card p-6">
