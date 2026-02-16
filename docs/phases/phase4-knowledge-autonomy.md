@@ -38,6 +38,10 @@ This plan was refined after auditing the Phase 2B codebase and the revised Phase
 
 9. **Task ordering revised**: The original plan had loose dependencies. Revised with explicit dependency chain and a clear critical path.
 
+10. **New Task 4.8 added**: Obsidian CLI Integration for Pods — From Obsidian integration plan Phase 3d. Executor and Researcher pods use Obsidian CLI for reading project context and recording learnings. This task adds prompt templates and integration patterns for pods to use the Obsidian CLI effectively.
+
+11. **Insight features**: The comprehensive analytics and observability features from `docs/insight-plan.md` are implemented as Phase 3 features (Task 3.17-3.21) and do not require Phase 4 changes. They provide operational intelligence through the existing task/usage data and are independent of the research and autonomy features in Phase 4.
+
 ---
 
 ## Task Breakdown
@@ -127,6 +131,7 @@ internal/researcher/workspace.go
 - `SetupWorkspace(podID string) (string, error)`: create directories, write CLAUDE.md with research context, write `.claude/settings.json` with allowed tools
 - Workspace is created once at Pod startup, reused across research sessions
 - Cleanup: remove workspace when Pod stops permanently (not between tasks)
+- CLAUDE.md template includes Obsidian CLI usage patterns (see Task 4.8 for details)
 
 **Acceptance criteria**:
 - [ ] Researcher Pod runs independently with own workspace
@@ -161,7 +166,7 @@ internal/researcher/researcher.go
   3. Create self-assigned task: type=RESEARCH, source=SELF, priority=70 (low, won't compete with real work)
   4. Build research prompt including Goal context and research history hint
 - Research history: append one-line summary to `Research/_history.md` in Vault after each research session
-- Avoid duplicates: check `_history.md` before starting (simple string match on topic)
+- Avoid duplicates: use Obsidian CLI to search existing research (`obsidian search query="{topic}"`) before starting new research. Fallback to checking `_history.md` if CLI unavailable (simple string match on topic)
 - **Design principle**: Keep Go-side logic simple. Let Claude Code make the intelligent decisions about *what* to research within the selected type. The Go code just picks the category and provides context.
 
 **Acceptance criteria**:
@@ -233,6 +238,7 @@ internal/vault/templates.go
 - Add `WriteProposal(podID string, content string)` convenience method
 - Route to Vault paths based on research type (from types.go mapping)
 - Existing `Write()` method unchanged — new methods are additive
+- Note: If Phase 3 Obsidian integration is complete, these methods should use VaultFacade (CLI-first, Writer fallback) instead of Writer directly. If Phase 3 is not complete, use Writer directly as a temporary measure.
 
 **Acceptance criteria**:
 - [ ] Research finding template produces well-formatted Obsidian markdown
@@ -429,6 +435,52 @@ frontend/src/stores/researchStore.ts
 
 ---
 
+### Task 4.8: Obsidian CLI Integration for Pods
+
+**Description**: Add Obsidian CLI usage patterns to Executor and Researcher pod prompts for reading project context and recording learnings. Pods use the CLI to access the knowledge base during execution.
+
+**Files to modify**:
+```
+internal/executor/executor.go (prompt template updates)
+internal/researcher/researcher.go (prompt template updates - if not already in 4.1)
+```
+
+**Implementation details**:
+- Executor pods should read project context before starting work:
+  - `obsidian read path="Projects/{project}/_index.md"` — get project overview
+  - `obsidian search query="{keyword}" folder="Projects/{project}" format=json matches` — find relevant prior work
+  - `obsidian backlinks path="Projects/{project}/_index.md"` — discover related notes
+- Executor pods should save learnings after task completion:
+  - `obsidian create name="Projects/{project}/learnings/{slug}" content="..." silent` — record new learnings
+  - `obsidian daily:append content="- ✅ {task}: {summary}"` — log to daily note
+  - `obsidian property:set name=status value=completed path="Tasks/{task}.md"` — update task properties
+- Researcher pods should check existing research before starting:
+  - `obsidian search query="{topic}" format=json matches` — avoid duplicate research
+  - `obsidian tags all counts` — understand knowledge base structure
+- Researcher pods should save research findings:
+  - `obsidian create name="Research/{category}/{slug}" content="..." silent` — store findings
+  - `obsidian daily:append content="- 🔬 Research: {topic}"` — log research activity
+- Add these patterns to the CLAUDE.md templates injected into pod workspaces
+- Include error handling guidance: if CLI fails, fall back to file-based operations
+- Emphasize `silent` flag usage to prevent Obsidian UI pop-ups during background operations
+- Note: This assumes Phase 3 Obsidian CLI integration (vault/client.go, vault/facade.go) is complete
+
+**Acceptance criteria**:
+- [ ] Executor CLAUDE.md template includes Obsidian CLI read/write patterns
+- [ ] Researcher CLAUDE.md template includes research-specific CLI patterns
+- [ ] Prompt includes examples of reading project context before work
+- [ ] Prompt includes examples of saving learnings after completion
+- [ ] Prompt includes fallback guidance when CLI unavailable
+- [ ] `silent` flag usage is emphasized for all create operations
+- [ ] Daily note logging patterns included
+- [ ] Property management patterns included for task status updates
+
+**Complexity**: Low-Medium (primarily prompt/template updates)
+
+**Depends on**: Phase 3 Obsidian CLI integration (vault/client.go and vault/facade.go must exist), Task 4.1 (Researcher Pod)
+
+---
+
 ## Recommended Implementation Order
 
 ```
@@ -443,10 +495,14 @@ Task 4.5  (Deployment Automation)              — Independent
   └── Task 4.6  (Self-Improvement)             — Requires deployment infra
 
 Task 4.7  (Research UI)                        — After 4.1 + 4.2 (needs data to display)
+
+Task 4.8  (Obsidian CLI Integration)           — After Phase 3 Obsidian CLI + 4.1 (Researcher Pod)
 ```
 
 **Critical path**: 4.1 → 4.2 → 4.0 (gets Researchers running and auto-scaled)
-**Parallel track**: 4.3 (Vault templates), 4.5 → 4.6 (self-improvement), 4.7 (UI)
+**Parallel track 1**: 4.3 (Vault templates) → 4.8 (Obsidian CLI integration for pods)
+**Parallel track 2**: 4.5 → 4.6 (self-improvement)
+**Parallel track 3**: 4.7 (UI)
 
 ---
 
@@ -466,6 +522,9 @@ Task 4.7  (Research UI)                        — After 4.1 + 4.2 (needs data t
 - [ ] Restart at idle only
 - [ ] Research UI functional
 - [ ] Audit trail for all self-modifications
+- [ ] Executor pods use Obsidian CLI for context and recording
+- [ ] Researcher pods use Obsidian CLI for research history and findings storage
+- [ ] Pod CLAUDE.md templates include Obsidian CLI usage patterns
 
 ## File Count Summary
 
@@ -474,13 +533,22 @@ Task 4.7  (Research UI)                        — After 4.1 + 4.2 (needs data t
 | Go backend | ~5 files | ~4 files |
 | React frontend | ~2 files | ~1 file |
 | Deploy/Build | ~1 file | ~1 file |
-| **Total** | **~8 files** | **~6 files** |
+| Prompt templates | 0 files | ~2 files (executor, researcher) |
+| **Total** | **~8 files** | **~8 files** |
 
 ---
 
 ## Post-Phase 4: Future Work
 
-After Phase 4, Flux is fully autonomous. Future improvements are documented in the spec under "Future Work":
+After Phase 4, Flux is fully autonomous. Future improvements are documented in the spec under "Future Work".
+
+### Related Plans
+
+Phase 4 integrates with or depends on features from other plan documents:
+
+- **Obsidian Integration** (`docs/obsidian-integration-plan.md`): Phase 3a-3c (CLI Client, Knowledge API, Knowledge Frontend) are prerequisites. Phase 3d is integrated as Task 4.8. The Knowledge UI provides the interface for viewing research findings created by Researcher pods.
+
+- **Insight/Analytics** (`docs/insight-plan.md`): Comprehensive analytics and observability features (Tasks 1-5 from insight plan) are implemented as Phase 3 features and provide operational intelligence through existing task/usage data. They are independent of Phase 4 research features but complement them by showing research productivity metrics.
 
 ### Original Design Deferrals
 - Service monitoring (HTTP healthchecks, incident reports) — upgrade `/api/services` stub
