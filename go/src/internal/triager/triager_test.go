@@ -430,7 +430,6 @@ func TestBuildTriagePrompt(t *testing.T) {
 
 	checks := []string{
 		"Fix login bug",
-		"BUGFIX",
 		"20",
 		"Users cannot log in after password reset",
 		"auth, urgent",

@@ -63,7 +63,6 @@ func (m *Manager) PopNextTask(podType string) (*models.Task, error) {
 				slog.Info("task successfully popped",
 					"task_id", task.ID,
 					"title", task.Title,
-					"type", task.Type,
 					"pod_type", podType)
 			} else {
 				slog.Debug("no task available", "pod_type", podType)
@@ -334,7 +333,6 @@ func (m *Manager) CreateTask(task *models.Task) error {
 		slog.Info("task created",
 			"task_id", task.ID,
 			"title", task.Title,
-			"type", task.Type,
 			"priority", task.Priority,
 			"project_id", task.ProjectID)
 	}

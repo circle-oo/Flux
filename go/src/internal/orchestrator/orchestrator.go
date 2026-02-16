@@ -33,7 +33,7 @@ func NewOrchestrator(cfg *config.Config, rlh *RateLimitHandler) *Orchestrator {
 // - Otherwise → return Sonnet
 // TODO: This method is currently only used in tests. Consider removing if not needed in production code.
 func (o *Orchestrator) SelectModel(task *models.Task) string {
-	slog.Debug("selecting model for task", "task_id", task.ID, "task_type", task.Type, "task_priority", task.Priority)
+	slog.Debug("selecting model for task", "task_id", task.ID, "task_priority", task.Priority)
 
 	// Priority 1: Rate limit protection - always use cheaper model
 	if o.rateLimitHandler.RecentlyLimited() {

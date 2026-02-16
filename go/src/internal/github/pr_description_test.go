@@ -34,7 +34,6 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 			"🔨 What Was Done in This PR",
 			"Successfully implemented JWT authentication", // Task result
 			"👀 Review Points",
-			"**Task Type:** CODING",
 			"**Priority:** 5",
 			"*Automated by Flux executor `executor-1`*",
 			"*Task ID: `task-123`*",
@@ -155,77 +154,36 @@ func TestPRDescriptionBuilder_Build(t *testing.T) {
 }
 
 func TestPRDescriptionBuilder_GenerateReviewPoints(t *testing.T) {
-	tests := []struct {
-		name          string
-		taskType      string
-		expectedPoint string
-	}{
-		{
-			name:          "coding task",
-			taskType:      models.TaskTypeCoding,
-			expectedPoint: "New functionality works as expected",
-		},
-		{
-			name:          "bugfix task",
-			taskType:      models.TaskTypeBugfix,
-			expectedPoint: "Bug is fixed and root cause addressed",
-		},
-		{
-			name:          "document task",
-			taskType:      models.TaskTypeDocument,
-			expectedPoint: "Documentation is clear and accurate",
-		},
-		{
-			name:          "maintenance task",
-			taskType:      models.TaskTypeMaintenance,
-			expectedPoint: "Dependencies are up to date",
-		},
+	task := &models.Task{
+		ID:          "task-test",
+		Title:       "Test task",
+		Description: "Test description",
+		Type:        models.TaskTypeCoding,
+		Priority:    5,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			task := &models.Task{
-				ID:          "task-test",
-				Title:       "Test task",
-				Description: "Test description",
-				Type:        tt.taskType,
-				Priority:    5,
-			}
+	builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test", "main")
+	points := builder.generateReviewPoints()
 
-			builder := NewPRDescriptionBuilder(task, "/tmp/test", "executor-test", "main")
-			points := builder.generateReviewPoints()
+	// All tasks should have common review points
+	commonPoints := []string{
+		"Code follows existing conventions and style",
+		"Changes are focused and minimal",
+		"No unintended side effects",
+		"Implementation meets requirements",
+	}
 
-			found := false
-			for _, point := range points {
-				if strings.Contains(point, tt.expectedPoint) {
-					found = true
-					break
-				}
+	for _, common := range commonPoints {
+		found := false
+		for _, point := range points {
+			if strings.Contains(point, common) {
+				found = true
+				break
 			}
-
-			if !found {
-				t.Errorf("expected review points to contain '%s' for task type %s", tt.expectedPoint, tt.taskType)
-			}
-
-			// All tasks should have common review points
-			commonPoints := []string{
-				"Code follows existing conventions and style",
-				"Changes are focused and minimal",
-			}
-
-			for _, common := range commonPoints {
-				found := false
-				for _, point := range points {
-					if strings.Contains(point, common) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("expected review points to contain common point: '%s'", common)
-				}
-			}
-		})
+		}
+		if !found {
+			t.Errorf("expected review points to contain common point: '%s'", common)
+		}
 	}
 }
 

@@ -30,7 +30,6 @@ Goal Priorities: {{.GoalPriorities}}
 Analyze the following task and produce a structured JSON response.
 
 # Task: {{.Title}}
-Type: {{.Type}}
 Current Priority: {{.Priority}}
 {{- if .Description}}
 Description: {{.Description}}
