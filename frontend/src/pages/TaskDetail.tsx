@@ -2,13 +2,14 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { useWSStore } from '../stores/wsStore'
-import { Task } from '../lib/api'
+import { Task, api } from '../lib/api'
 import { StatusBadge } from '../components/StatusBadge'
 import InfoRow from '../components/InfoRow'
 import ContentRenderer from '../components/ContentRenderer'
 import MarkdownRenderer from '../components/MarkdownRenderer'
 import BackButton from '../components/BackButton'
 import LoadingState from '../components/LoadingState'
+import SubtaskDAGVisualization from '../components/SubtaskDAGVisualization'
 import { formatDate, formatDuration, formatCost, formatTokens, prStatusTextColor } from '../lib/utils'
 
 export default function TaskDetail() {
@@ -18,15 +19,22 @@ export default function TaskDetail() {
   const taskUpdateCounter = useWSStore((s) => s.taskUpdateCounter)
   const [task, setTask] = useState<Task | null>(null)
   const [subtasks, setSubtasks] = useState<Task[]>([])
+  const [dependencies, setDependencies] = useState<{ dependent_id: string; dependency_id: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [subtasksExpanded, setSubtasksExpanded] = useState(true)
+  const [showDAG, setShowDAG] = useState(false)
 
   const refreshTask = useCallback(() => {
     if (!id) return
     getTask(id).then((t) => {
       setTask(t)
       fetchSubtasks(t.id).then(setSubtasks)
+      // Fetch dependency graph
+      api.getSubtaskDependencies(t.id).then((data) => {
+        setDependencies(data.edges)
+        setShowDAG(data.edges.length > 0)
+      }).catch(() => {})
     }).catch(() => {})
   }, [id, getTask, fetchSubtasks])
 
@@ -37,6 +45,11 @@ export default function TaskDetail() {
       .then((t) => {
         setTask(t)
         fetchSubtasks(t.id).then(setSubtasks)
+        // Fetch dependency graph
+        api.getSubtaskDependencies(t.id).then((data) => {
+          setDependencies(data.edges)
+          setShowDAG(data.edges.length > 0)
+        }).catch(() => {})
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
@@ -172,6 +185,18 @@ export default function TaskDetail() {
                   style={{ width: `${(completedCount / subtasks.length) * 100}%` }}
                 />
               </div>
+
+              {/* DAG Visualization - show only if dependencies exist */}
+              {showDAG && (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-semibold text-slate-300">Dependency Graph</h3>
+                    <span className="text-xs text-slate-500">{dependencies.length} dependencies</span>
+                  </div>
+                  <SubtaskDAGVisualization nodes={subtasks} edges={dependencies} />
+                </div>
+              )}
+
               <div className="space-y-2">
                 {subtasks.map((sub) => (
                   <button

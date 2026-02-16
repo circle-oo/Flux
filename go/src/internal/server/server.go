@@ -140,6 +140,7 @@ func (s *Server) setupRoutes() {
 
 	// Subtasks API (requires auth)
 	s.mux.Handle("GET /api/tasks/{id}/subtasks", s.authMiddleware(http.HandlerFunc(s.handleListSubtasks)))
+	s.mux.Handle("GET /api/tasks/{id}/subtasks/dependencies", s.authMiddleware(http.HandlerFunc(s.handleGetSubtaskDependencies)))
 
 	// Internal API (localhost only, no auth)
 	s.mux.Handle("POST /internal/tasks/next", s.localhostOnly(http.HandlerFunc(s.handleInternalNextTask)))

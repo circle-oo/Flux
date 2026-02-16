@@ -517,6 +517,38 @@ const TaskSelectSQL = `SELECT id, title, description, type, status, priority, so
 	created_at, updated_at, started_at, completed_at
 	FROM tasks`
 
+// SubtaskDependency represents a dependency relationship between subtasks.
+type SubtaskDependency struct {
+	DependentID  string `json:"dependent_id"`
+	DependencyID string `json:"dependency_id"`
+}
+
+// GetSubtaskDependencies retrieves all dependencies for subtasks of a given parent task.
+func (s *TaskStore) GetSubtaskDependencies(parentID string) ([]*SubtaskDependency, error) {
+	query := `
+		SELECT sd.dependent_id, sd.dependency_id
+		FROM subtask_dependencies sd
+		INNER JOIN tasks t1 ON sd.dependent_id = t1.id
+		WHERE t1.parent_id = ?
+		ORDER BY sd.dependent_id, sd.dependency_id
+	`
+	rows, err := s.DB.Query(query, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("query subtask dependencies: %w", err)
+	}
+	defer rows.Close()
+
+	var deps []*SubtaskDependency
+	for rows.Next() {
+		var d SubtaskDependency
+		if err := rows.Scan(&d.DependentID, &d.DependencyID); err != nil {
+			return nil, fmt.Errorf("scan dependency: %w", err)
+		}
+		deps = append(deps, &d)
+	}
+	return deps, rows.Err()
+}
+
 // ScanTask scans a task from any source that implements Scan (works with
 // both *sql.Row and *sql.Rows). This is the single source of truth for
 // the scan field order — it must match TaskSelectSQL.

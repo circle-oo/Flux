@@ -291,6 +291,36 @@ func (s *Server) handleListSubtasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": subtasks})
 }
 
+// handleGetSubtaskDependencies handles GET /api/tasks/{id}/subtasks/dependencies
+func (s *Server) handleGetSubtaskDependencies(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	// Get subtasks
+	subtasks, err := s.tasks.ListByParent(id)
+	if err != nil {
+		serverError(w, "failed to list subtasks", "parent_id", id, "error", err)
+		return
+	}
+	if subtasks == nil {
+		subtasks = []*models.Task{}
+	}
+
+	// Get dependencies
+	dependencies, err := s.tasks.GetSubtaskDependencies(id)
+	if err != nil {
+		serverError(w, "failed to get subtask dependencies", "parent_id", id, "error", err)
+		return
+	}
+	if dependencies == nil {
+		dependencies = []*models.SubtaskDependency{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"nodes": subtasks,
+		"edges": dependencies,
+	})
+}
+
 // promoteToReady moves a PENDING task to READY status.
 // Takes taskID and re-reads from DB to avoid stale state.
 func (s *Server) promoteToReady(taskID string) {
