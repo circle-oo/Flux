@@ -262,6 +262,13 @@ class APIClient {
     return data.tasks || []
   }
 
+  async getSubtaskDependencies(parentId: string): Promise<{
+    nodes: Task[]
+    edges: { dependent_id: string; dependency_id: string }[]
+  }> {
+    return this.fetch(`/api/tasks/${parentId}/subtasks/dependencies`)
+  }
+
   // Projects
   async listProjects(): Promise<Project[]> {
     const data = await this.fetch<{ projects: Project[] }>('/api/projects')
