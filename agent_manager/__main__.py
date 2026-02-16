@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 
-from server import serve
+from agent_manager.server import serve
 
 if __name__ == "__main__":
     logging.basicConfig(

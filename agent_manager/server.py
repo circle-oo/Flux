@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "gen", "python"
 from flux.v1 import flux_pb2, flux_pb2_grpc  # noqa: E402
 from google.protobuf.timestamp_pb2 import Timestamp  # noqa: E402
 
-from config import get_agent_config, AGENT_CONFIGS  # noqa: E402
+from agent_manager.config import get_agent_config, AGENT_CONFIGS  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
