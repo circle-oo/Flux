@@ -5,7 +5,10 @@ import { useTaskStore } from '../stores/taskStore'
 import { useGoalStore } from '../stores/goalStore'
 import { Project } from '../lib/api'
 import { StatusBadge } from '../components/StatusBadge'
-import { formatDate } from '../lib/utils'
+import { formatDate, countByStatus } from '../lib/utils'
+import BackButton from '../components/BackButton'
+import LoadingState from '../components/LoadingState'
+import StatCard from '../components/StatCard'
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
@@ -40,7 +43,7 @@ export default function ProjectDetail() {
   if (loading) {
     return (
       <div className="p-4 sm:p-6 lg:p-8">
-        <div className="text-slate-400">Loading project...</div>
+        <LoadingState message="Loading project..." />
       </div>
     )
   }
@@ -61,27 +64,14 @@ export default function ProjectDetail() {
 
   const projectTasks = tasks.filter((t) => t.project_id === id)
   const goal = project.goal_id ? goals.find((g) => g.id === project.goal_id) : null
-
-  const tasksByStatus = {
-    PENDING: projectTasks.filter((t) => t.status === 'PENDING').length,
-    READY: projectTasks.filter((t) => t.status === 'READY').length,
-    RUNNING: projectTasks.filter((t) => t.status === 'RUNNING').length,
-    COMPLETED: projectTasks.filter((t) => t.status === 'COMPLETED').length,
-    FAILED: projectTasks.filter((t) => t.status === 'FAILED').length,
-    DECOMPOSED: projectTasks.filter((t) => t.status === 'DECOMPOSED').length,
-  }
+  const taskCounts = countByStatus(projectTasks)
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
-          <button
-            onClick={() => navigate('/projects')}
-            className="text-slate-400 hover:text-slate-300 mb-3 flex items-center gap-2 text-sm"
-          >
-            ← Back to Projects
-          </button>
+          <BackButton to="/projects" label="Back to Projects" />
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-100">
               {project.name}
@@ -161,8 +151,9 @@ export default function ProjectDetail() {
           {goal && (
             <div>
               <span className="text-sm text-slate-500 font-medium">Linked Goal</span>
-              <div
-                className="mt-2 p-3 rounded-lg bg-slate-700/30 cursor-pointer hover:bg-slate-700/50 transition-colors"
+              <button
+                type="button"
+                className="mt-2 p-3 rounded-lg bg-slate-700/30 hover:bg-slate-700/50 transition-colors w-full text-left"
                 onClick={() => navigate('/goals')}
               >
                 <h4 className="text-sm font-semibold text-blue-400 mb-1">
@@ -171,7 +162,7 @@ export default function ProjectDetail() {
                 <p className="text-xs text-slate-400 line-clamp-2">
                   {goal.description}
                 </p>
-              </div>
+              </button>
             </div>
           )}
 
@@ -200,51 +191,21 @@ export default function ProjectDetail() {
           Task Statistics
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          <div className="p-4 rounded-lg bg-slate-700/30">
-            <div className="text-xs text-slate-400 mb-1">Total</div>
-            <div className="text-2xl font-bold text-slate-100">
-              {projectTasks.length}
-            </div>
-          </div>
-          {tasksByStatus.PENDING > 0 && (
-            <div className="p-4 rounded-lg bg-slate-700/30">
-              <div className="text-xs text-slate-400 mb-1">Pending</div>
-              <div className="text-2xl font-bold text-slate-400">
-                {tasksByStatus.PENDING}
-              </div>
-            </div>
+          <StatCard label="Total" value={projectTasks.length} color="text-slate-100" />
+          {(taskCounts['PENDING'] || 0) > 0 && (
+            <StatCard label="Pending" value={taskCounts['PENDING'] || 0} color="text-slate-400" />
           )}
-          {tasksByStatus.READY > 0 && (
-            <div className="p-4 rounded-lg bg-slate-700/30">
-              <div className="text-xs text-slate-400 mb-1">Ready</div>
-              <div className="text-2xl font-bold text-blue-400">
-                {tasksByStatus.READY}
-              </div>
-            </div>
+          {(taskCounts['READY'] || 0) > 0 && (
+            <StatCard label="Ready" value={taskCounts['READY'] || 0} color="text-blue-400" />
           )}
-          {tasksByStatus.RUNNING > 0 && (
-            <div className="p-4 rounded-lg bg-slate-700/30">
-              <div className="text-xs text-slate-400 mb-1">Running</div>
-              <div className="text-2xl font-bold text-amber-400">
-                {tasksByStatus.RUNNING}
-              </div>
-            </div>
+          {(taskCounts['RUNNING'] || 0) > 0 && (
+            <StatCard label="Running" value={taskCounts['RUNNING'] || 0} color="text-amber-400" />
           )}
-          {tasksByStatus.COMPLETED > 0 && (
-            <div className="p-4 rounded-lg bg-slate-700/30">
-              <div className="text-xs text-slate-400 mb-1">Completed</div>
-              <div className="text-2xl font-bold text-green-400">
-                {tasksByStatus.COMPLETED}
-              </div>
-            </div>
+          {(taskCounts['COMPLETED'] || 0) > 0 && (
+            <StatCard label="Completed" value={taskCounts['COMPLETED'] || 0} color="text-green-400" />
           )}
-          {tasksByStatus.FAILED > 0 && (
-            <div className="p-4 rounded-lg bg-slate-700/30">
-              <div className="text-xs text-slate-400 mb-1">Failed</div>
-              <div className="text-2xl font-bold text-red-400">
-                {tasksByStatus.FAILED}
-              </div>
-            </div>
+          {(taskCounts['FAILED'] || 0) > 0 && (
+            <StatCard label="Failed" value={taskCounts['FAILED'] || 0} color="text-red-400" />
           )}
         </div>
       </div>
@@ -267,10 +228,11 @@ export default function ProjectDetail() {
         ) : (
           <div className="space-y-2">
             {projectTasks.slice(0, 10).map((task) => (
-              <div
+              <button
                 key={task.id}
+                type="button"
                 onClick={() => navigate(`/tasks/${task.id}`)}
-                className="p-4 rounded-lg bg-slate-700/30 hover:bg-slate-700/60 cursor-pointer transition-colors"
+                className="p-4 rounded-lg bg-slate-700/30 hover:bg-slate-700/60 transition-colors w-full text-left"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
@@ -288,7 +250,7 @@ export default function ProjectDetail() {
                     {formatDate(task.created_at)}
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
             {projectTasks.length > 10 && (
               <div className="text-center pt-2">

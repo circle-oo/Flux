@@ -1,5 +1,6 @@
 import { useEffect, useRef, useMemo, useState } from 'react'
 import { useLogStore, LogEntry } from '../stores/logStore'
+import PageHeader from '../components/PageHeader'
 
 const levelColors: Record<string, string> = {
   DEBUG: 'bg-slate-600 text-slate-200',
@@ -58,6 +59,7 @@ function AttrCell({ attrs }: { attrs: Record<string, unknown> }) {
         onClick={() => setExpanded(true)}
         className="text-left text-slate-400 hover:text-slate-200 font-mono text-xs truncate max-w-md"
         title="Click to expand"
+        aria-expanded={false}
       >
         {preview}
         {hasMore && ' ...'}
@@ -69,6 +71,7 @@ function AttrCell({ attrs }: { attrs: Record<string, unknown> }) {
     <button
       onClick={() => setExpanded(false)}
       className="text-left font-mono text-xs text-slate-300 whitespace-pre-wrap"
+      aria-expanded={true}
     >
       {JSON.stringify(attrs, null, 2)}
     </button>
@@ -90,11 +93,12 @@ function LogToolbar({
 
   return (
     <div className="card p-4 flex items-center gap-4 mb-4">
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1" role="group" aria-label="Log level filter">
         {levels.map((lvl) => (
           <button
             key={lvl || 'ALL'}
             onClick={() => onFilterChange({ level: lvl })}
+            aria-pressed={filter.level === lvl}
             className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
               filter.level === lvl
                 ? lvl === ''
@@ -108,7 +112,9 @@ function LogToolbar({
         ))}
       </div>
 
+      <label htmlFor="log-search" className="sr-only">Search logs</label>
       <input
+        id="log-search"
         type="text"
         placeholder="Search logs..."
         value={filter.search}
@@ -193,33 +199,30 @@ export default function Logs() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 flex flex-col h-full">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 mb-2">Logs</h1>
-          <p className="text-sm sm:text-base text-slate-400">
-            Real-time system logs ({filteredLogs.length} entries)
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setPaused(!paused)}
-            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-              paused
-                ? 'bg-amber-600 text-white hover:bg-amber-500'
-                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-            }`}
-          >
-            {paused ? 'Resume' : 'Pause'}
-          </button>
-          <button
-            onClick={clearLogs}
-            className="px-3 py-1.5 rounded text-sm font-medium bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
-          >
-            Clear
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Logs"
+        subtitle={`Real-time system logs (${filteredLogs.length} entries)`}
+        count={filteredLogs.length}
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPaused(!paused)}
+              className={`btn-secondary !py-1.5 !px-3 !min-h-0 ${
+                paused ? '!bg-amber-600 !text-white hover:!bg-amber-500' : ''
+              }`}
+              aria-pressed={paused}
+            >
+              {paused ? 'Resume' : 'Pause'}
+            </button>
+            <button
+              onClick={clearLogs}
+              className="btn-secondary !py-1.5 !px-3 !min-h-0"
+            >
+              Clear
+            </button>
+          </div>
+        }
+      />
 
       <LogToolbar
         filter={filter}
@@ -233,11 +236,11 @@ export default function Logs() {
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-slate-800 z-10">
             <tr className="text-left text-slate-400 border-b border-slate-700">
-              <th className="px-4 py-2 w-28 font-medium">Time</th>
-              <th className="px-4 py-2 w-20 font-medium">Level</th>
-              <th className="px-4 py-2 w-24 font-medium">Component</th>
-              <th className="px-4 py-2 font-medium">Message</th>
-              <th className="px-4 py-2 font-medium">Attributes</th>
+              <th scope="col" className="px-4 py-2 w-28 font-medium">Time</th>
+              <th scope="col" className="px-4 py-2 w-20 font-medium">Level</th>
+              <th scope="col" className="px-4 py-2 w-24 font-medium">Component</th>
+              <th scope="col" className="px-4 py-2 font-medium">Message</th>
+              <th scope="col" className="px-4 py-2 font-medium">Attributes</th>
             </tr>
           </thead>
           <tbody className="font-mono text-xs">

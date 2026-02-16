@@ -98,6 +98,17 @@ export function formatTokens(tokens?: number): string {
   return tokens.toString()
 }
 
+/**
+ * Counts tasks by status. Used across Dashboard, ProjectDetail, etc.
+ */
+export function countByStatus(tasks: { status: string }[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const task of tasks) {
+    counts[task.status] = (counts[task.status] || 0) + 1
+  }
+  return counts
+}
+
 // Status badge class mappings
 export const statusBadgeClass: Record<string, string> = {
   PENDING: 'badge-secondary',
@@ -107,8 +118,8 @@ export const statusBadgeClass: Record<string, string> = {
   FAILED: 'badge-danger',
   RETRY: 'badge-warning',
   ARCHIVED: 'badge-secondary',
-  DECOMPOSED: 'bg-purple-600 text-white px-2 py-1 rounded text-xs font-semibold',
-  CANCELLED: 'bg-slate-500 text-white px-2 py-1 rounded text-xs font-semibold',
+  DECOMPOSED: 'badge-purple',
+  CANCELLED: 'badge-muted',
 }
 
 export const prStatusBadgeClass: Record<string, { label: string; className: string }> = {
@@ -116,7 +127,7 @@ export const prStatusBadgeClass: Record<string, { label: string; className: stri
   APPROVED: { label: 'Approved', className: 'badge-success' },
   CHANGES_REQUESTED: { label: 'Changes Requested', className: 'badge-warning' },
   MERGED: { label: 'Merged', className: 'badge-secondary' },
-  CLOSED: { label: 'Closed', className: 'bg-slate-600 text-slate-200 px-2 py-1 rounded text-xs font-medium' },
+  CLOSED: { label: 'Closed', className: 'badge-secondary' },
 }
 
 export const prStatusTextColor: Record<string, string> = {

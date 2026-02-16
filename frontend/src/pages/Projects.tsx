@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { useProjectStore } from '../stores/projectStore'
 import { useGoalStore } from '../stores/goalStore'
 import { Project } from '../lib/api'
+import PageHeader from '../components/PageHeader'
+import LoadingState from '../components/LoadingState'
+import EmptyState from '../components/EmptyState'
 
 export default function Projects() {
   const navigate = useNavigate()
@@ -89,19 +92,18 @@ export default function Projects() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 mb-2">Projects</h1>
-          <p className="text-sm sm:text-base text-slate-400">Register and manage projects</p>
-        </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="btn-primary whitespace-nowrap"
-        >
-          {showForm ? 'Cancel' : '+ Register Project'}
-        </button>
-      </div>
+      <PageHeader
+        title="Projects"
+        subtitle="Register and manage projects"
+        action={
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="btn-primary whitespace-nowrap"
+          >
+            {showForm ? 'Cancel' : '+ Register Project'}
+          </button>
+        }
+      />
 
       {/* Create Form */}
       {showForm && (
@@ -111,8 +113,9 @@ export default function Projects() {
           </h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="label">Name</label>
+              <label htmlFor="project-name" className="label">Name</label>
               <input
+                id="project-name"
                 type="text"
                 value={formData.name}
                 onChange={(e) =>
@@ -120,11 +123,13 @@ export default function Projects() {
                 }
                 className="input"
                 required
+                autoFocus
               />
             </div>
             <div>
-              <label className="label">Type</label>
+              <label htmlFor="project-type" className="label">Type</label>
               <select
+                id="project-type"
                 value={formData.type}
                 onChange={(e) =>
                   setFormData({
@@ -141,8 +146,9 @@ export default function Projects() {
               </select>
             </div>
             <div>
-              <label className="label">Description</label>
+              <label htmlFor="project-description" className="label">Description</label>
               <textarea
+                id="project-description"
                 value={formData.description}
                 onChange={(e) =>
                   setFormData({ ...formData, description: e.target.value })
@@ -152,8 +158,9 @@ export default function Projects() {
               />
             </div>
             <div>
-              <label className="label">Repository URL (optional)</label>
+              <label htmlFor="project-repo" className="label">Repository URL (optional)</label>
               <input
+                id="project-repo"
                 type="text"
                 value={formData.repo_url}
                 onChange={(e) =>
@@ -164,8 +171,9 @@ export default function Projects() {
               />
             </div>
             <div>
-              <label className="label">Tech Stack (comma-separated)</label>
+              <label htmlFor="project-techstack" className="label">Tech Stack (comma-separated)</label>
               <input
+                id="project-techstack"
                 type="text"
                 value={formData.tech_stack}
                 onChange={(e) =>
@@ -177,8 +185,9 @@ export default function Projects() {
               />
             </div>
             <div>
-              <label className="label">Inspiration (optional)</label>
+              <label htmlFor="project-inspiration" className="label">Inspiration (optional)</label>
               <input
+                id="project-inspiration"
                 type="text"
                 value={formData.inspiration}
                 onChange={(e) =>
@@ -189,8 +198,9 @@ export default function Projects() {
               />
             </div>
             <div>
-              <label className="label">Link to Goal (optional)</label>
+              <label htmlFor="project-goal" className="label">Link to Goal (optional)</label>
               <select
+                id="project-goal"
                 value={formData.goal_id}
                 onChange={(e) =>
                   setFormData({ ...formData, goal_id: e.target.value })
@@ -295,17 +305,16 @@ export default function Projects() {
           Active Projects
         </h2>
         {isLoading ? (
-          <div className="text-slate-400">Loading...</div>
+          <LoadingState message="Loading projects..." />
         ) : activeProjects.length === 0 ? (
-          <div className="card p-6 text-center text-slate-400">
-            No active projects yet.
-          </div>
+          <EmptyState title="No active projects" message="Register a project to get started." />
         ) : (
           <div className="space-y-3">
             {activeProjects.map((project) => (
-              <div
+              <button
                 key={project.id}
-                className="card p-6 cursor-pointer hover:border-slate-600 transition-colors"
+                type="button"
+                className="card p-6 w-full text-left hover:border-slate-600 transition-colors"
                 onClick={() => navigate(`/projects/${project.id}`)}
               >
                 <div className="flex items-start justify-between mb-3">
@@ -322,15 +331,9 @@ export default function Projects() {
                     </p>
                     {project.repo_url && (
                       <div className="mb-2">
-                        <a
-                          href={project.repo_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-400 hover:underline text-sm"
-                          onClick={(e) => e.stopPropagation()}
-                        >
+                        <span className="text-blue-400 text-sm">
                           {project.repo_url}
-                        </a>
+                        </span>
                       </div>
                     )}
                     {project.tech_stack.length > 0 && (
@@ -344,7 +347,7 @@ export default function Projects() {
                     )}
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -358,9 +361,10 @@ export default function Projects() {
           </h2>
           <div className="space-y-3">
             {otherProjects.map((project) => (
-              <div
+              <button
                 key={project.id}
-                className="card p-6 opacity-75 cursor-pointer hover:opacity-100 hover:border-slate-600 transition-all"
+                type="button"
+                className="card p-6 w-full text-left opacity-75 hover:opacity-100 hover:border-slate-600 transition-all"
                 onClick={() => navigate(`/projects/${project.id}`)}
               >
                 <div className="flex items-start justify-between">
@@ -383,7 +387,7 @@ export default function Projects() {
                     <p className="text-slate-300">{project.description}</p>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>

@@ -2,6 +2,9 @@ import { useEffect } from 'react'
 import { useDeployStore } from '../stores/deployStore'
 import { useWSStore } from '../stores/wsStore'
 import { timeAgo } from '../lib/utils'
+import PageHeader from '../components/PageHeader'
+import LoadingState from '../components/LoadingState'
+import ErrorBanner from '../components/ErrorBanner'
 
 function StateIndicator({ state }: { state: string }) {
   const colors: Record<string, string> = {
@@ -15,7 +18,7 @@ function StateIndicator({ state }: { state: string }) {
 
   return (
     <div className="flex items-center gap-2">
-      <div className={`w-2.5 h-2.5 rounded-full ${colors[state] || 'bg-slate-500'}`} />
+      <div className={`w-2.5 h-2.5 rounded-full ${colors[state] || 'bg-slate-500'}`} aria-hidden="true" />
       <span className="text-sm text-slate-300 capitalize">{state}</span>
     </div>
   )
@@ -27,7 +30,6 @@ export default function Settings() {
 
   useEffect(() => {
     fetchStatus()
-    // Poll status every 30 seconds
     const interval = setInterval(fetchStatus, 30000)
     return () => clearInterval(interval)
   }, [fetchStatus])
@@ -44,27 +46,22 @@ export default function Settings() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-100 mb-2">Settings</h1>
-        <p className="text-sm sm:text-base text-slate-400">System configuration and deployment</p>
-      </div>
+      <PageHeader
+        title="Settings"
+        subtitle="System configuration and deployment"
+      />
 
-      {error && (
-        <div className="p-3 bg-red-900/30 border border-red-600 rounded-lg text-sm text-red-200">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner message={error} />}
 
       {isDeploying && (
-        <div className="p-3 bg-blue-900/30 border border-blue-600 rounded-lg text-sm text-blue-200">
+        <div className="p-3 bg-blue-900/30 border border-blue-600 rounded-lg text-sm text-blue-200" role="status">
           Deploy in progress. Pulling latest code, rebuilding, and restarting...
           The page will reload automatically when the new version is ready.
         </div>
       )}
 
       {isLoading && !status ? (
-        <div className="text-slate-400 text-sm">Loading deploy status...</div>
+        <LoadingState message="Loading deploy status..." />
       ) : status ? (
         <>
           {/* Deployment Mode Card */}
@@ -82,7 +79,7 @@ export default function Settings() {
                 <div className="flex items-start gap-3">
                   <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
                     isAutoMode ? 'border-blue-500' : 'border-slate-600'
-                  }`}>
+                  }`} aria-hidden="true">
                     {isAutoMode && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -130,7 +127,7 @@ export default function Settings() {
                 <div className="flex items-start gap-3">
                   <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
                     !isAutoMode ? 'border-blue-500' : 'border-slate-600'
-                  }`}>
+                  }`} aria-hidden="true">
                     {!isAutoMode && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -192,7 +189,7 @@ export default function Settings() {
                 <div>
                   <div className="text-xs text-slate-500 mb-1">WebSocket</div>
                   <div className="flex items-center gap-2">
-                    <div className={`w-2.5 h-2.5 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                    <div className={`w-2.5 h-2.5 rounded-full ${wsConnected ? 'bg-green-500' : 'bg-red-500'}`} aria-hidden="true" />
                     <span className="text-sm text-slate-300">{wsConnected ? 'Connected' : 'Disconnected'}</span>
                   </div>
                 </div>
@@ -269,7 +266,7 @@ export default function Settings() {
               {updater?.last_error && (
                 <div className="border-t border-slate-700 pt-4">
                   <h3 className="text-sm font-medium text-red-400 mb-2">Last Error</h3>
-                  <div className="p-3 bg-red-900/30 border border-red-600 rounded text-sm text-red-200 font-mono">
+                  <div className="p-3 bg-red-900/30 border border-red-600 rounded text-sm text-red-200 font-mono" role="alert">
                     {updater.last_error}
                   </div>
                 </div>
