@@ -81,13 +81,35 @@ Rules:
 
 ### Description
 Rewrite the task description as a clear, actionable specification with:
-- Problem statement
-- Acceptance criteria (bullet points)
-- Technical hints (if applicable)
+- **Problem statement**: What needs to be implemented, fixed, or changed
+- **Acceptance criteria**: Specific, testable requirements (bullet points)
+- **Technical hints**: Guidance on implementation approach, affected components, or patterns to follow
+{{- if .ProjectName}}
+
+**IMPORTANT: Use the project context to make requirements more specific:**
+{{- if .TechStack}}
+- Reference specific technologies from the tech stack ({{.TechStack}}) when relevant
+- Mention framework-specific patterns, conventions, or best practices
+- Specify which tech stack components are affected (e.g., "Update the React component", "Modify the Go backend handler")
+{{- end}}
+{{- if .ProjectType}}
+- Tailor acceptance criteria to the project type ({{.ProjectType}})
+- Include type-specific requirements (e.g., for REPO: test coverage, for SERVICE: API compatibility, for LIBRARY: backward compatibility)
+{{- end}}
+{{- if .ProjectDescription}}
+- Ensure requirements align with the project's purpose and constraints
+- Reference project-specific terminology or architecture mentioned in the description
+{{- end}}
+{{- end}}
+
+Examples of context-aware requirements:
+- Instead of: "Add validation" → "Add form validation using React Hook Form (per project tech stack) with Zod schema"
+- Instead of: "Fix the bug" → "Fix the authentication bug in the Go JWT middleware; ensure token refresh logic handles expired tokens correctly"
+- Instead of: "Update tests" → "Update Jest tests for the new component; maintain >80% coverage as per project standards"
 
 If the original task is unclear or nonsensical, write: "Task needs clarification. Original input does not contain actionable requirements."
 
-Keep it concise but complete.
+Keep it concise but complete. Aim for 3-6 bullet points in acceptance criteria, each specific and testable.
 
 ## Output Format
 
