@@ -419,7 +419,7 @@ func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request
 		Tags:        req.Tags,
 	}
 	if task.Priority == 0 {
-		task.Priority = 50
+		task.Priority = 40
 	}
 	if task.Source == "" {
 		task.Source = models.TaskSourceSystem

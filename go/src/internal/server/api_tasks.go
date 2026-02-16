@@ -64,7 +64,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Prompt:      req.Prompt,
 	}
 	if task.Priority == 0 {
-		task.Priority = 50
+		task.Priority = 40
 	}
 	if task.Source == "" {
 		task.Source = models.TaskSourceOperator

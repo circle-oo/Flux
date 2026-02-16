@@ -365,16 +365,16 @@ func TestParseTriageResponse_WrappedJSON(t *testing.T) {
 	}{
 		{
 			name:         "JSON in markdown code fence",
-			input:        "```json\n{\"analysis\": \"Security fix needed.\", \"priority\": 10, \"description\": \"Fix the auth bypass.\"}\n```",
-			task:         &models.Task{Priority: 50, Description: "fix auth"},
-			wantPriority: 10,
+			input:        "```json\n{\"analysis\": \"Security fix needed.\", \"priority\": 25, \"description\": \"Fix the auth bypass.\"}\n```",
+			task:         &models.Task{Priority: 40, Description: "fix auth"},
+			wantPriority: 25,
 			wantAnalysis: true,
 			wantDesc:     true,
 		},
 		{
 			name:         "JSON embedded in narrative text",
 			input:        "Here is my analysis of the task:\n{\"analysis\": \"This is a standard feature.\", \"priority\": 40, \"description\": \"Add the button.\"}\nLet me know if you need more details.",
-			task:         &models.Task{Priority: 50, Description: "add button"},
+			task:         &models.Task{Priority: 40, Description: "add button"},
 			wantPriority: 40,
 			wantAnalysis: true,
 			wantDesc:     true,
@@ -382,8 +382,8 @@ func TestParseTriageResponse_WrappedJSON(t *testing.T) {
 		{
 			name:         "pure narrative falls back to markdown parsing",
 			input:        "Perfect. All autopilot modes have been successfully cancelled. The system is now idle.",
-			task:         &models.Task{Priority: 50, Description: "original desc"},
-			wantPriority: 50,
+			task:         &models.Task{Priority: 40, Description: "original desc"},
+			wantPriority: 40,
 			wantAnalysis: false,
 			wantDesc:     false,
 		},
@@ -434,8 +434,8 @@ func TestBuildTriagePrompt(t *testing.T) {
 		"20",
 		"Users cannot log in after password reset",
 		"auth, urgent",
-		"most tasks should fall in the 31-50 range",
-		"When in doubt, assign priority 50",
+		"most tasks should fall in the 31-55 range",
+		"When in doubt, assign priority 40",
 		`"analysis"`,
 		`"priority"`,
 		`"description"`,
@@ -483,13 +483,13 @@ func TestParseTriageResponse_SanityGuard(t *testing.T) {
 	}{
 		{
 			name:         "short garbage input with high priority gets overridden (JSON)",
-			task:         &models.Task{Title: "asdf", Description: "", Priority: 50},
+			task:         &models.Task{Title: "asdf", Description: "", Priority: 40},
 			input:        `{"analysis": "test", "priority": 1, "description": "new desc"}`,
-			wantPriority: 50, // overridden: inputLen < 10 and priority < 10
+			wantPriority: 40, // overridden: inputLen < 10 and priority < 20
 		},
 		{
 			name:         "short input with normal priority stays (JSON)",
-			task:         &models.Task{Title: "test", Description: "", Priority: 50},
+			task:         &models.Task{Title: "test", Description: "", Priority: 40},
 			input:        `{"analysis": "test", "priority": 35, "description": "new desc"}`,
 			wantPriority: 35,
 		},
@@ -500,16 +500,16 @@ func TestParseTriageResponse_SanityGuard(t *testing.T) {
 			wantPriority: 3, // not overridden: inputLen >= 10
 		},
 		{
-			name:         "short input with priority exactly 10 stays (JSON)",
-			task:         &models.Task{Title: "fix", Description: "", Priority: 50},
+			name:         "short input with priority in guard range gets overridden (JSON)",
+			task:         &models.Task{Title: "fix", Description: "", Priority: 40},
 			input:        `{"analysis": "test", "priority": 10, "description": "new desc"}`,
-			wantPriority: 10, // guard only fires for < 10
+			wantPriority: 40, // guard fires for < 20 when inputLen < 10
 		},
 		{
 			name:         "short garbage input with high priority gets overridden (markdown fallback)",
-			task:         &models.Task{Title: "asdf", Description: "", Priority: 50},
+			task:         &models.Task{Title: "asdf", Description: "", Priority: 40},
 			input:        "### ANALYSIS\ntest\n\n### PRIORITY\n1\n\n### DESCRIPTION\nnew desc",
-			wantPriority: 50, // overridden: inputLen < 10 and priority < 10
+			wantPriority: 40, // overridden: inputLen < 10 and priority < 20
 		},
 	}
 
