@@ -340,6 +340,12 @@ func (e *Executor) processResults(task *models.Task, result *claudecli.Result, w
 		return fmt.Errorf("force push failed: %s", string(output))
 	}
 
+	// Parse and populate task result for PR description
+	parsed, parseErr := claudecli.ParseResponse(result.Stdout)
+	if parseErr == nil && parsed.ResultText != "" {
+		task.Result = parsed.ResultText
+	}
+
 	// Create PR
 	// TODO: move extractOwnerRepo to github.ExtractOwnerRepo
 	owner, repo := extractOwnerRepo(project.RepoURL)
