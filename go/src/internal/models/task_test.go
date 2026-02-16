@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/circle-oo/flux/internal/testutil"
@@ -506,5 +507,495 @@ func TestTask_HasRetriesExhausted(t *testing.T) {
 				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
 		})
+	}
+}
+
+// DAG Validation Tests
+
+func TestTaskStore_ValidateSubtaskDAG_ValidLinearChain(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create linear chain: A -> B -> C
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	// Validate adding C that depends on B (should be valid)
+	err := store.ValidateSubtaskDAG(parent.ID, []string{taskB.ID})
+	if err != nil {
+		t.Errorf("expected valid DAG, got error: %v", err)
+	}
+}
+
+func TestTaskStore_ValidateSubtaskDAG_ValidDiamond(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create diamond: A -> B, A -> C, B -> D, C -> D
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	taskC := &Task{Title: "C", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskC)
+
+	// Validate adding D that depends on both B and C (diamond structure)
+	err := store.ValidateSubtaskDAG(parent.ID, []string{taskB.ID, taskC.ID})
+	if err != nil {
+		t.Errorf("expected valid diamond DAG, got error: %v", err)
+	}
+}
+
+func TestTaskStore_ValidateSubtaskDAG_RejectSelfLoop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	// Update A to depend on itself (creates self-loop)
+	taskA.DependsOn = []string{taskA.ID}
+	store.Update(taskA)
+
+	// Validate adding a new task - should detect the self-loop in existing graph
+	err := store.ValidateSubtaskDAG(parent.ID, []string{})
+	if err == nil {
+		t.Error("expected error for self-loop, got nil")
+	}
+}
+
+func TestTaskStore_ValidateSubtaskDAG_RejectTwoNodeCycle(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create A -> B
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	// Try to add B -> A (creates cycle)
+	// Simulate by validating a new task that depends on A, while A would depend on B
+	taskA.DependsOn = []string{taskB.ID}
+	store.Update(taskA)
+
+	// This should detect the cycle
+	err := store.ValidateSubtaskDAG(parent.ID, []string{taskA.ID})
+	if err == nil {
+		t.Error("expected error for two-node cycle, got nil")
+	}
+}
+
+func TestTaskStore_ValidateSubtaskDAG_RejectThreeNodeCycle(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create A -> B -> C -> A (3-node cycle)
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	taskC := &Task{Title: "C", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskB.ID}}
+	store.Create(taskC)
+
+	// Update A to depend on C (closes the cycle)
+	taskA.DependsOn = []string{taskC.ID}
+	store.Update(taskA)
+
+	// Validate adding a new task - should detect the existing cycle
+	err := store.ValidateSubtaskDAG(parent.ID, []string{})
+	if err == nil {
+		t.Error("expected error for three-node cycle, got nil")
+	}
+}
+
+func TestTaskStore_ValidateSubtaskDAG_InvalidDependency(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	// Try to add dependency on a task that doesn't exist or isn't a subtask
+	err := store.ValidateSubtaskDAG(parent.ID, []string{"nonexistent-id"})
+	if err == nil {
+		t.Error("expected error for invalid dependency, got nil")
+	}
+}
+
+func TestTaskStore_ValidateSubtaskDAG_EmptyDependencies(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Empty dependencies should always be valid
+	err := store.ValidateSubtaskDAG(parent.ID, []string{})
+	if err != nil {
+		t.Errorf("expected no error for empty dependencies, got: %v", err)
+	}
+}
+
+func TestTaskStore_GetTopologicalOrder_LinearChain(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create A -> B -> C
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Priority: 10}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Priority: 20, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	taskC := &Task{Title: "C", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, Priority: 30, DependsOn: []string{taskB.ID}}
+	store.Create(taskC)
+
+	order, err := store.GetTopologicalOrder(parent.ID)
+	if err != nil {
+		t.Fatalf("GetTopologicalOrder: %v", err)
+	}
+
+	if len(order) != 3 {
+		t.Fatalf("expected 3 tasks, got %d", len(order))
+	}
+
+	// Verify order: A must come before B, B must come before C
+	orderMap := make(map[string]int)
+	for i, task := range order {
+		orderMap[task.ID] = i
+	}
+
+	if orderMap[taskA.ID] >= orderMap[taskB.ID] {
+		t.Error("A should come before B")
+	}
+	if orderMap[taskB.ID] >= orderMap[taskC.ID] {
+		t.Error("B should come before C")
+	}
+}
+
+func TestTaskStore_GetTopologicalOrder_Diamond(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create diamond: A -> B, A -> C, B -> D, C -> D
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	taskC := &Task{Title: "C", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskC)
+
+	taskD := &Task{Title: "D", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskB.ID, taskC.ID}}
+	store.Create(taskD)
+
+	order, err := store.GetTopologicalOrder(parent.ID)
+	if err != nil {
+		t.Fatalf("GetTopologicalOrder: %v", err)
+	}
+
+	if len(order) != 4 {
+		t.Fatalf("expected 4 tasks, got %d", len(order))
+	}
+
+	// Verify constraints
+	orderMap := make(map[string]int)
+	for i, task := range order {
+		orderMap[task.ID] = i
+	}
+
+	// A must come before B, C, and D
+	if orderMap[taskA.ID] >= orderMap[taskB.ID] {
+		t.Error("A should come before B")
+	}
+	if orderMap[taskA.ID] >= orderMap[taskC.ID] {
+		t.Error("A should come before C")
+	}
+	if orderMap[taskA.ID] >= orderMap[taskD.ID] {
+		t.Error("A should come before D")
+	}
+
+	// B and C must come before D
+	if orderMap[taskB.ID] >= orderMap[taskD.ID] {
+		t.Error("B should come before D")
+	}
+	if orderMap[taskC.ID] >= orderMap[taskD.ID] {
+		t.Error("C should come before D")
+	}
+}
+
+func TestTaskStore_GetTopologicalOrder_DisconnectedSubgraphs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create two disconnected chains: A -> B and C -> D
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	taskC := &Task{Title: "C", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskC)
+
+	taskD := &Task{Title: "D", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskC.ID}}
+	store.Create(taskD)
+
+	order, err := store.GetTopologicalOrder(parent.ID)
+	if err != nil {
+		t.Fatalf("GetTopologicalOrder: %v", err)
+	}
+
+	if len(order) != 4 {
+		t.Fatalf("expected 4 tasks, got %d", len(order))
+	}
+
+	// Verify partial order constraints
+	orderMap := make(map[string]int)
+	for i, task := range order {
+		orderMap[task.ID] = i
+	}
+
+	if orderMap[taskA.ID] >= orderMap[taskB.ID] {
+		t.Error("A should come before B")
+	}
+	if orderMap[taskC.ID] >= orderMap[taskD.ID] {
+		t.Error("C should come before D")
+	}
+}
+
+func TestTaskStore_GetTopologicalOrder_SingleNode(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	order, err := store.GetTopologicalOrder(parent.ID)
+	if err != nil {
+		t.Fatalf("GetTopologicalOrder: %v", err)
+	}
+
+	if len(order) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(order))
+	}
+	if order[0].ID != taskA.ID {
+		t.Error("expected task A")
+	}
+}
+
+func TestTaskStore_GetTopologicalOrder_EmptyGraph(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	order, err := store.GetTopologicalOrder(parent.ID)
+	if err != nil {
+		t.Fatalf("GetTopologicalOrder: %v", err)
+	}
+
+	if len(order) != 0 {
+		t.Errorf("expected empty result, got %d tasks", len(order))
+	}
+}
+
+func TestTaskStore_GetTopologicalOrder_DetectsCycle(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	// Create cycle: A -> B -> C -> A
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	taskC := &Task{Title: "C", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskB.ID}}
+	store.Create(taskC)
+
+	// Close the cycle
+	taskA.DependsOn = []string{taskC.ID}
+	store.Update(taskA)
+
+	_, err := store.GetTopologicalOrder(parent.ID)
+	if err == nil {
+		t.Error("expected error for cycle detection, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("expected cycle error, got: %v", err)
+	}
+}
+
+func TestTaskStore_AddSubtaskDependency_Success(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskB)
+
+	// Add dependency B -> A
+	err := store.AddSubtaskDependency(taskB.ID, taskA.ID)
+	if err != nil {
+		t.Fatalf("AddSubtaskDependency: %v", err)
+	}
+
+	// Verify dependency was added
+	updated, _ := store.GetByID(taskB.ID)
+	if len(updated.DependsOn) != 1 || updated.DependsOn[0] != taskA.ID {
+		t.Error("dependency not added correctly")
+	}
+}
+
+func TestTaskStore_AddSubtaskDependency_SelfLoop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	// Try to add self-dependency
+	err := store.AddSubtaskDependency(taskA.ID, taskA.ID)
+	if err == nil {
+		t.Error("expected error for self-loop, got nil")
+	}
+}
+
+func TestTaskStore_AddSubtaskDependency_CreatesCycle(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	// Try to add A -> B (creates cycle)
+	err := store.AddSubtaskDependency(taskA.ID, taskB.ID)
+	if err == nil {
+		t.Error("expected error for cycle creation, got nil")
+	}
+}
+
+func TestTaskStore_AddSubtaskDependency_DifferentParents(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent1 := &Task{Title: "Parent1", Type: TaskTypeCoding}
+	store.Create(parent1)
+
+	parent2 := &Task{Title: "Parent2", Type: TaskTypeCoding}
+	store.Create(parent2)
+
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent1.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent2.ID, Depth: 1}
+	store.Create(taskB)
+
+	// Try to add cross-parent dependency
+	err := store.AddSubtaskDependency(taskB.ID, taskA.ID)
+	if err == nil {
+		t.Error("expected error for different parents, got nil")
+	}
+}
+
+func TestTaskStore_AddSubtaskDependency_NotSubtask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	taskA := &Task{Title: "A", Type: TaskTypeCoding}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding}
+	store.Create(taskB)
+
+	// Try to add dependency for non-subtasks
+	err := store.AddSubtaskDependency(taskB.ID, taskA.ID)
+	if err == nil {
+		t.Error("expected error for non-subtask, got nil")
+	}
+}
+
+func TestTaskStore_AddSubtaskDependency_Idempotent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	store := NewTaskStore(db)
+
+	parent := &Task{Title: "Parent", Type: TaskTypeCoding}
+	store.Create(parent)
+
+	taskA := &Task{Title: "A", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1}
+	store.Create(taskA)
+
+	taskB := &Task{Title: "B", Type: TaskTypeCoding, ParentID: parent.ID, Depth: 1, DependsOn: []string{taskA.ID}}
+	store.Create(taskB)
+
+	// Try to add existing dependency
+	err := store.AddSubtaskDependency(taskB.ID, taskA.ID)
+	if err != nil {
+		t.Errorf("expected no error for idempotent add, got: %v", err)
+	}
+
+	// Verify no duplicate
+	updated, _ := store.GetByID(taskB.ID)
+	if len(updated.DependsOn) != 1 {
+		t.Errorf("expected 1 dependency, got %d", len(updated.DependsOn))
 	}
 }
