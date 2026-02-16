@@ -41,11 +41,13 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	// Validate input for security
 	if err := ValidateTaskInput(req.Title, req.Description); err != nil {
+		slog.Warn("task creation validation failed", "error", err, "title_len", len(req.Title), "desc_len", len(req.Description))
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Prompt != "" {
 		if err := ValidatePrompt(req.Prompt); err != nil {
+			slog.Warn("task creation prompt validation failed", "error", err, "prompt_len", len(req.Prompt))
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -173,6 +175,13 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Description != nil {
 		task.Description = *req.Description
+	}
+
+	// Validate updated fields
+	if err := ValidateTaskInput(task.Title, task.Description); err != nil {
+		slog.Warn("task update validation failed", "task_id", id, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if req.Type != nil {
 		task.Type = *req.Type

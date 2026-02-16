@@ -38,6 +38,8 @@ const priorityPresets = [
   { value: 85, label: 'Backlog', color: 'text-slate-500' },
 ]
 
+const MAX_DESCRIPTION_LENGTH = 51200 // Must match backend maxDescriptionLength
+
 const typeDescriptions: Record<string, string> = {
   CODING: 'Implementation, features, refactoring',
   BUGFIX: 'Fix a bug or regression',
@@ -122,6 +124,7 @@ export default function Tasks() {
     prompt: '',
   })
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
   const [subtaskCounts, setSubtaskCounts] = useState<Record<string, number>>({})
 
@@ -210,6 +213,14 @@ export default function Tasks() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setFormError(null)
+
+    // Client-side validation
+    if (formData.description.length > MAX_DESCRIPTION_LENGTH) {
+      setFormError(`Description exceeds maximum length of ${MAX_DESCRIPTION_LENGTH.toLocaleString()} characters (${formData.description.length.toLocaleString()} provided)`)
+      return
+    }
+
     try {
       await createTask({
         title: formData.title,
@@ -225,6 +236,7 @@ export default function Tasks() {
       })
       setShowForm(false)
       setShowAdvanced(false)
+      setFormError(null)
       setFormData({
         title: '',
         description: '',
@@ -236,6 +248,8 @@ export default function Tasks() {
         prompt: '',
       })
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create task'
+      setFormError(message)
       console.error('Failed to create task:', error)
     }
   }
@@ -439,9 +453,14 @@ export default function Tasks() {
                 placeholder="Describe the task in detail. Include acceptance criteria, context, and any constraints. This becomes the executor's primary input."
                 required
               />
-              <p className="text-xs text-slate-500 mt-1">
-                Be specific — this is what the executor agent reads to understand the work.
-              </p>
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-xs text-slate-500">
+                  Be specific — this is what the executor agent reads to understand the work.
+                </p>
+                <span className={`text-xs ${formData.description.length > MAX_DESCRIPTION_LENGTH ? 'text-red-400' : 'text-slate-500'}`}>
+                  {formData.description.length.toLocaleString()} / {MAX_DESCRIPTION_LENGTH.toLocaleString()}
+                </span>
+              </div>
             </div>
 
             {/* Type + Priority row */}
@@ -586,6 +605,13 @@ export default function Tasks() {
                 <p className="text-xs text-slate-500 mt-1">
                   Appended to the executor prompt as additional context.
                 </p>
+              </div>
+            )}
+
+            {/* Error display */}
+            {formError && (
+              <div className="p-3 bg-red-900/30 border border-red-600 rounded text-sm text-red-200">
+                {formError}
               </div>
             )}
 

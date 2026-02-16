@@ -125,8 +125,15 @@ class APIClient {
     })
 
     if (!response.ok) {
-      const error = await response.text()
-      throw new Error(error || `HTTP ${response.status}`)
+      const text = await response.text()
+      let message = text || `HTTP ${response.status}`
+      try {
+        const parsed = JSON.parse(text)
+        if (parsed.error) message = parsed.error
+      } catch {
+        // Use raw text if not valid JSON
+      }
+      throw new Error(message)
     }
 
     return response.json()

@@ -36,9 +36,15 @@ func TestValidateTaskInput(t *testing.T) {
 		{
 			name:        "oversized description",
 			title:       "Title",
-			description: strings.Repeat("a", 10241),
+			description: strings.Repeat("a", 51201),
 			wantErr:     true,
 			errContains: "description exceeds maximum length",
+		},
+		{
+			name:        "description at max length is allowed",
+			title:       "Title",
+			description: strings.Repeat("a", 51200),
+			wantErr:     false,
 		},
 		{
 			name:        "SQL-like content in title is allowed",
