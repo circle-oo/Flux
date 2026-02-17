@@ -94,6 +94,7 @@ type OrchestratorConfig struct {
 	MaxTotalPods     int           `yaml:"max_total_pods"`
 	MinTriagerRatio  float64       `yaml:"min_triager_ratio"`
 	Pods             PodsConfig    `yaml:"pods"`
+	DailyCostBudget  float64       `yaml:"daily_cost_budget"` // USD; 0 = unlimited
 	WorkspaceBase    string        `yaml:"workspace_base"`
 	DailySummaryHour int           `yaml:"daily_summary_hour"`
 	Models           ModelsConfig  `yaml:"models"`

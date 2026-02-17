@@ -34,15 +34,16 @@ ccusage:
 orchestrator:
   check_interval: 5m
   scale_cooldown: 15m
+  daily_cost_budget: 20.0   # USD; scale to min executors when exceeded
   workspace_base: "./workspaces"
   daily_summary_hour: 0
 
   pods:
     executor:
-      min: 0
+      min: 1
       max: 3
     triager:
-      min: 0
+      min: 1
       max: 1
     researcher:
       min: 0

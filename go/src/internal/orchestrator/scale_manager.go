@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"math"
 	"sync"
 	"time"
 
@@ -20,8 +19,8 @@ type AgentScaler interface {
 	ScalePods(ctx context.Context, executorCount, triagerCount, researcherCount int) error
 }
 
-// ScaleManager implements SubComponent and manages executor/triager/researcher pod scaling
-// based on queue state.
+// ScaleManager scales executor pods based on READY queue depth and daily cost budget.
+// Triager and researcher pods are always held at their configured min.
 type ScaleManager struct {
 	db      *sql.DB
 	config  *config.OrchestratorConfig
@@ -29,10 +28,12 @@ type ScaleManager struct {
 	discord *notifier.Discord
 
 	mu             sync.RWMutex
-	queueState     string
 	executorPods   int
 	triagerPods    int
 	researcherPods int
+	readyCount     int
+	dailyCost      float64
+	budgetExceeded bool
 	lastScaleTime  time.Time
 }
 
@@ -44,11 +45,10 @@ func NewScaleManager(
 	scaler AgentScaler,
 ) *ScaleManager {
 	return &ScaleManager{
-		db:         db,
-		config:     cfg,
-		scaler:     scaler,
-		discord:    discord,
-		queueState: "empty",
+		db:      db,
+		config:  cfg,
+		scaler:  scaler,
+		discord: discord,
 	}
 }
 
@@ -65,62 +65,81 @@ func clamp(v, min, max int) int {
 	return v
 }
 
-// Tick evaluates the current queue state and adjusts pod allocation if needed.
+// Tick evaluates READY queue depth and daily cost, then scales executor pods.
 func (s *ScaleManager) Tick(ctx context.Context) error {
-	// Always evaluate queue state (even during cooldown) so we detect transitions.
-	state, err := s.evaluateQueue(ctx)
-	if err != nil {
-		return fmt.Errorf("evaluate queue: %w", err)
-	}
-
 	pods := s.config.ResolvePods()
 
-	// Calculate ratio
-	executorRatio, _ := s.ratioForState(state)
+	// 1. Count READY tasks (work waiting for executors)
+	readyCount, err := s.countReady(ctx)
+	if err != nil {
+		return fmt.Errorf("count ready: %w", err)
+	}
 
-	totalBudget := pods.Executor.Max + pods.Triager.Max + pods.Researcher.Max
+	// 2. Count RUNNING tasks (already being executed)
+	runningCount, err := s.countRunning(ctx)
+	if err != nil {
+		return fmt.Errorf("count running: %w", err)
+	}
 
-	// Allocate researcher first (currently 0 since max=0 by default)
-	researcherPods := clamp(0, pods.Researcher.Min, pods.Researcher.Max)
+	// 3. Query today's cost
+	dailyCost, err := s.todayCost(ctx)
+	if err != nil {
+		return fmt.Errorf("today cost: %w", err)
+	}
 
-	// Remaining budget for executor + triager
-	remaining := totalBudget - researcherPods
+	// 4. Check daily budget
+	budget := s.config.DailyCostBudget
+	if budget <= 0 {
+		budget = 20.0 // default $20/day
+	}
+	budgetExceeded := dailyCost >= budget
 
-	executorDesired := int(math.Round(float64(remaining) * executorRatio))
-	triagerDesired := remaining - executorDesired
-
-	// Clamp per type
+	// 5. Determine desired executor count
+	//    - One executor per READY task (up to max), minus already running
+	//    - If budget exceeded, scale to min only
+	var executorDesired int
+	if budgetExceeded {
+		executorDesired = pods.Executor.Min
+	} else {
+		// Need enough executors to drain the READY queue
+		// Subtract running count since those executors are already busy
+		executorDesired = readyCount + runningCount
+	}
 	executorPods := clamp(executorDesired, pods.Executor.Min, pods.Executor.Max)
-	triagerPods := clamp(triagerDesired, pods.Triager.Min, pods.Triager.Max)
 
+	// Triager and researcher: always at min (config controls availability)
+	triagerPods := pods.Triager.Min
+	researcherPods := pods.Researcher.Min
+
+	// 6. Check if anything changed
 	s.mu.Lock()
-	changed := s.queueState != state || s.executorPods != executorPods || s.triagerPods != triagerPods || s.researcherPods != researcherPods
-	prevState := s.queueState
+	changed := s.executorPods != executorPods || s.triagerPods != triagerPods || s.researcherPods != researcherPods
 	prevExecutor := s.executorPods
-	prevTriager := s.triagerPods
 	lastScale := s.lastScaleTime
 
-	// Always update the tracked state so Status() reflects reality.
-	s.queueState = state
+	// Always update tracked metrics for Status()
+	s.readyCount = readyCount
+	s.dailyCost = dailyCost
+	s.budgetExceeded = budgetExceeded
 	s.mu.Unlock()
 
 	if !changed {
 		return nil
 	}
 
-	// Apply cooldown only to the actual ScalePods call, not to state evaluation.
-	// Exception: always allow scaling up from zero (startup / recovery).
+	// 7. Apply cooldown for scale-down only; scale-up is always immediate
 	cooldown := s.config.ScaleCooldown
 	if cooldown <= 0 {
 		cooldown = 15 * time.Minute
 	}
-	isScaleUp := executorPods > prevExecutor || triagerPods > prevTriager
+	isScaleUp := executorPods > prevExecutor
 	coolingDown := !lastScale.IsZero() && time.Since(lastScale) < cooldown
 
 	if coolingDown && !isScaleUp {
 		return nil
 	}
 
+	// 8. Apply
 	s.mu.Lock()
 	s.executorPods = executorPods
 	s.triagerPods = triagerPods
@@ -129,21 +148,22 @@ func (s *ScaleManager) Tick(ctx context.Context) error {
 	s.mu.Unlock()
 
 	slog.Info("scale adjusted",
-		"state", state,
-		"prev_state", prevState,
 		"executor_pods", executorPods,
-		"triager_pods", triagerPods,
-		"researcher_pods", researcherPods,
+		"ready_tasks", readyCount,
+		"running_tasks", runningCount,
+		"daily_cost", fmt.Sprintf("$%.2f/$%.2f", dailyCost, budget),
+		"budget_exceeded", budgetExceeded,
 	)
 
-	// Notify Discord on state transition
 	if s.discord != nil {
-		msg := fmt.Sprintf("Scale state: %s -> %s (executor=%d, triager=%d, researcher=%d, total=%d)",
-			prevState, state, executorPods, triagerPods, researcherPods, totalBudget)
+		msg := fmt.Sprintf("Scale: executor=%d (ready=%d, running=%d, cost=$%.2f/$%.2f)",
+			executorPods, readyCount, runningCount, dailyCost, budget)
+		if budgetExceeded {
+			msg += " [BUDGET EXCEEDED]"
+		}
 		s.discord.Send(notifier.LevelInfo, msg)
 	}
 
-	// Call the scaler to apply the new pod counts
 	if s.scaler != nil {
 		if err := s.scaler.ScalePods(ctx, executorPods, triagerPods, researcherPods); err != nil {
 			slog.Error("failed to scale pods", "error", err)
@@ -157,79 +177,32 @@ func (s *ScaleManager) Tick(ctx context.Context) error {
 	return nil
 }
 
-// evaluateQueue queries the task queue and determines the current queue state.
-func (s *ScaleManager) evaluateQueue(ctx context.Context) (string, error) {
-	// Count urgent operator tasks (priority >= 80)
-	var urgentCount int
+// countReady returns the number of READY tasks in the queue.
+func (s *ScaleManager) countReady(ctx context.Context) (int, error) {
+	var count int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE status IN ('PENDING','READY') AND source = 'OPERATOR' AND priority >= 80`,
-	).Scan(&urgentCount)
-	if err != nil {
-		return "", fmt.Errorf("count urgent: %w", err)
-	}
-	if urgentCount > 0 {
-		return "urgent", nil
-	}
-
-	// Count operator tasks (source = 'OPERATOR')
-	var operatorCount int
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE status IN ('PENDING','READY') AND source = 'OPERATOR'`,
-	).Scan(&operatorCount)
-	if err != nil {
-		return "", fmt.Errorf("count operator: %w", err)
-	}
-	if operatorCount > 0 {
-		return "operator", nil
-	}
-
-	// Count system/researcher tasks
-	var systemCount int
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE status IN ('PENDING','READY') AND source IN ('SYSTEM','RESEARCHER')`,
-	).Scan(&systemCount)
-	if err != nil {
-		return "", fmt.Errorf("count system: %w", err)
-	}
-	if systemCount > 0 {
-		return "system", nil
-	}
-
-	// Count total pending/ready tasks
-	var totalCount int
-	err = s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM tasks WHERE status IN ('PENDING','READY')`,
-	).Scan(&totalCount)
-	if err != nil {
-		return "", fmt.Errorf("count total: %w", err)
-	}
-
-	if totalCount >= 3 {
-		return "system", nil
-	}
-	if totalCount > 0 {
-		return "near_empty", nil
-	}
-
-	return "empty", nil
+		`SELECT COUNT(*) FROM tasks WHERE status = 'READY'`,
+	).Scan(&count)
+	return count, err
 }
 
-// ratioForState returns (executorRatio, triagerRatio) for a given queue state.
-func (s *ScaleManager) ratioForState(state string) (float64, float64) {
-	switch state {
-	case "urgent":
-		return 0.90, 0.10
-	case "operator":
-		return 0.80, 0.20
-	case "system":
-		return 0.70, 0.30
-	case "near_empty":
-		return 0.30, 0.70
-	case "empty":
-		return 0.00, 1.00
-	default:
-		return 0.50, 0.50
-	}
+// countRunning returns the number of currently RUNNING tasks.
+func (s *ScaleManager) countRunning(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM tasks WHERE status = 'RUNNING'`,
+	).Scan(&count)
+	return count, err
+}
+
+// todayCost returns total cost_usd for tasks completed today.
+func (s *ScaleManager) todayCost(ctx context.Context) (float64, error) {
+	var cost float64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(cost_usd), 0) FROM tasks
+		 WHERE date(completed_at) = date('now')`,
+	).Scan(&cost)
+	return cost, err
 }
 
 // Status returns the current scale status for the orchestrator status RPC.
@@ -244,14 +217,19 @@ func (s *ScaleManager) Status() *fluxv1.ScaleStatus {
 		lastScale = s.lastScaleTime.Format(time.RFC3339)
 	}
 
+	queueState := fmt.Sprintf("ready=%d cost=$%.2f", s.readyCount, s.dailyCost)
+	if s.budgetExceeded {
+		queueState += " [budget exceeded]"
+	}
+
 	return &fluxv1.ScaleStatus{
-		ExecutorPods:     int32(s.executorPods),
-		TriagerPods:      int32(s.triagerPods),
-		ResearcherPods:   int32(s.researcherPods),
-		MaxExecutorPods:  int32(pods.Executor.Max),
-		MaxTriagerPods:   int32(pods.Triager.Max),
+		ExecutorPods:      int32(s.executorPods),
+		TriagerPods:       int32(s.triagerPods),
+		ResearcherPods:    int32(s.researcherPods),
+		MaxExecutorPods:   int32(pods.Executor.Max),
+		MaxTriagerPods:    int32(pods.Triager.Max),
 		MaxResearcherPods: int32(pods.Researcher.Max),
-		QueueState:       s.queueState,
-		LastScaleTime:    lastScale,
+		QueueState:        queueState,
+		LastScaleTime:     lastScale,
 	}
 }
