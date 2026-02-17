@@ -220,21 +220,17 @@ func (h *FluxServiceHandler) executeInBackground(task *fluxv1.Task) {
 		Metadata:         task.GetMetadata(),
 	}
 
-	err := h.agent.ExecuteTask(ctx, req, func(event *fluxv1.TaskEvent) {
+	result, err := h.agent.ExecuteTask(ctx, req, func(event *fluxv1.TaskEvent) {
 		h.store.RecordEvent(task.GetId(), event)
 		h.store.Broadcast(task.GetId(), event)
-
-		// Update task status based on terminal events.
-		switch event.GetType() {
-		case fluxv1.TaskEvent_TASK_EVENT_TYPE_TASK_COMPLETE:
-			h.store.UpdateStatus(task.GetId(), fluxv1.TaskStatus_TASK_STATUS_COMPLETED)
-		case fluxv1.TaskEvent_TASK_EVENT_TYPE_TASK_ERROR:
-			h.store.UpdateStatus(task.GetId(), fluxv1.TaskStatus_TASK_STATUS_FAILED)
-		}
 	})
 
 	if err != nil {
 		h.logger.Error("task execution failed", "task_id", task.GetId(), "error", err)
 		h.store.UpdateStatus(task.GetId(), fluxv1.TaskStatus_TASK_STATUS_FAILED)
+	} else if result != nil && result.IsError {
+		h.store.UpdateStatus(task.GetId(), fluxv1.TaskStatus_TASK_STATUS_FAILED)
+	} else {
+		h.store.UpdateStatus(task.GetId(), fluxv1.TaskStatus_TASK_STATUS_COMPLETED)
 	}
 }

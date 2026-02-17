@@ -12,6 +12,24 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+// ExecutionResult holds the final output from an agent execution.
+type ExecutionResult struct {
+	// Result is the final result text from the TASK_COMPLETE event (ResultMessage).
+	Result string
+	// Output collects all ASSISTANT_MESSAGE content (intermediate conversation).
+	Output string
+	// CostUSD is extracted from ResultMessage metadata if available.
+	CostUSD string
+	// NumTurns is extracted from ResultMessage metadata if available.
+	NumTurns string
+	// SessionID is extracted from ResultMessage metadata if available.
+	SessionID string
+	// IsError is true if the agent returned a TASK_ERROR.
+	IsError bool
+	// ErrorMessage holds the error content if IsError is true.
+	ErrorMessage string
+}
+
 type Client struct {
 	conn   *grpc.ClientConn
 	agent  fluxv1.AgentExecutionServiceClient
@@ -37,35 +55,67 @@ func NewClient(addr string, logger *slog.Logger) (*Client, error) {
 	}, nil
 }
 
+// ExecuteTask streams events from the agent and returns a structured result.
+// The onEvent callback is called for every event (for logging/streaming to UI).
+// The returned ExecutionResult separates the final result from intermediate output.
 func (c *Client) ExecuteTask(
 	ctx context.Context,
 	req *fluxv1.ExecuteTaskRequest,
 	onEvent func(*fluxv1.TaskEvent),
-) error {
+) (*ExecutionResult, error) {
 	stream, err := c.agent.ExecuteTask(ctx, req)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	result := &ExecutionResult{}
+
 	for {
 		resp, err := stream.Recv()
 		if err == io.EOF {
-			return nil
+			return result, nil
 		}
 		if err != nil {
-			return err
+			return result, err
 		}
 		event := resp.GetEvent()
 		if event == nil {
 			continue
 		}
-		c.logger.Info("agent event",
+
+		c.logger.Debug("agent event",
 			"task_id", event.GetTaskId(),
 			"type", event.GetType().String(),
 		)
-		onEvent(event)
-		if event.GetType() == fluxv1.TaskEvent_TASK_EVENT_TYPE_TASK_COMPLETE ||
-			event.GetType() == fluxv1.TaskEvent_TASK_EVENT_TYPE_TASK_ERROR {
-			return nil
+
+		if onEvent != nil {
+			onEvent(event)
+		}
+
+		switch event.GetType() {
+		case fluxv1.TaskEvent_TASK_EVENT_TYPE_ASSISTANT_MESSAGE:
+			if event.GetContent() != "" {
+				result.Output += event.GetContent() + "\n"
+			}
+
+		case fluxv1.TaskEvent_TASK_EVENT_TYPE_TASK_COMPLETE:
+			result.Result = event.GetContent()
+			// Extract metadata from ResultMessage
+			if meta := event.GetMetadata(); meta != nil {
+				result.CostUSD = meta["cost_usd"]
+				result.NumTurns = meta["num_turns"]
+				result.SessionID = meta["session_id"]
+			}
+			return result, nil
+
+		case fluxv1.TaskEvent_TASK_EVENT_TYPE_TASK_ERROR:
+			result.IsError = true
+			result.ErrorMessage = event.GetContent()
+			if meta := event.GetMetadata(); meta != nil {
+				result.CostUSD = meta["cost_usd"]
+				result.NumTurns = meta["num_turns"]
+			}
+			return result, nil
 		}
 	}
 }

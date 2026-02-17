@@ -268,19 +268,23 @@ func (t *Triager) triageTask(ctx context.Context, task *models.Task, model strin
 		},
 	}
 
-	// Collect only ASSISTANT_MESSAGE content (skip PROGRESS, TOOL_USE, etc.)
-	var output strings.Builder
-	err := t.agentClient.ExecuteTask(triageCtx, req, func(event *fluxv1.TaskEvent) {
-		if event.GetType() == fluxv1.TaskEvent_TASK_EVENT_TYPE_ASSISTANT_MESSAGE {
-			output.WriteString(event.GetContent())
-		}
-	})
-
+	agentResult, err := t.agentClient.ExecuteTask(triageCtx, req, nil)
 	if err != nil {
 		return nil, fmt.Errorf("triage execution failed: %w", err)
 	}
+	if agentResult != nil && agentResult.IsError {
+		return nil, fmt.Errorf("triage agent error: %s", agentResult.ErrorMessage)
+	}
 
-	resultText := strings.TrimSpace(output.String())
+	// Use the final result (from TASK_COMPLETE/ResultMessage); fall back to intermediate output
+	resultText := ""
+	if agentResult != nil {
+		if agentResult.Result != "" {
+			resultText = strings.TrimSpace(agentResult.Result)
+		} else {
+			resultText = strings.TrimSpace(agentResult.Output)
+		}
+	}
 	if resultText == "" {
 		return nil, fmt.Errorf("triage returned empty output")
 	}

@@ -100,6 +100,7 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
                 permission_mode="bypassPermissions",
             )
 
+            has_result = False
             async for message in query(prompt=prompt, options=options):
                 if cancel_event.is_set():
                     yield _make_event(task_id, "TASK_ERROR", "Cancelled by operator")
@@ -108,8 +109,13 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
                 # Convert SDK messages to gRPC events
                 for event in self._convert_message(task_id, message):
                     yield event
+                    if isinstance(message, ResultMessage):
+                        has_result = True
 
-            yield _make_event(task_id, "TASK_COMPLETE", "Done")
+            # If SDK didn't yield a ResultMessage, send a fallback TASK_COMPLETE
+            if not has_result:
+                yield _make_event(task_id, "TASK_COMPLETE", "")
+
             self.completed_count += 1
 
         except Exception as e:
@@ -134,9 +140,13 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
                     content = block.content if isinstance(block.content, str) else str(block.content)
                     yield _make_event(task_id, "TOOL_RESULT", content[:2000])
         elif isinstance(message, ResultMessage):
+            # ResultMessage is the final SDK output. Store metadata on it and
+            # use TASK_COMPLETE (if success) or TASK_ERROR (if error) so the Go
+            # client can distinguish the final result from intermediate messages.
             meta = {
                 "num_turns": str(message.num_turns),
                 "session_id": message.session_id or "",
+                "is_result": "true",
             }
             if message.total_cost_usd:
                 meta["cost_usd"] = f"{message.total_cost_usd:.4f}"
@@ -147,8 +157,10 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
                     meta,
                 )
             else:
+                # Yield as TASK_COMPLETE with the actual result text.
+                # The Go client uses this as the authoritative output.
                 yield _make_event(
-                    task_id, "ASSISTANT_MESSAGE",
+                    task_id, "TASK_COMPLETE",
                     message.result or "",
                     meta,
                 )

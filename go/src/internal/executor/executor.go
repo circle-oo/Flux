@@ -310,26 +310,29 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 	defer cancel()
 
 	e.executionStartTime = time.Now()
-	var output strings.Builder
-	var lastEventType fluxv1.TaskEvent_TaskEventType
 
-	err := e.agentClient.ExecuteTask(execCtx, req, func(event *fluxv1.TaskEvent) {
-		lastEventType = event.GetType()
-		if event.GetContent() != "" {
-			output.WriteString(event.GetContent())
-			output.WriteString("\n")
-		}
+	agentResult, err := e.agentClient.ExecuteTask(execCtx, req, func(event *fluxv1.TaskEvent) {
 		slog.Debug("agent event", "task_id", task.ID, "type", event.GetType().String())
 	})
 
 	duration := time.Since(e.executionStartTime)
+
+	// Use the final result from TASK_COMPLETE; fall back to intermediate output
+	outputText := ""
+	if agentResult != nil {
+		if agentResult.Result != "" {
+			outputText = agentResult.Result
+		} else {
+			outputText = agentResult.Output
+		}
+	}
+
 	result := &ExecutionResult{
-		Output:   output.String(),
+		Output:   outputText,
 		Duration: duration,
 	}
 
 	if err != nil {
-		// Check if context deadline exceeded (timeout)
 		if errors.Is(err, context.DeadlineExceeded) {
 			slog.Warn("task execution timed out", "task_id", task.ID, "duration", duration)
 			e.reportFailure(task.ID, task, result.Output, "execution timed out")
@@ -338,10 +341,10 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 		return nil, fmt.Errorf("agent execution failed: %w", err)
 	}
 
-	// Check if the agent reported an error event
-	if lastEventType == fluxv1.TaskEvent_TASK_EVENT_TYPE_TASK_ERROR {
-		slog.Warn("agent reported task error", "task_id", task.ID)
-		e.reportFailure(task.ID, task, result.Output, "agent reported error")
+	// Check if the agent reported an error
+	if agentResult != nil && agentResult.IsError {
+		slog.Warn("agent reported task error", "task_id", task.ID, "error", agentResult.ErrorMessage)
+		e.reportFailure(task.ID, task, result.Output, agentResult.ErrorMessage)
 		return nil, nil
 	}
 
