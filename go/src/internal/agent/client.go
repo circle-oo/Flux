@@ -41,8 +41,9 @@ func NewClient(addr string, logger *slog.Logger) (*Client, error) {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10<<20)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:    30 * time.Second,
-			Timeout: 10 * time.Second,
+			Time:                30 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
 		}),
 	)
 	if err != nil {

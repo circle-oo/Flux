@@ -61,10 +61,29 @@ def _make_event(
 class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
     """Implements the AgentExecutionService using Claude Code SDK."""
 
+    # Maximum task execution time before a cancellation flag is considered stale.
+    _STALE_FLAG_SECONDS = 35 * 60  # 35 minutes
+
     def __init__(self):
-        self.cancellation_flags: dict[str, asyncio.Event] = {}
+        self.cancellation_flags: dict[str, tuple[asyncio.Event, float]] = {}  # task_id -> (event, created_at)
         self.active_agents: dict[str, str] = {}  # task_id -> agent_type
         self.completed_count = 0
+
+    def _cleanup_stale_flags(self):
+        """Remove cancellation flags for tasks that exceeded the max execution time.
+
+        If ExecuteTask crashes before reaching its finally block (e.g. gRPC transport
+        error), the cancellation_flags entry leaks. This sweep prevents unbounded growth.
+        """
+        now = time.time()
+        stale = [
+            tid for tid, (_, created_at) in self.cancellation_flags.items()
+            if now - created_at > self._STALE_FLAG_SECONDS
+        ]
+        for tid in stale:
+            logger.warning("Cleaning up stale cancellation flag for task %s", tid)
+            self.cancellation_flags.pop(tid, None)
+            self.active_agents.pop(tid, None)
 
     async def ExecuteTask(self, request, context):
         """Execute a task via Claude Code SDK and stream events back."""
@@ -73,6 +92,9 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
         prompt = request.prompt
 
         logger.info("ExecuteTask: task_id=%s agent_type=%s", task_id, agent_type)
+
+        # Sweep stale entries from prior crashes before adding a new one
+        self._cleanup_stale_flags()
 
         # Validate agent type
         try:
@@ -83,7 +105,7 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
 
         # Set up cancellation
         cancel_event = asyncio.Event()
-        self.cancellation_flags[task_id] = cancel_event
+        self.cancellation_flags[task_id] = (cancel_event, time.time())
         self.active_agents[task_id] = agent_type
 
         try:
@@ -143,10 +165,19 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
             # ResultMessage is the final SDK output. Store metadata on it and
             # use TASK_COMPLETE (if success) or TASK_ERROR (if error) so the Go
             # client can distinguish the final result from intermediate messages.
+            # Extract token counts from usage dict if available
+            usage = message.usage or {}
+            total_tokens = (
+                usage.get("input_tokens", 0)
+                + usage.get("output_tokens", 0)
+                + usage.get("cache_creation_input_tokens", 0)
+                + usage.get("cache_read_input_tokens", 0)
+            )
             meta = {
                 "num_turns": str(message.num_turns),
                 "session_id": message.session_id or "",
                 "is_result": "true",
+                "total_tokens": str(total_tokens),
             }
             if message.total_cost_usd:
                 meta["cost_usd"] = f"{message.total_cost_usd:.4f}"
@@ -170,8 +201,9 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
         task_id = request.task_id
         logger.info("CancelAgentTask: task_id=%s", task_id)
 
-        flag = self.cancellation_flags.get(task_id)
-        if flag:
+        entry = self.cancellation_flags.get(task_id)
+        if entry:
+            flag, _ = entry
             flag.set()
             return flux_pb2.CancelAgentTaskResponse(success=True)
 
@@ -200,7 +232,12 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
 
 async def serve(port: int = 50051) -> None:
     """Start the async gRPC server with graceful shutdown."""
-    server = grpc_aio.server()
+    server = grpc_aio.server(options=[
+        # Allow the Go client's 30-second keepalive pings.
+        # Default enforcement minimum is 5 minutes, which causes GOAWAY errors.
+        ("grpc.keepalive_permit_without_calls", True),
+        ("grpc.http2.min_ping_interval_without_data_ms", 10_000),  # 10s minimum
+    ])
     flux_pb2_grpc.add_AgentExecutionServiceServicer_to_server(
         AgentExecutionServicer(), server
     )

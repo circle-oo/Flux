@@ -367,6 +367,23 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRetryTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
+	// Snapshot the current attempt before retry clears the fields
+	task, err := s.tasks.GetByID(id)
+	if err != nil {
+		serverError(w, "failed to get task for attempt snapshot", "id", id, "error", err)
+		return
+	}
+	// Reconcile usage from events before snapshotting, in case the task
+	// row has stale zeros (prior bug: ReportTaskDone passed 0,0).
+	if totalTokens, totalCost, err := s.taskUsageEvents.SumByTask(id); err == nil && (totalTokens > 0 || totalCost > 0) {
+		task.TokensUsed = totalTokens
+		task.CostUSD = totalCost
+	}
+	if err := s.taskAttempts.SaveAttempt(id, task); err != nil {
+		slog.Error("failed to save attempt before retry", "task_id", id, "error", err)
+		// Non-fatal: continue with retry
+	}
+
 	// Archive all previous subtasks before retrying
 	archived, err := s.tasks.ArchiveChildren(id)
 	if err != nil {
@@ -381,7 +398,7 @@ func (s *Server) handleRetryTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := s.tasks.GetByID(id)
+	task, err = s.tasks.GetByID(id)
 	if err != nil {
 		serverError(w, "failed to get task after retry", "id", id, "error", err)
 		return
@@ -390,6 +407,65 @@ func (s *Server) handleRetryTask(w http.ResponseWriter, r *http.Request) {
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
 	writeJSON(w, http.StatusOK, task)
+}
+
+// handleListAttempts handles GET /api/tasks/{id}/attempts
+func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	attempts, err := s.taskAttempts.ListByTask(id)
+	if err != nil {
+		serverError(w, "failed to list task attempts", "task_id", id, "error", err)
+		return
+	}
+	if attempts == nil {
+		attempts = []*models.TaskAttempt{}
+	}
+
+	// Use usage events as the source of truth for totals across all attempts.
+	// This is more accurate than summing attempt snapshots (which may have stale zeros).
+	totalTokens, totalCost, err := s.taskUsageEvents.SumByTask(id)
+	if err != nil {
+		slog.Error("failed to compute usage totals", "task_id", id, "error", err)
+		// Fallback: sum from attempt snapshots + current task
+		totalTokens, totalCost, _ = s.taskAttempts.TotalTokensAndCost(id)
+		if task, err := s.tasks.GetByID(id); err == nil {
+			totalTokens += task.TokensUsed
+			totalCost += task.CostUSD
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"attempts":         attempts,
+		"total_tokens_used": totalTokens,
+		"total_cost_usd":    totalCost,
+	})
+}
+
+// handleListUsageEvents handles GET /api/tasks/{id}/usage
+func (s *Server) handleListUsageEvents(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	events, err := s.taskUsageEvents.ListByTask(id)
+	if err != nil {
+		serverError(w, "failed to list usage events", "task_id", id, "error", err)
+		return
+	}
+	if events == nil {
+		events = []*models.TaskUsageEvent{}
+	}
+
+	totalTokens, totalCost, err := s.taskUsageEvents.SumByTask(id)
+	if err != nil {
+		serverError(w, "failed to sum usage", "task_id", id, "error", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"events":       events,
+		"total_tokens": totalTokens,
+		"total_cost":   totalCost,
+	})
 }
 
 // handleArchiveTask handles POST /api/tasks/{id}/archive

@@ -65,7 +65,8 @@ export default function Tasks() {
         setActiveFilterGroup('')
       }
     }
-  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   useEffect(() => {
     fetchTasks()

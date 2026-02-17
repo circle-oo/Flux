@@ -6,6 +6,9 @@ import type {
   AgentPerformance,
   PipelineHealth,
   FailureAnalysis,
+  UsageTimePoint,
+  ProjectActivity,
+  BillingInfo,
 } from '../lib/api'
 
 type Period = '24h' | '7d' | '30d'
@@ -17,15 +20,23 @@ interface InsightState {
   efficiency: AgentPerformance[]
   pipeline: PipelineHealth[]
   failures: FailureAnalysis[]
+  realtimeUsage: UsageTimePoint[]
+  projectActivities: ProjectActivity[]
+  billing: BillingInfo | null
   isLoading: boolean
   error: string | null
+  _refreshTimer: ReturnType<typeof setInterval> | null
   setPeriod: (period: Period) => void
   fetchAll: () => Promise<void>
+  fetchBilling: () => Promise<void>
   fetchSummary: () => Promise<void>
   fetchTimeseries: () => Promise<void>
   fetchEfficiency: () => Promise<void>
   fetchPipeline: () => Promise<void>
   fetchFailures: () => Promise<void>
+  fetchRealtimeUsage: () => Promise<void>
+  startAutoRefresh: () => void
+  stopAutoRefresh: () => void
 }
 
 export const useInsightStore = create<InsightState>((set, get) => ({
@@ -35,32 +46,55 @@ export const useInsightStore = create<InsightState>((set, get) => ({
   efficiency: [],
   pipeline: [],
   failures: [],
+  realtimeUsage: [],
+  projectActivities: [],
+  billing: null,
   isLoading: false,
   error: null,
+  _refreshTimer: null,
 
   setPeriod: (period) => {
     set({ period })
     get().fetchAll()
   },
 
+  fetchBilling: async () => {
+    try {
+      const billing = await api.getBillingInfo()
+      set({ billing })
+    } catch (error) {
+      console.error('Failed to fetch billing info:', error)
+    }
+  },
+
   fetchAll: async () => {
     set({ isLoading: true, error: null })
-    try {
-      const { period } = get()
-      const [summary, timeseries, efficiency, pipeline, failures] = await Promise.all([
-        api.getInsightsSummary(period),
-        api.getInsightsTimeseries(period),
-        api.getInsightsEfficiency(),
-        api.getInsightsPipeline(),
-        api.getInsightsFailures(period),
-      ])
-      set({ summary, timeseries, efficiency, pipeline, failures, isLoading: false })
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to fetch insights',
-        isLoading: false,
-      })
+    const { period } = get()
+
+    const emptySummary: InsightsSummary = {
+      total_tasks: 0, completed_tasks: 0, failed_tasks: 0, success_rate: 0,
+      total_tokens: 0, total_cost: 0, triage_tokens: 0, triage_cost: 0,
+      execution_tokens: 0, execution_cost: 0, avg_latency_min: 0, active_projects: 0,
     }
+
+    // Each call has its own .catch() so a single endpoint failure
+    // doesn't block the entire page from loading.
+    const [summary, timeseries, efficiency, pipeline, failures, realtimeUsage, insights, billing] = await Promise.all([
+      api.getInsightsSummary(period).catch(() => emptySummary),
+      api.getInsightsTimeseries(period).catch(() => []),
+      api.getInsightsEfficiency().catch(() => []),
+      api.getInsightsPipeline().catch(() => []),
+      api.getInsightsFailures(period).catch(() => []),
+      api.getInsightsUsageRealtime(60).catch(() => []),
+      api.getInsights().catch(() => ({ total_tokens: 0, total_cost: 0, project_activities: [] as ProjectActivity[] })),
+      api.getBillingInfo().catch(() => null),
+    ])
+    set({
+      summary, timeseries, efficiency, pipeline, failures, realtimeUsage,
+      projectActivities: insights.project_activities || [],
+      billing,
+      isLoading: false,
+    })
   },
 
   fetchSummary: async () => {
@@ -105,6 +139,33 @@ export const useInsightStore = create<InsightState>((set, get) => ({
       set({ failures })
     } catch (error) {
       console.error('Failed to fetch failures:', error)
+    }
+  },
+
+  fetchRealtimeUsage: async () => {
+    try {
+      const realtimeUsage = await api.getInsightsUsageRealtime(60)
+      set({ realtimeUsage })
+    } catch (error) {
+      console.error('Failed to fetch realtime usage:', error)
+    }
+  },
+
+  // Auto-refresh realtime data every 30s while the insights page is mounted
+  startAutoRefresh: () => {
+    const { _refreshTimer } = get()
+    if (_refreshTimer) return
+    const timer = setInterval(() => {
+      get().fetchRealtimeUsage()
+    }, 30_000)
+    set({ _refreshTimer: timer })
+  },
+
+  stopAutoRefresh: () => {
+    const { _refreshTimer } = get()
+    if (_refreshTimer) {
+      clearInterval(_refreshTimer)
+      set({ _refreshTimer: null })
     }
   },
 }))

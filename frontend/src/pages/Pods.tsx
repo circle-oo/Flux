@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, Pod, OrchestratorStatus } from '../lib/api'
 import { useSettingsStore } from '../stores/settingsStore'
+import { formatBytes, diskLevelColor } from '../lib/utils'
 import PageHeader from '../components/PageHeader'
 import PodCard from '../components/PodCard'
 import LoadingState from '../components/LoadingState'
@@ -42,25 +43,6 @@ export default function Pods() {
   const scaleStatus = orchStatus?.scale_status
   const diskStatus = orchStatus?.disk_status
 
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 B'
-    const gb = bytes / (1024 * 1024 * 1024)
-    if (gb >= 1) return `${gb.toFixed(1)} GB`
-    const mb = bytes / (1024 * 1024)
-    return `${mb.toFixed(0)} MB`
-  }
-
-  const diskLevelColor = (level: string) => {
-    switch (level) {
-      case 'ok': return 'text-emerald-400'
-      case 'warning': return 'text-yellow-400'
-      case 'block': return 'text-orange-400'
-      case 'critical': return 'text-red-400'
-      case 'force': return 'text-red-500'
-      default: return 'text-content-muted'
-    }
-  }
-
   return (
     <div className="p-5 sm:p-6 lg:p-8 space-y-6 animate-fade-in">
       <PageHeader
@@ -75,7 +57,7 @@ export default function Pods() {
       />
 
       {error && (
-        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
+        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 text-sm">
           {error}
         </div>
       )}
@@ -146,7 +128,7 @@ export default function Pods() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
             <div>
               <div className="text-xs text-content-muted mb-1">Status</div>
-              <div className={`text-sm font-medium ${orchStatus.running ? 'text-emerald-400' : 'text-red-400'}`}>
+              <div className={`text-sm font-medium ${orchStatus.running ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {orchStatus.running ? 'Running' : 'Stopped'}
               </div>
             </div>
@@ -160,7 +142,7 @@ export default function Pods() {
             </div>
             <div>
               <div className="text-xs text-content-muted mb-1">Rate Limited</div>
-              <div className={`text-sm font-medium ${orchStatus.rate_limited ? 'text-red-400' : 'text-emerald-400'}`}>
+              <div className={`text-sm font-medium ${orchStatus.rate_limited ? 'text-rose-500' : 'text-emerald-500'}`}>
                 {orchStatus.rate_limited ? 'Yes' : 'No'}
               </div>
             </div>
@@ -186,14 +168,14 @@ export default function Pods() {
                         <td className="py-2 pr-4 font-mono text-content-secondary">{c.name}</td>
                         <td className="py-2 pr-4">
                           <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${c.healthy ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                          <span className={c.healthy ? 'text-emerald-400' : 'text-red-400'}>
+                          <span className={c.healthy ? 'text-emerald-500' : 'text-rose-500'}>
                             {c.healthy ? 'Healthy' : 'Error'}
                           </span>
                         </td>
                         <td className="py-2 pr-4 text-content-muted">
                           {c.last_tick ? new Date(c.last_tick).toLocaleTimeString() : '--'}
                         </td>
-                        <td className="py-2 text-red-400/80 max-w-[200px] truncate">{c.last_error || '--'}</td>
+                        <td className="py-2 text-rose-500/80 max-w-[200px] truncate">{c.last_error || '--'}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -43,7 +43,7 @@ export default function DeployStatusCard({ status, wsConnected, isAutoMode, isDe
         {updater?.last_error && (
           <div className="border-t border-line-subtle pt-4">
             <h3 className="text-xs font-medium text-rose-600 mb-2">Last Error</h3>
-            <div className="p-3 bg-rose-50/50 border border-rose-500/15 rounded-lg text-xs text-rose-300 font-mono" role="alert">{updater.last_error}</div>
+            <div className="p-3 bg-rose-50/50 border border-rose-500/15 rounded-lg text-xs text-rose-600 font-mono" role="alert">{updater.last_error}</div>
           </div>
         )}
       </div>

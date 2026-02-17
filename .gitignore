@@ -19,9 +19,7 @@ __pycache__/
 *.pyc
 
 # Runtime data
-data/
-workspaces/
-logs/
+var/
 
 # IDE
 .idea/

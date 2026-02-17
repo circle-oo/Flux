@@ -3,6 +3,7 @@ import { useDeployStore } from '../stores/deployStore'
 import { useWSStore } from '../stores/wsStore'
 import { useSettingsStore, Theme, DashboardLayout } from '../stores/settingsStore'
 import { api, OrchestratorStatus } from '../lib/api'
+import { formatBytes, diskLevelColor } from '../lib/utils'
 import PageHeader from '../components/PageHeader'
 import LoadingState from '../components/LoadingState'
 import ErrorBanner from '../components/ErrorBanner'
@@ -174,7 +175,7 @@ export default function Settings() {
           {error && <ErrorBanner message={error} />}
 
           {isDeploying && (
-            <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-lg text-sm text-primary-300" role="status">
+            <div className="p-3 bg-primary-500/10 border border-primary-500/20 rounded-lg text-sm text-primary-600" role="status">
               Deploy in progress. Pulling latest code, rebuilding, and restarting...
             </div>
           )}
@@ -264,25 +265,6 @@ function ConfigSection({ title, entries }: { title: string; entries: [string, un
 }
 
 function OrchestratorView({ status }: { status: OrchestratorStatus }) {
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 B'
-    const gb = bytes / (1024 * 1024 * 1024)
-    if (gb >= 1) return `${gb.toFixed(1)} GB`
-    const mb = bytes / (1024 * 1024)
-    return `${mb.toFixed(0)} MB`
-  }
-
-  const diskLevelColor = (level: string) => {
-    switch (level) {
-      case 'ok': return 'text-emerald-400'
-      case 'warning': return 'text-yellow-400'
-      case 'block': return 'text-orange-400'
-      case 'critical': return 'text-red-400'
-      case 'force': return 'text-red-500'
-      default: return 'text-content-muted'
-    }
-  }
-
   return (
     <div className="space-y-6">
       {/* System Health */}
@@ -291,7 +273,7 @@ function OrchestratorView({ status }: { status: OrchestratorStatus }) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
             <div className="text-xs text-content-muted mb-1">Status</div>
-            <div className={`text-sm font-medium ${status.running ? 'text-emerald-400' : 'text-red-400'}`}>
+            <div className={`text-sm font-medium ${status.running ? 'text-emerald-500' : 'text-rose-500'}`}>
               {status.running ? 'Running' : 'Stopped'}
             </div>
           </div>
@@ -305,11 +287,11 @@ function OrchestratorView({ status }: { status: OrchestratorStatus }) {
           </div>
           <div>
             <div className="text-xs text-content-muted mb-1">Rate Limited</div>
-            <div className={`text-sm font-medium ${status.rate_limited ? 'text-red-400' : 'text-emerald-400'}`}>
+            <div className={`text-sm font-medium ${status.rate_limited ? 'text-rose-500' : 'text-emerald-500'}`}>
               {status.rate_limited ? 'Yes' : 'No'}
             </div>
             {status.rate_limited && status.rate_limit_until && (
-              <div className="text-[10px] text-red-400/70 mt-0.5">
+              <div className="text-[10px] text-rose-500/70 mt-0.5">
                 Until {new Date(status.rate_limit_until).toLocaleTimeString()}
               </div>
             )}
@@ -337,14 +319,14 @@ function OrchestratorView({ status }: { status: OrchestratorStatus }) {
                     <td className="py-2 pr-4 font-mono text-content-secondary">{c.name}</td>
                     <td className="py-2 pr-4">
                       <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${c.healthy ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                      <span className={c.healthy ? 'text-emerald-400' : 'text-red-400'}>
+                      <span className={c.healthy ? 'text-emerald-500' : 'text-rose-500'}>
                         {c.healthy ? 'Healthy' : 'Error'}
                       </span>
                     </td>
                     <td className="py-2 pr-4 text-content-muted">
                       {c.last_tick ? new Date(c.last_tick).toLocaleTimeString() : '--'}
                     </td>
-                    <td className="py-2 text-red-400/80 max-w-[200px] truncate">{c.last_error || '--'}</td>
+                    <td className="py-2 text-rose-500/80 max-w-[200px] truncate">{c.last_error || '--'}</td>
                   </tr>
                 ))}
               </tbody>

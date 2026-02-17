@@ -1,73 +1,55 @@
 package executor
 
 import (
-	"encoding/json"
 	"log/slog"
-	"os/exec"
 	"strings"
 
+	"github.com/circle-oo/flux/internal/ccusage"
 	"github.com/circle-oo/flux/internal/models"
 )
 
 // EncodeCCProjectName encodes an absolute path into a ccusage project name.
 // Replaces '/' and '.' with '-'.
-// Example: /home/user/workspaces/trees/flux--task-abc123 -> -home-user-workspaces-trees-flux--task-abc123
 func EncodeCCProjectName(absolutePath string) string {
 	encoded := strings.ReplaceAll(absolutePath, "/", "-")
 	encoded = strings.ReplaceAll(encoded, ".", "-")
 	return encoded
 }
 
-// ccusageDailyResponse matches the top-level JSON from `ccusage daily --json`.
-type ccusageDailyResponse struct {
-	Daily []ccusageDayEntry `json:"daily"`
-}
-
-// ccusageDayEntry matches a single day entry in ccusage's camelCase JSON output.
-type ccusageDayEntry struct {
-	TotalTokens int     `json:"totalTokens"`
-	TotalCost   float64 `json:"totalCost"`
-}
-
 // CollectTaskUsage queries ccusage for the task's token and cost data.
-// Updates task.TokensUsed and task.CostUSD.
-// Graceful degradation: logs errors but does not fail the task.
-func CollectTaskUsage(ccusageCmd, worktreePath string, task *models.Task) error {
-	projectName := EncodeCCProjectName(worktreePath)
+// Prefers session-based lookup (exact match) when sessionID is available,
+// falls back to project-based lookup (worktree directory).
+// ccusage calculates cost from model pricing regardless of billing plan.
+func CollectTaskUsage(ccusageCmd, worktreePath, sessionID string, task *models.Task) error {
+	// Prefer session-based lookup: exact per-session usage
+	if sessionID != "" {
+		totals := ccusage.QuerySession(ccusageCmd, sessionID)
+		if totals != nil && totals.TotalTokens > 0 {
+			task.TokensUsed = totals.TotalTokens
+			task.CostUSD = totals.TotalCost
+			slog.Info("collected task usage from ccusage (session)",
+				"task_id", task.ID,
+				"session_id", sessionID,
+				"tokens", task.TokensUsed,
+				"cost_usd", task.CostUSD)
+			return nil
+		}
+	}
 
-	// Split command in case ccusageCmd contains args (e.g. "npx ccusage@latest")
-	parts := strings.Fields(ccusageCmd)
-	if len(parts) == 0 {
+	// Fallback: project-based lookup
+	projectName := EncodeCCProjectName(worktreePath)
+	totals := ccusage.QueryProjectUsage(ccusageCmd, projectName)
+	if totals == nil {
 		return nil
 	}
-	args := append(parts[1:], "daily", "--project", projectName, "--json")
-	cmd := exec.Command(parts[0], args...)
-	output, err := cmd.Output()
-	if err != nil {
-		slog.Warn("ccusage command failed, skipping usage collection", "error", err, "project", projectName)
-		return nil // Graceful degradation
-	}
 
-	var response ccusageDailyResponse
-	if err := json.Unmarshal(output, &response); err != nil {
-		slog.Warn("failed to parse ccusage JSON response", "error", err, "output", string(output))
-		return nil // Graceful degradation
-	}
+	task.TokensUsed = totals.TotalTokens
+	task.CostUSD = totals.TotalCost
 
-	// Sum across all daily entries (task may span multiple days)
-	var totalTokens int
-	var totalCost float64
-	for _, day := range response.Daily {
-		totalTokens += day.TotalTokens
-		totalCost += day.TotalCost
-	}
-
-	task.TokensUsed = totalTokens
-	task.CostUSD = totalCost
-
-	if totalTokens > 0 {
-		slog.Info("collected task usage from ccusage",
+	if totals.TotalTokens > 0 {
+		slog.Info("collected task usage from ccusage (project)",
 			"task_id", task.ID,
+			"project", projectName,
 			"tokens", task.TokensUsed,
 			"cost_usd", task.CostUSD)
 	}

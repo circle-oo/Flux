@@ -207,6 +207,61 @@ func (s *TaskStore) Create(t *Task) error {
 	return nil
 }
 
+// CreateTx inserts a new task within an existing transaction.
+func (s *TaskStore) CreateTx(tx *sql.Tx, t *Task) error {
+	if t.ID == "" {
+		t.ID = uuid.New().String()
+	}
+	if t.Status == "" {
+		t.Status = TaskPending
+	}
+	if t.Source == "" {
+		t.Source = TaskSourceSystem
+	}
+	if t.Model == "" {
+		t.Model = "sonnet"
+	}
+	if t.DependsOn == nil {
+		t.DependsOn = []string{}
+	}
+	if t.Tags == nil {
+		t.Tags = []string{}
+	}
+	if t.MaxRetries == 0 {
+		t.MaxRetries = 3
+	}
+
+	dependsOnJSON, err := marshalStringSlice("depends_on", t.DependsOn)
+	if err != nil {
+		return err
+	}
+	tagsJSON, err := marshalStringSlice("tags", t.Tags)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(
+		`INSERT INTO tasks (id, title, description, status, priority, source,
+		 project_id, parent_id, depth, alert_id, goal_id, depends_on, tags, prompt,
+		 result, error_log, executor_id, model, branch_name, pr_url, pr_status,
+		 diff_lines, files_changed, triage_analysis, triage_description, triage_title, plan, test_passed,
+		 retry_count, max_retries, crash_recovery, tokens_used, cost_usd, started_at, completed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Title, t.Description, t.Status, t.Priority, t.Source,
+		t.ProjectID, t.ParentID, t.Depth, t.AlertID, t.GoalID,
+		dependsOnJSON, tagsJSON, t.Prompt,
+		t.Result, t.ErrorLog, t.ExecutorID, t.Model, t.BranchName,
+		t.PRUrl, t.PRStatus, t.DiffLines, t.FilesChanged,
+		t.TriageAnalysis, t.TriageDescription, t.TriageTitle, t.Plan, t.TestPassed,
+		t.RetryCount, t.MaxRetries, t.CrashRecovery, t.TokensUsed, t.CostUSD,
+		t.StartedAt, t.CompletedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert task: %w", err)
+	}
+	return nil
+}
+
 // GetByID retrieves a task by its ID.
 func (s *TaskStore) GetByID(id string) (*Task, error) {
 	row := s.DB.QueryRow(TaskSelectSQL+" WHERE id = ?", id)
@@ -357,6 +412,7 @@ func (s *TaskStore) Retry(id string) error {
 		`UPDATE tasks SET status = ?, error_log = '', result = '',
 		 retry_count = retry_count + 1, started_at = '', completed_at = '',
 		 executor_id = '', branch_name = '', pr_url = '', pr_status = '',
+		 tokens_used = 0, cost_usd = 0,
 		 updated_at = CURRENT_TIMESTAMP
 		 WHERE id = ? AND status IN (?, ?) AND retry_count < max_retries`,
 		TaskReady, id, TaskFailed, TaskRetry,

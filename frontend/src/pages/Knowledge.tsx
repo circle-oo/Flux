@@ -325,11 +325,11 @@ function HealthTab() {
   const modeColor = (mode: string) => {
     switch (mode) {
       case 'full':
-        return 'text-emerald-400'
+        return 'text-emerald-500'
       case 'fallback':
-        return 'text-amber-400'
+        return 'text-amber-500'
       case 'degraded':
-        return 'text-rose-400'
+        return 'text-rose-500'
       default:
         return 'text-content-faint'
     }

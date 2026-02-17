@@ -42,12 +42,16 @@ type FailureAnalysis struct {
 
 // InsightsSummary holds overview metrics for a given period.
 type InsightsSummary struct {
-	TotalTasks     int     `json:"total_tasks"`
-	CompletedTasks int     `json:"completed_tasks"`
-	FailedTasks    int     `json:"failed_tasks"`
-	SuccessRate    float64 `json:"success_rate"`
-	TotalTokens    int     `json:"total_tokens"`
-	TotalCost      float64 `json:"total_cost"`
-	AvgLatencyMin  float64 `json:"avg_latency_min"`
-	ActiveProjects int     `json:"active_projects"`
+	TotalTasks      int     `json:"total_tasks"`
+	CompletedTasks  int     `json:"completed_tasks"`
+	FailedTasks     int     `json:"failed_tasks"`
+	SuccessRate     float64 `json:"success_rate"`
+	TotalTokens     int     `json:"total_tokens"`
+	TotalCost       float64 `json:"total_cost"`
+	TriageTokens    int     `json:"triage_tokens"`
+	TriageCost      float64 `json:"triage_cost"`
+	ExecutionTokens int     `json:"execution_tokens"`
+	ExecutionCost   float64 `json:"execution_cost"`
+	AvgLatencyMin   float64 `json:"avg_latency_min"`
+	ActiveProjects  int     `json:"active_projects"`
 }

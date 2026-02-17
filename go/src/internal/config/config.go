@@ -70,7 +70,46 @@ type GitHubConfig struct {
 }
 
 type ClaudeCodeConfig struct {
-	Plan string `yaml:"plan"`
+	Plan     string `yaml:"plan"`     // "auto" (default), "api", "max", "pro"
+	detected string // runtime-detected; set by DetectBilling()
+}
+
+// IsAPIBilling returns true if using API billing (pay-per-token).
+func (c *ClaudeCodeConfig) IsAPIBilling() bool {
+	return c.EffectivePlan() == "api"
+}
+
+// EffectivePlan returns the resolved plan name.
+// Priority: explicit config > runtime detection > default "api".
+func (c *ClaudeCodeConfig) EffectivePlan() string {
+	p := strings.ToLower(c.Plan)
+	if p != "" && p != "auto" {
+		return p
+	}
+	if c.detected != "" {
+		return c.detected
+	}
+	return "api"
+}
+
+// DetectBilling sets the runtime-detected plan based on whether cost was reported
+// by the SDK (not ccusage). SDK reports cost > 0 only on API billing.
+// ccusage always calculates cost regardless of plan, so we check SDK cost specifically.
+func (c *ClaudeCodeConfig) DetectBilling(costReported bool) {
+	p := strings.ToLower(c.Plan)
+	if p != "" && p != "auto" {
+		return
+	}
+	if costReported {
+		c.detected = "api"
+	} else {
+		c.detected = "plan"
+	}
+}
+
+// WindowDuration returns the usage reset window (Max/Pro reset every 5 hours).
+func (c *ClaudeCodeConfig) WindowDuration() time.Duration {
+	return 5 * time.Hour
 }
 
 type CCUsageConfig struct {
@@ -89,15 +128,16 @@ type PodsConfig struct {
 }
 
 type OrchestratorConfig struct {
-	CheckInterval    time.Duration `yaml:"check_interval"`
-	ScaleCooldown    time.Duration `yaml:"scale_cooldown"`
-	MaxTotalPods     int           `yaml:"max_total_pods"`
-	MinTriagerRatio  float64       `yaml:"min_triager_ratio"`
-	Pods             PodsConfig    `yaml:"pods"`
-	DailyCostBudget  float64       `yaml:"daily_cost_budget"` // USD; 0 = unlimited
-	WorkspaceBase    string        `yaml:"workspace_base"`
-	DailySummaryHour int           `yaml:"daily_summary_hour"`
-	Models           ModelsConfig  `yaml:"models"`
+	CheckInterval     time.Duration `yaml:"check_interval"`
+	ScaleCooldown     time.Duration `yaml:"scale_cooldown"`
+	MaxTotalPods      int           `yaml:"max_total_pods"`
+	MinTriagerRatio   float64       `yaml:"min_triager_ratio"`
+	Pods              PodsConfig    `yaml:"pods"`
+	DailyCostBudget   float64       `yaml:"daily_cost_budget"`   // USD; API billing mode only; 0 = unlimited
+	WindowTokenBudget int           `yaml:"window_token_budget"` // tokens per 5h window; plan mode only; 0 = unlimited
+	WorkspaceBase     string        `yaml:"workspace_base"`
+	DailySummaryHour  int           `yaml:"daily_summary_hour"`
+	Models            ModelsConfig  `yaml:"models"`
 }
 
 // ResolvePods returns a PodsConfig derived from the explicit Pods section if set,

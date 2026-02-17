@@ -27,11 +27,13 @@ var validTransitions = map[string][]string{
 
 // Manager coordinates task distribution and state transitions.
 type Manager struct {
-	db       *sql.DB
-	config   *config.Config
-	goals    *models.GoalStore
-	tasks    *models.TaskStore
-	projects *models.ProjectStore
+	db               *sql.DB
+	config           *config.Config
+	goals            *models.GoalStore
+	tasks            *models.TaskStore
+	projects         *models.ProjectStore
+	taskAttempts     *models.TaskAttemptStore
+	taskUsageEvents  *models.TaskUsageEventStore
 }
 
 // NewManager creates a new Manager instance.
@@ -40,11 +42,13 @@ func NewManager(db *sql.DB, cfg *config.Config) *Manager {
 		"database_path", cfg.Database.Path,
 		"max_total_pods", cfg.Orchestrator.MaxTotalPods)
 	return &Manager{
-		db:       db,
-		config:   cfg,
-		goals:    models.NewGoalStore(db),
-		tasks:    models.NewTaskStore(db),
-		projects: models.NewProjectStore(db),
+		db:              db,
+		config:          cfg,
+		goals:           models.NewGoalStore(db),
+		tasks:           models.NewTaskStore(db),
+		projects:        models.NewProjectStore(db),
+		taskAttempts:    models.NewTaskAttemptStore(db),
+		taskUsageEvents: models.NewTaskUsageEventStore(db),
 	}
 }
 
@@ -70,11 +74,12 @@ func (m *Manager) PopNextTask(podType string) (*models.Task, error) {
 		}
 		// Retry on SQLite busy errors
 		if isSQLiteBusy(err) {
+			backoffMs := 10 * (1 << uint(attempt))
 			slog.Warn("sqlite busy, retrying",
 				"attempt", attempt+1,
 				"max_retries", maxRetries,
-				"backoff_ms", 10*(attempt+1))
-			time.Sleep(time.Duration(10*(attempt+1)) * time.Millisecond)
+				"backoff_ms", backoffMs)
+			time.Sleep(time.Duration(backoffMs) * time.Millisecond)
 			continue
 		}
 		return nil, err
@@ -165,10 +170,24 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 			"retry_count", task.RetryCount,
 			"max_retries", task.MaxRetries)
 
+		// Reconcile usage from events before snapshotting, in case the task
+		// row has stale zeros (prior bug: ReportTaskDone passed 0,0).
+		if totalTokens, totalCost, err := m.taskUsageEvents.SumByTask(task.ID); err == nil && (totalTokens > 0 || totalCost > 0) {
+			task.TokensUsed = totalTokens
+			task.CostUSD = totalCost
+		}
+
+		// Snapshot the current attempt before clearing
+		if err := m.taskAttempts.SaveAttemptTx(tx, task.ID, task); err != nil {
+			slog.Error("failed to save attempt before auto-retry", "task_id", task.ID, "error", err)
+			// Non-fatal: continue with retry even if snapshot fails
+		}
+
 		// Increment retry count and clear previous failure data
 		_, err = tx.Exec(
 			`UPDATE tasks SET status = ?, retry_count = retry_count + 1,
 			 error_log = '', result = '', started_at = '', completed_at = '',
+			 tokens_used = 0, cost_usd = 0,
 			 updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 			models.TaskRetry, task.ID,
 		)
@@ -181,6 +200,8 @@ func (m *Manager) popNextTaskOnce(podType string) (*models.Task, error) {
 		task.Result = ""
 		task.StartedAt = ""
 		task.CompletedAt = ""
+		task.TokensUsed = 0
+		task.CostUSD = 0
 	}
 
 	// Transition to RUNNING and set started_at
@@ -367,7 +388,7 @@ func (m *Manager) PopNextPending(triagerID string) (*models.Task, error) {
 			return task, nil
 		}
 		if isSQLiteBusy(err) {
-			time.Sleep(time.Duration(10*(attempt+1)) * time.Millisecond)
+			time.Sleep(time.Duration(10*(1<<uint(attempt))) * time.Millisecond)
 			continue
 		}
 		return nil, err

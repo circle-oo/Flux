@@ -73,10 +73,10 @@ export default function Dashboard() {
   async function fetchInsights() {
     try {
       const [ins, sum] = await Promise.all([
-        api.getInsights(),
+        api.getInsights().catch(() => null),
         api.getInsightsSummary('24h').catch(() => null),
       ])
-      setInsights(ins)
+      if (ins) setInsights(ins)
       if (sum) setInsightSummary(sum)
     } catch (error) {
       console.error('Failed to fetch insights:', error)
@@ -282,7 +282,7 @@ function GoalHero({ goal, health, onClick }: { goal: Goal | null; health: Health
           </div>
           {goal ? (
             <div>
-              <h3 className="text-base font-semibold text-content mb-1.5 group-hover:text-primary-400 transition-colors">{goal.title}</h3>
+              <h3 className="text-base font-semibold text-content mb-1.5 group-hover:text-primary-600 transition-colors">{goal.title}</h3>
               <p className="text-sm text-content-muted mb-3 line-clamp-2">{goal.description}</p>
               {goal.priorities.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
@@ -306,34 +306,47 @@ function TokenUsageCard({ insights, insightSummary, navigate }: {
   insightSummary: InsightsSummary | null
   navigate: (path: string) => void
 }) {
+  // Prefer insightSummary (period-accurate) over basic insights (all-time aggregate)
+  const totalTokens = insightSummary?.total_tokens ?? insights?.total_tokens ?? null
+  const totalCost = insightSummary?.total_cost ?? insights?.total_cost ?? null
+
   return (
     <button
       type="button"
       className="card p-5 w-full text-left transition-all hover:border-line-hover"
       onClick={() => navigate('/insights')}
     >
-      <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-3">Token Usage</div>
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest">Token Usage</div>
+        {insightSummary && <span className="text-[10px] text-content-faint">Last 24h</span>}
+      </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
           <div className="text-[10px] text-content-faint uppercase tracking-wider mb-0.5">Total Tokens</div>
           <div className="text-lg font-bold text-cyan-500 tabular-nums">
-            {insights ? insights.total_tokens.toLocaleString() : '--'}
+            {totalTokens != null ? totalTokens.toLocaleString() : '--'}
           </div>
         </div>
         <div>
           <div className="text-[10px] text-content-faint uppercase tracking-wider mb-0.5">Total Cost</div>
           <div className="text-lg font-bold text-emerald-500 tabular-nums">
-            {insights ? `$${insights.total_cost.toFixed(2)}` : '--'}
+            {totalCost != null ? `$${totalCost.toFixed(2)}` : '--'}
           </div>
         </div>
       </div>
       {insightSummary && (
-        <div className="mt-3 pt-3 border-t border-line-subtle flex items-center justify-between">
-          <span className="text-[10px] text-content-faint uppercase tracking-wider">Success Rate</span>
-          <span className={`text-sm font-semibold ${
-            insightSummary.success_rate >= 80 ? 'text-emerald-500' :
-            insightSummary.success_rate >= 50 ? 'text-amber-500' : 'text-rose-500'
-          }`}>{insightSummary.success_rate.toFixed(1)}%</span>
+        <div className="mt-3 pt-3 border-t border-line-subtle grid grid-cols-2 gap-4">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-content-faint uppercase tracking-wider">Success Rate</span>
+            <span className={`text-sm font-semibold ${
+              insightSummary.success_rate >= 80 ? 'text-emerald-500' :
+              insightSummary.success_rate >= 50 ? 'text-amber-500' : 'text-rose-500'
+            }`}>{insightSummary.success_rate.toFixed(1)}%</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-content-faint uppercase tracking-wider">Tasks</span>
+            <span className="text-sm font-semibold text-content-secondary">{insightSummary.total_tasks}</span>
+          </div>
         </div>
       )}
     </button>

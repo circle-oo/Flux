@@ -27,7 +27,7 @@ export default function TaskListItem({ task, project, subtaskCount, isExpanded, 
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-sm font-medium text-content hover:text-primary-400 transition-colors truncate">
+            <h3 className="text-sm font-medium text-content hover:text-primary-600 transition-colors truncate">
               {task.triage_title || task.title}
             </h3>
             <StatusBadge status={task.status} />
@@ -59,7 +59,7 @@ export default function TaskListItem({ task, project, subtaskCount, isExpanded, 
             {task.model && <span className="text-content-faint">{task.model}</span>}
             {task.diff_lines ? <span>{task.diff_lines}L / {task.files_changed}F</span> : null}
             {task.pr_url && (
-              <a href={task.pr_url} target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:text-primary-300 transition-colors" onClick={(e) => e.stopPropagation()}>
+              <a href={task.pr_url} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:text-primary-500 transition-colors" onClick={(e) => e.stopPropagation()}>
                 PR {task.pr_status === 'MERGED' ? '(merged)' : ''}
               </a>
             )}
@@ -88,7 +88,7 @@ export default function TaskListItem({ task, project, subtaskCount, isExpanded, 
       </div>
 
       {task.error_log && (
-        <div className="mt-3 p-3 bg-rose-50 border border-rose-500/15 rounded-lg text-xs text-rose-300 line-clamp-3" role="alert">
+        <div className="mt-3 p-3 bg-rose-50 border border-rose-500/15 rounded-lg text-xs text-rose-600/80 line-clamp-3" role="alert">
           <strong className="text-rose-600">Error:</strong> {task.error_log}
         </div>
       )}

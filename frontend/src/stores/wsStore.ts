@@ -9,19 +9,21 @@ import { useGoalStore } from './goalStore'
 import { useTaskStore } from './taskStore'
 import { useLogStore } from './logStore'
 import { useDeployStore } from './deployStore'
+import { useInsightStore } from './insightStore'
 import type { UpdaterStatus } from '../lib/api'
 
-type EventType = 'TASK_UPDATED' | 'GOAL_CHANGED' | 'PR_STATUS' | 'POD_STATUS' | 'LOG_ENTRY' | 'DEPLOY_STATUS'
+type EventType = 'TASK_UPDATED' | 'GOAL_CHANGED' | 'PR_STATUS' | 'POD_STATUS' | 'LOG_ENTRY' | 'DEPLOY_STATUS' | 'USAGE_UPDATE'
 
 interface TaskUpdatedData { task_id: string; status: string }
 interface GoalChangedData { goal_id: string; status: string }
 interface PRStatusData { task_id: string; pr_status: string }
 interface PodStatusData { pod_id: string; status: string }
 interface DeployStatusData { updater: UpdaterStatus }
+interface UsageUpdateData { task_id: string; tokens: number; cost_usd: number; total_tokens: number; total_cost: number }
 
 interface LogEntryData { time: string; level: string; msg: string; attrs: Record<string, unknown> }
 
-type WSEventData = TaskUpdatedData | GoalChangedData | PRStatusData | PodStatusData | DeployStatusData | LogEntryData
+type WSEventData = TaskUpdatedData | GoalChangedData | PRStatusData | PodStatusData | DeployStatusData | LogEntryData | UsageUpdateData
 
 interface WSEvent {
   type: EventType
@@ -33,6 +35,7 @@ interface WSState {
   reconnecting: boolean
   socket: WebSocket | null
   taskUpdateCounter: number
+  usageByTask: Record<string, { tokens: number; cost: number }>
   connect: () => void
   disconnect: () => void
   send: (event: WSEvent) => void
@@ -48,6 +51,7 @@ export const useWSStore = create<WSState>((set, get) => ({
   reconnecting: false,
   socket: null,
   taskUpdateCounter: 0,
+  usageByTask: {},
 
   connect: () => {
     const { socket, connected } = get()
@@ -199,6 +203,25 @@ function handleEvent(event: WSEvent) {
       // Update deploy status when remote commit is fetched
       useDeployStore.getState().fetchStatus()
       break
+
+    case 'USAGE_UPDATE': {
+      const usage = event.data as UsageUpdateData
+      if (usage.task_id) {
+        useWSStore.setState((s) => ({
+          usageByTask: {
+            ...s.usageByTask,
+            [usage.task_id]: {
+              tokens: usage.total_tokens,
+              cost: usage.total_cost,
+            },
+          },
+        }))
+      }
+      // Refresh realtime chart and summary on usage events
+      useInsightStore.getState().fetchRealtimeUsage()
+      useInsightStore.getState().fetchSummary()
+      break
+    }
 
     default:
       console.warn('Unknown event type:', event.type)

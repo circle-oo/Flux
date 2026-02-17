@@ -31,6 +31,7 @@ func periodFilter(period string) string {
 }
 
 // GetSummary returns overview metrics for the given period.
+// Token/cost data is sourced from task_usage_events for accuracy.
 func (c *Collector) GetSummary(period string) (*InsightsSummary, error) {
 	pf := periodFilter(period)
 
@@ -40,8 +41,6 @@ func (c *Collector) GetSummary(period string) (*InsightsSummary, error) {
 			COUNT(*) as total_tasks,
 			COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END), 0) as completed,
 			COALESCE(SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END), 0) as failed,
-			COALESCE(SUM(tokens_used), 0) as total_tokens,
-			COALESCE(SUM(cost_usd), 0) as total_cost,
 			COALESCE(AVG(
 				CASE WHEN completed_at != '' AND started_at != ''
 				THEN (julianday(completed_at) - julianday(started_at)) * 1440
@@ -49,11 +48,26 @@ func (c *Collector) GetSummary(period string) (*InsightsSummary, error) {
 			), 0) as avg_latency_min
 		FROM tasks WHERE %s
 	`, pf)).Scan(
-		&s.TotalTasks, &s.CompletedTasks, &s.FailedTasks,
-		&s.TotalTokens, &s.TotalCost, &s.AvgLatencyMin,
+		&s.TotalTasks, &s.CompletedTasks, &s.FailedTasks, &s.AvgLatencyMin,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query summary: %w", err)
+	}
+
+	// Token/cost totals from usage events, broken down by triage vs execution
+	err = c.db.QueryRow(fmt.Sprintf(`
+		SELECT
+			COALESCE(SUM(tokens), 0),
+			COALESCE(SUM(cost_usd), 0),
+			COALESCE(SUM(CASE WHEN source = 'triager' THEN tokens ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN source = 'triager' THEN cost_usd ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN source != 'triager' THEN tokens ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN source != 'triager' THEN cost_usd ELSE 0 END), 0)
+		FROM task_usage_events
+		WHERE task_id IN (SELECT id FROM tasks WHERE %s)
+	`, pf)).Scan(&s.TotalTokens, &s.TotalCost, &s.TriageTokens, &s.TriageCost, &s.ExecutionTokens, &s.ExecutionCost)
+	if err != nil {
+		return nil, fmt.Errorf("query usage totals: %w", err)
 	}
 
 	if s.TotalTasks > 0 {
@@ -70,28 +84,46 @@ func (c *Collector) GetSummary(period string) (*InsightsSummary, error) {
 	return &s, nil
 }
 
-// GetTimeseries returns daily task metrics for the given period.
+// bucketExpr returns a SQL strftime expression for bucketing timestamps.
+// 24h uses hourly buckets; 7d/30d use daily buckets.
+func bucketExpr(period string) string {
+	if period == "24h" {
+		return "strftime('%Y-%m-%d %H:00', created_at)"
+	}
+	return "strftime('%Y-%m-%d', created_at)"
+}
+
+// GetTimeseries returns time-bucketed task metrics for the given period.
+// Uses hourly buckets for 24h, daily buckets for 7d/30d.
+// Token/cost data is sourced from task_usage_events for accuracy.
 func (c *Collector) GetTimeseries(period string) ([]DailyMetric, error) {
 	pf := periodFilter(period)
+	be := bucketExpr(period)
 
-	rows, err := c.db.Query(fmt.Sprintf(`
+	query := `
 		SELECT
-			strftime('%%Y-%%m-%%d', created_at) as date,
-			COALESCE(SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END), 0) as completed,
-			COALESCE(SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END), 0) as failed,
+			` + be + ` as date,
+			COALESCE(SUM(CASE WHEN t.status = 'COMPLETED' THEN 1 ELSE 0 END), 0) as completed,
+			COALESCE(SUM(CASE WHEN t.status = 'FAILED' THEN 1 ELSE 0 END), 0) as failed,
 			COUNT(*) as created,
-			COALESCE(SUM(tokens_used), 0) as tokens,
-			COALESCE(SUM(cost_usd), 0) as cost,
+			COALESCE(SUM(u.tokens), 0) as tokens,
+			COALESCE(SUM(u.cost), 0) as cost,
 			COALESCE(AVG(
-				CASE WHEN completed_at != '' AND started_at != ''
-				THEN (julianday(completed_at) - julianday(started_at)) * 1440
+				CASE WHEN t.completed_at != '' AND t.started_at != ''
+				THEN (julianday(t.completed_at) - julianday(t.started_at)) * 1440
 				ELSE NULL END
 			), 0) as avg_latency
-		FROM tasks
-		WHERE %s
-		GROUP BY strftime('%%Y-%%m-%%d', created_at)
+		FROM tasks t
+		LEFT JOIN (
+			SELECT task_id, SUM(tokens) as tokens, SUM(cost_usd) as cost
+			FROM task_usage_events GROUP BY task_id
+		) u ON t.id = u.task_id
+		WHERE ` + pf + `
+		GROUP BY ` + be + `
 		ORDER BY date ASC
-	`, pf))
+	`
+
+	rows, err := c.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("query timeseries: %w", err)
 	}

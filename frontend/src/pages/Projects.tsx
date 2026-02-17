@@ -240,7 +240,7 @@ export default function Projects() {
                         href={project.repo_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-primary-400 hover:text-primary-300 text-xs transition-colors"
+                        className="text-primary-600 hover:text-primary-500 text-xs transition-colors"
                       >
                         {project.repo_url}
                       </a>
@@ -297,7 +297,7 @@ export default function Projects() {
                 onClick={() => navigate(`/projects/${project.id}`)}
               >
                 <div className="flex items-center gap-2 mb-1.5">
-                  <h3 className="text-sm font-medium text-content group-hover:text-primary-400 transition-colors truncate">
+                  <h3 className="text-sm font-medium text-content group-hover:text-primary-600 transition-colors truncate">
                     {project.name}
                   </h3>
                   <span className="badge-success">Active</span>

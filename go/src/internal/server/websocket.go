@@ -18,6 +18,7 @@ const (
 	EventPRStatus    = "PR_STATUS"
 	EventPodStatus   = "POD_STATUS"
 	EventLogEntry    = "LOG_ENTRY"
+	EventUsageUpdate = "USAGE_UPDATE"
 )
 
 // Event represents a WebSocket event.
@@ -77,6 +78,9 @@ func (h *WebSocketHub) Run() {
 				cancel()
 				if err != nil {
 					slog.Debug("websocket write error, removing client", "error", err)
+					// removeClient acquires a write lock in a goroutine to avoid
+					// blocking the broadcast loop. Multiple concurrent removals are
+					// safe because removeClient checks membership before closing.
 					go h.removeClient(client)
 				}
 			}

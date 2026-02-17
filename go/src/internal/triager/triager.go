@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -268,7 +269,29 @@ func (t *Triager) triageTask(ctx context.Context, task *models.Task, model strin
 		},
 	}
 
-	agentResult, err := t.agentClient.ExecuteTask(triageCtx, req, nil)
+	agentResult, err := t.agentClient.ExecuteTask(triageCtx, req, func(event *fluxv1.TaskEvent) {
+		// Extract and report incremental usage from event metadata
+		if meta := event.GetMetadata(); meta != nil {
+			if costStr, ok := meta["cost_usd"]; ok && costStr != "" {
+				cost, _ := strconv.ParseFloat(costStr, 64)
+				tokens := 0
+				if tokensStr, ok := meta["total_tokens"]; ok {
+					tokens, _ = strconv.Atoi(tokensStr)
+				}
+				if cost > 0 || tokens > 0 {
+					go func() {
+						if err := t.client.ReportTaskUsage(task.ID, tokens, cost, "triager", map[string]string{
+							"session_id": meta["session_id"],
+							"num_turns":  meta["num_turns"],
+							"model":      model,
+						}); err != nil {
+							slog.Debug("failed to report triage usage event", "task_id", task.ID, "error", err)
+						}
+					}()
+				}
+			}
+		}
+	})
 	if err != nil {
 		return nil, fmt.Errorf("triage execution failed: %w", err)
 	}

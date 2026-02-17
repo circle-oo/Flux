@@ -71,8 +71,12 @@ func updateTaskFields(task *models.Task, f taskDoneFields) {
 	if f.ErrorLog != "" {
 		task.ErrorLog = f.ErrorLog
 	}
-	task.TokensUsed = f.TokensUsed
-	task.CostUSD = f.CostUSD
+	if f.TokensUsed > 0 {
+		task.TokensUsed = f.TokensUsed
+	}
+	if f.CostUSD > 0 {
+		task.CostUSD = f.CostUSD
+	}
 	if f.ExecutorID != "" {
 		task.ExecutorID = f.ExecutorID
 	}
@@ -176,10 +180,34 @@ func (s *Server) handleInternalTaskDone(w http.ResponseWriter, r *http.Request) 
 		PRStatus:     req.PRStatus,
 	})
 
+	// Record final usage event from ccusage reconciliation
+	if req.TokensUsed > 0 || req.CostUSD > 0 {
+		if err := s.taskUsageEvents.Record(&models.TaskUsageEvent{
+			TaskID:  id,
+			Source:  "ccusage",
+			Tokens:  req.TokensUsed,
+			CostUSD: req.CostUSD,
+		}); err != nil {
+			slog.Warn("failed to record usage event", "task_id", id, "error", err)
+		}
+	}
+
+	// Reconcile: aggregate real totals from usage events onto the task
+	// This ensures tokens_used/cost_usd on the task row always reflect
+	// the sum of all tracked usage events (executor streaming + ccusage).
+	if totalTokens, totalCost, err := s.taskUsageEvents.SumByTask(id); err == nil && (totalTokens > 0 || totalCost > 0) {
+		task.TokensUsed = totalTokens
+		task.CostUSD = totalCost
+	}
+
 	if err := s.tasks.Update(task); err != nil {
 		serverError(w, "failed to update task", "id", id, "error", err)
 		return
 	}
+
+	// Auto-detect billing mode from first task completion.
+	// If cost was reported (cost_usd > 0), it's API billing. Otherwise, it's a plan.
+	s.config.ClaudeCode.DetectBilling(task.CostUSD > 0 || req.CostUSD > 0)
 
 	slog.Info("internal API: task updated successfully", "task_id", id, "status", task.Status)
 
@@ -376,7 +404,15 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Create subtasks first to generate IDs, then validate dependencies
+	// Create all subtasks atomically within a transaction so partial failures
+	// don't leave orphaned subtasks in the database.
+	tx, err := s.db.Begin()
+	if err != nil {
+		serverError(w, "failed to begin transaction", "error", err)
+		return
+	}
+	defer tx.Rollback()
+
 	var created []*models.Task
 	subtaskIDMap := make(map[int]string) // index -> task ID mapping
 
@@ -392,13 +428,21 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 			GoalID:      parent.GoalID,
 			DependsOn:   sub.DependsOn,
 		}
-		if err := s.tasks.Create(task); err != nil {
+		if err := s.tasks.CreateTx(tx, task); err != nil {
 			serverError(w, "failed to create subtask", "parent_id", parent.ID, "error", err)
 			return
 		}
 		slog.Info("internal API: subtask created", "parent_id", parent.ID, "subtask_id", task.ID, "title", sub.Title)
 		created = append(created, task)
 		subtaskIDMap[i] = task.ID
+	}
+
+	// Commit the subtask creation transaction before applying dependencies.
+	// This ensures all subtasks are created atomically; dependency updates
+	// happen outside the transaction (recoverable if they fail).
+	if err := tx.Commit(); err != nil {
+		serverError(w, "failed to commit subtask transaction", "parent_id", req.ParentID, "error", err)
+		return
 	}
 
 	// Validate and apply dependencies if provided
@@ -575,6 +619,55 @@ func (s *Server) handleInternalGetModel(w http.ResponseWriter, r *http.Request) 
 	// No manager: fallback
 	slog.Info("internal API: model assigned (default)", "task_id", taskID, "model", models.DefaultModel)
 	writeJSON(w, http.StatusOK, map[string]string{"model": models.DefaultModel})
+}
+
+// handleInternalTaskUsage handles POST /internal/tasks/{id}/usage
+// Pod reports incremental usage data during execution.
+func (s *Server) handleInternalTaskUsage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req struct {
+		Tokens  int               `json:"tokens"`
+		CostUSD float64           `json:"cost_usd"`
+		Source  string            `json:"source"`
+		Meta    map[string]string `json:"meta"`
+	}
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidBody)
+		return
+	}
+
+	if req.Source == "" {
+		req.Source = "executor"
+	}
+
+	event := &models.TaskUsageEvent{
+		TaskID:  id,
+		Source:  req.Source,
+		Tokens:  req.Tokens,
+		CostUSD: req.CostUSD,
+		Meta:    req.Meta,
+	}
+
+	if err := s.taskUsageEvents.Record(event); err != nil {
+		serverError(w, "failed to record usage event", "task_id", id, "error", err)
+		return
+	}
+
+	// Get running totals for the broadcast
+	totalTokens, totalCost, _ := s.taskUsageEvents.SumByTask(id)
+
+	slog.Debug("internal API: usage event recorded", "task_id", id, "tokens", req.Tokens, "cost_usd", req.CostUSD, "source", req.Source)
+
+	s.ws.Broadcast(Event{Type: EventUsageUpdate, Data: map[string]interface{}{
+		"task_id":      id,
+		"tokens":       req.Tokens,
+		"cost_usd":     req.CostUSD,
+		"total_tokens": totalTokens,
+		"total_cost":   totalCost,
+	}})
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // handleInternalGetProject handles GET /internal/projects/{id}

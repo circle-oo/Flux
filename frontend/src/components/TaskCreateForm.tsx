@@ -14,7 +14,7 @@ const priorityPresets = [
 interface TaskCreateFormProps {
   projects: Project[]
   currentGoal: Goal | null
-  onSubmit: (task: { title: string; description: string; priority: number; project_id: string; goal_id?: string; tags?: string[] }) => Promise<void>
+  onSubmit: (task: { title: string; description: string; priority: number; project_id: string; goal_id?: string; tags?: string[]; prompt?: string }) => Promise<void>
   onCancel: () => void
 }
 
@@ -28,7 +28,7 @@ export default function TaskCreateForm({ projects, currentGoal, onSubmit, onCanc
     e.preventDefault(); setFormError(null)
     if (formData.description.length > MAX_DESCRIPTION_LENGTH) { setFormError(`Description exceeds maximum length of ${MAX_DESCRIPTION_LENGTH.toLocaleString()} characters`); return }
     try {
-      await onSubmit({ title: formData.title, description: formData.description, priority: formData.priority, project_id: formData.project_id, goal_id: formData.goal_id || undefined, tags: formData.tags.split(',').map((s) => s.trim()).filter(Boolean) })
+      await onSubmit({ title: formData.title, description: formData.description, priority: formData.priority, project_id: formData.project_id, goal_id: formData.goal_id || undefined, tags: formData.tags.split(',').map((s) => s.trim()).filter(Boolean), prompt: formData.prompt || undefined })
       setFormData({ title: '', description: '', priority: 40, project_id: '', goal_id: '', tags: '', prompt: '' }); setShowAdvanced(false); setFormError(null)
     } catch (error) { setFormError(error instanceof Error ? error.message : 'Failed to create task') }
   }

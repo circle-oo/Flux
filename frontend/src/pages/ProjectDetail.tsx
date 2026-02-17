@@ -103,7 +103,7 @@ export default function ProjectDetail() {
                   href={project.repo_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-primary-400 hover:text-primary-300 text-sm transition-colors"
+                  className="text-primary-600 hover:text-primary-500 text-sm transition-colors"
                 >
                   {project.repo_url}
                 </a>
@@ -148,7 +148,7 @@ export default function ProjectDetail() {
                 className="mt-2 p-3 rounded-lg bg-surface-hover hover:bg-surface-active border border-line transition-colors w-full text-left"
                 onClick={() => navigate('/goals')}
               >
-                <h4 className="text-sm font-semibold text-primary-400 mb-1">
+                <h4 className="text-sm font-semibold text-primary-600 mb-1">
                   {goal.title}
                 </h4>
                 <p className="text-xs text-content-muted line-clamp-2">
@@ -204,7 +204,7 @@ export default function ProjectDetail() {
           <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest">Tasks</div>
           <button
             onClick={() => navigate('/tasks?project_id=' + id)}
-            className="text-xs text-primary-400 hover:text-primary-300 transition-colors"
+            className="text-xs text-primary-600 hover:text-primary-500 transition-colors"
           >
             View all →
           </button>
@@ -244,7 +244,7 @@ export default function ProjectDetail() {
               <div className="text-center pt-2">
                 <button
                   onClick={() => navigate('/tasks?project_id=' + id)}
-                  className="text-xs text-primary-400 hover:text-primary-300 transition-colors"
+                  className="text-xs text-primary-600 hover:text-primary-500 transition-colors"
                 >
                   Show all {projectTasks.length} tasks →
                 </button>

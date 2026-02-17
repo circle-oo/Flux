@@ -4,10 +4,9 @@ import { useTaskStore } from '../stores/taskStore'
 import { useWSStore } from '../stores/wsStore'
 import { Task, api } from '../lib/api'
 import LoadingState from '../components/LoadingState'
-import MarkdownRenderer from '../components/MarkdownRenderer'
 import TaskHeader from '../components/TaskHeader'
 import TaskSubtasks from '../components/TaskSubtasks'
-import TaskOverview from '../components/TaskOverview'
+import TaskTriage from '../components/TaskTriage'
 import TaskExecution from '../components/TaskExecution'
 import TaskOutput from '../components/TaskOutput'
 import { useConfirm } from '../hooks/useConfirm'
@@ -25,7 +24,7 @@ export default function TaskDetail() {
   const [error, setError] = useState<string | null>(null)
   const [subtasksExpanded, setSubtasksExpanded] = useState(true)
   const [showDAG, setShowDAG] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'execution' | 'output'>('overview')
+  const [activeTab, setActiveTab] = useState<'triage' | 'execution' | 'output'>('triage')
   const { confirm, dialog } = useConfirm()
   const { toast } = useToast()
 
@@ -103,7 +102,7 @@ export default function TaskDetail() {
     return (
       <div className="p-5 sm:p-6 lg:p-8 animate-fade-in">
         <div className="text-rose-600 text-sm" role="alert">Error: {error || 'Task not found'}</div>
-        <button onClick={() => navigate('/tasks')} className="mt-4 text-primary-400 hover:text-primary-300 text-sm transition-colors">
+        <button onClick={() => navigate('/tasks')} className="mt-4 text-primary-600 hover:text-primary-500 text-sm transition-colors">
           Back to Tasks
         </button>
       </div>
@@ -111,7 +110,7 @@ export default function TaskDetail() {
   }
 
   const tabs = [
-    { id: 'overview' as const, label: 'Overview' },
+    { id: 'triage' as const, label: 'Triage' },
     { id: 'execution' as const, label: 'Execution' },
     { id: 'output' as const, label: 'Output' },
   ]
@@ -121,19 +120,6 @@ export default function TaskDetail() {
       {dialog}
 
       <TaskHeader task={task} onRetry={handleRetry} onCancel={handleCancel} />
-
-      {/* Triage Analysis */}
-      {task.triage_analysis && (
-        <div className="card p-5 ring-1 ring-cyan-200/60 animate-slide-up">
-          <div className="flex items-center gap-2 mb-3">
-            <h2 className="text-sm font-semibold text-cyan-600">Triage Analysis</h2>
-            <span className="badge-info">AI</span>
-          </div>
-          <div className="text-sm text-content-secondary leading-relaxed">
-            <MarkdownRenderer content={task.triage_analysis} />
-          </div>
-        </div>
-      )}
 
       <TaskSubtasks
         subtasks={subtasks}
@@ -151,7 +137,7 @@ export default function TaskDetail() {
             onClick={() => setActiveTab(tab.id)}
             className={`px-4 py-2.5 text-xs font-medium tracking-wide uppercase transition-all border-b-2 -mb-px ${
               activeTab === tab.id
-                ? 'text-primary-400 border-primary-400'
+                ? 'text-primary-600 border-primary-400'
                 : 'text-content-faint border-transparent hover:text-content-secondary hover:border-line-hover'
             }`}
           >
@@ -160,7 +146,7 @@ export default function TaskDetail() {
         ))}
       </div>
 
-      {activeTab === 'overview' && <TaskOverview task={task} />}
+      {activeTab === 'triage' && <TaskTriage task={task} />}
       {activeTab === 'execution' && <TaskExecution task={task} />}
       {activeTab === 'output' && <TaskOutput task={task} />}
     </div>

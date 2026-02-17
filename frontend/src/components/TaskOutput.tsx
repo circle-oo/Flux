@@ -10,7 +10,7 @@ export default function TaskOutput({ task }: TaskOutputProps) {
       {task.error_log && (
         <div className="card p-5 ring-1 ring-rose-200/60" role="alert">
           <h2 className="text-sm font-semibold text-rose-600 mb-3">Error</h2>
-          <pre className="text-xs text-rose-300/80 bg-rose-50/50 rounded-lg p-4 overflow-auto whitespace-pre-wrap border border-rose-500/10">{task.error_log}</pre>
+          <pre className="text-xs text-rose-600/80 bg-rose-50/50 rounded-lg p-4 overflow-auto whitespace-pre-wrap border border-rose-500/10">{task.error_log}</pre>
         </div>
       )}
       {task.result && (

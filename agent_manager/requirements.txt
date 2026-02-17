@@ -1,3 +1,4 @@
 grpcio>=1.60.0
 grpcio-tools>=1.60.0
 protobuf>=4.25.0
+claude-code-sdk>=0.0.25

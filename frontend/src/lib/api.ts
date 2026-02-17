@@ -143,6 +143,10 @@ export interface InsightsSummary {
   success_rate: number
   total_tokens: number
   total_cost: number
+  triage_tokens: number
+  triage_cost: number
+  execution_tokens: number
+  execution_cost: number
   avg_latency_min: number
   active_projects: number
 }
@@ -221,6 +225,116 @@ export interface DiskUsageResponse {
   available_gb: number
   total_gb: number
   used_pct: number
+}
+
+export interface TaskAttempt {
+  id: number
+  task_id: string
+  attempt: number
+  status: string
+  result: string
+  error_log: string
+  executor_id: string
+  model: string
+  branch_name: string
+  pr_url: string
+  pr_status: string
+  diff_lines: number
+  files_changed: number
+  test_passed: boolean | null
+  tokens_used: number
+  cost_usd: number
+  triage_analysis: string
+  triage_description: string
+  triage_title: string
+  started_at: string
+  completed_at: string
+  created_at: string
+}
+
+export interface TaskAttemptsResponse {
+  attempts: TaskAttempt[]
+  total_tokens_used: number
+  total_cost_usd: number
+}
+
+// Task usage event types
+export interface TaskUsageEvent {
+  id: number
+  task_id: string
+  source: string
+  tokens: number
+  cost_usd: number
+  meta: Record<string, string>
+  recorded_at: string
+}
+
+export interface TaskUsageResponse {
+  events: TaskUsageEvent[]
+  total_tokens: number
+  total_cost: number
+}
+
+export interface UsageTimePoint {
+  time: string
+  tokens: number
+  cost_usd: number
+  task_count: number
+}
+
+export interface CCUsageModelBreakdown {
+  modelName: string
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  cost: number
+}
+
+export interface CCUsageDaily {
+  date: string
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  totalTokens: number
+  totalCost: number
+  modelsUsed?: string[]
+  modelBreakdowns?: CCUsageModelBreakdown[]
+}
+
+export interface CCUsageBlock {
+  blockStart: string
+  blockEnd: string
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  totalTokens: number
+  totalCost: number
+  sessionCount: number
+  isActive: boolean
+  projectedTokens?: number
+  projectedCost?: number
+}
+
+export interface BillingInfo {
+  plan: string
+  configured_plan: string
+  is_api: boolean
+  show_cost: boolean
+  // ccusage data (always available, calculates cost regardless of plan)
+  ccusage_daily?: CCUsageDaily
+  ccusage_block?: CCUsageBlock
+  // API billing fields
+  daily_cost_budget?: number
+  daily_cost_used?: number
+  // Plan billing fields
+  window_token_budget?: number
+  window_hours?: number
+  window_tokens_used?: number
+  window_start?: string
+  window_end?: string
 }
 
 class APIClient {
@@ -368,6 +482,10 @@ class APIClient {
 
   async retryTask(id: string): Promise<Task> {
     return this.fetch(`/api/tasks/${id}/retry`, { method: 'POST' })
+  }
+
+  async getTaskAttempts(id: string): Promise<TaskAttemptsResponse> {
+    return this.fetch(`/api/tasks/${id}/attempts`)
   }
 
   async listSubtasks(parentId: string): Promise<Task[]> {
@@ -601,6 +719,17 @@ class APIClient {
     return data.orphans || []
   }
 
+  // Task Usage
+  async getTaskUsage(id: string): Promise<TaskUsageResponse> {
+    return this.fetch(`/api/tasks/${id}/usage`)
+  }
+
+  // Realtime Usage
+  async getInsightsUsageRealtime(minutes?: number): Promise<UsageTimePoint[]> {
+    const params = minutes ? `?minutes=${minutes}` : ''
+    return this.fetch(`/api/insights/usage-realtime${params}`)
+  }
+
   // Orchestrator
   async getOrchestratorStatus(): Promise<OrchestratorStatus> {
     return this.fetch('/api/orchestrator/status')
@@ -609,6 +738,11 @@ class APIClient {
   // Disk Usage
   async getDiskUsage(): Promise<DiskUsageResponse> {
     return this.fetch('/api/system/disk')
+  }
+
+  // Billing Info
+  async getBillingInfo(): Promise<BillingInfo> {
+    return this.fetch('/api/billing')
   }
 }
 

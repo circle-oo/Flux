@@ -102,7 +102,7 @@ function LogToolbar({
             className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-all ${
               filter.level === lvl
                 ? lvl === ''
-                  ? 'bg-primary-600/20 text-primary-400 ring-1 ring-primary-500/20'
+                  ? 'bg-primary-600/20 text-primary-600 ring-1 ring-primary-500/20'
                   : (levelColors[lvl] || 'bg-surface-active text-content')
                 : 'bg-surface-hover text-content-faint hover:bg-surface-active hover:text-content-muted'
             }`}

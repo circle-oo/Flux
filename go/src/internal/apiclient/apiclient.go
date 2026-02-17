@@ -271,6 +271,21 @@ func (c *Client) GetProject(projectID string) (*models.Project, error) {
 	return &project, nil
 }
 
+// ReportTaskUsage reports incremental usage data for a task.
+// POST /internal/tasks/{id}/usage
+func (c *Client) ReportTaskUsage(taskID string, tokens int, costUSD float64, source string, meta map[string]string) error {
+	path := fmt.Sprintf("/internal/tasks/%s/usage", taskID)
+	return c.postJSON(path, http.StatusOK,
+		map[string]interface{}{
+			"tokens":   tokens,
+			"cost_usd": costUSD,
+			"source":   source,
+			"meta":     meta,
+		},
+		nil,
+	)
+}
+
 // PostInternal sends a generic POST request to an internal endpoint.
 // This is a general-purpose helper for internal endpoints that don't need specialized handling.
 func (c *Client) PostInternal(path string, reqBody, respBody interface{}) error {
