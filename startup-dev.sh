@@ -40,6 +40,17 @@ if ! command -v python3 &>/dev/null; then
     exit 1
 fi
 
+# ── Generate protobuf stubs ──────────────────────────────────────────
+if command -v buf &>/dev/null; then
+    echo "Generating protobuf stubs..."
+    make proto 2>&1 | tail -1
+    echo ""
+else
+    echo "WARNING: buf not found, skipping proto generation."
+    echo "  Install with: brew install bufbuild/buf/buf"
+    echo ""
+fi
+
 # ── Build frontend ───────────────────────────────────────────────────
 if [ "$SKIP_FRONTEND" = false ]; then
     echo "Building frontend..."
