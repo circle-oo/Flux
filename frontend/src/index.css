@@ -170,6 +170,31 @@
    ═══════════════════════════════════════════ */
 
 @layer components {
+  .sidebar-shell {
+    overflow: hidden;
+    isolation: isolate;
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--c-surface) 94%, transparent) 0%,
+        color-mix(in srgb, var(--c-surface-alt) 88%, transparent) 100%
+      );
+    border-color: color-mix(in srgb, var(--c-border) 78%, transparent);
+    box-shadow: 0 20px 44px rgba(17, 24, 39, 0.16);
+  }
+
+  .sidebar-divider {
+    height: 1px;
+    margin: 0 10px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--c-border-subtle) 88%, transparent) 20%,
+      color-mix(in srgb, var(--c-border-subtle) 88%, transparent) 80%,
+      transparent 100%
+    );
+  }
+
   /* Glass card — light mode: white with subtle border + shadow */
   .card {
     @apply rounded-2xl border border-line transition-all duration-200;

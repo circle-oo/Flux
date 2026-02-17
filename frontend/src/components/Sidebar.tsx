@@ -60,14 +60,24 @@ function RailGlyph({ glyph }: { glyph: string }) {
   )
 }
 
-function TinyIconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+function TinyIconButton({
+  label,
+  onClick,
+  children,
+  className,
+}: {
+  label: string
+  onClick: () => void
+  children: React.ReactNode
+  className?: string
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="gi"
+      className={`gi ${className ?? ''}`}
       style={{
         width: 34,
         height: 34,
@@ -153,10 +163,10 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
       )}
 
       <aside
-        className={`gs fixed inset-y-0 left-0 z-40 m-0 lg:m-3 rounded-r-[22px] lg:rounded-[22px] transition-all duration-300 ${sidebarCollapsed ? 'w-[84px]' : 'w-[276px]'} ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        className={`gs sidebar-shell fixed inset-y-0 left-0 z-40 m-0 lg:m-3 rounded-r-[22px] lg:rounded-[22px] transition-all duration-300 ${sidebarCollapsed ? 'w-[84px]' : 'w-[276px]'} ${mobileMenuOpen ? 'translate-x-0 w-[88vw] max-w-[320px]' : '-translate-x-full lg:translate-x-0'}`}
       >
         <div className="h-full flex flex-col">
-          <div className={`px-3 pt-3 pb-4 border-b border-line-subtle ${sidebarCollapsed ? 'flex justify-center' : 'flex items-center justify-between'}`}>
+          <div className={`px-3 pt-3 pb-4 ${sidebarCollapsed ? 'flex justify-center' : 'flex items-center justify-between'}`}>
             <div className="flex items-center gap-3 min-w-0">
               <div
                 style={{
@@ -179,7 +189,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
               {!sidebarCollapsed && (
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-content truncate">Flux</div>
-                  <div className="text-[11px] text-content-faint truncate">Autonomous Engineering Control</div>
+                  <div className="text-[11px] text-content-faint truncate">Autonomous Engineering</div>
                 </div>
               )}
             </div>
@@ -206,11 +216,14 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
               <TinyIconButton
                 label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="hidden lg:inline-flex"
               >
                 {sidebarCollapsed ? '>>' : '<<'}
               </TinyIconButton>
             </div>
           </div>
+
+          <div className="sidebar-divider" />
 
           <nav className="px-2 py-2 overflow-y-auto flex-1 space-y-2">
             {groups.map((group) => {
@@ -218,7 +231,7 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
               return (
                 <div key={group.id} className="space-y-1">
                   {!sidebarCollapsed && (
-                    <div className="text-[10px] px-2.5 uppercase tracking-[0.12em] text-content-faint font-semibold">
+                    <div className="text-[10px] px-2.5 uppercase tracking-[0.12em] text-content-faint font-semibold mt-1">
                       {group.label}
                     </div>
                   )}
@@ -241,7 +254,9 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
             })}
           </nav>
 
-          <div className="border-t border-line-subtle px-2 py-2 space-y-2">
+          <div className="sidebar-divider" />
+
+          <div className="px-2 py-2 space-y-2">
             <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} px-1`}>
               {!sidebarCollapsed && (
                 <div className="flex items-center gap-2 text-[11px] text-content-faint uppercase tracking-wider font-medium">
