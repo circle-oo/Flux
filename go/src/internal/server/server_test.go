@@ -548,10 +548,16 @@ func TestTasks_Delete(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 
-	// Verify deleted
+	// Verify soft-deleted (archived)
 	rr = doAuthRequest(t, srv, "GET", "/api/tasks/"+id, nil)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 after delete, got %d", rr.Code)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 after soft delete, got %d", rr.Code)
+	}
+
+	var deleted map[string]interface{}
+	parseResponse(t, rr, &deleted)
+	if deleted["status"] != "ARCHIVED" {
+		t.Fatalf("expected ARCHIVED status after soft delete, got %v", deleted["status"])
 	}
 }
 
@@ -583,9 +589,9 @@ func TestProjects_Create(t *testing.T) {
 	srv, _ := setupTestServer(t)
 
 	rr := doAuthRequest(t, srv, "POST", "/api/projects", map[string]interface{}{
-		"name":      "flux",
-		"type":      "REPO",
-		"repo_url":  "https://github.com/circle-oo/flux",
+		"name":       "flux",
+		"type":       "REPO",
+		"repo_url":   "https://github.com/circle-oo/flux",
 		"tech_stack": []string{"go", "react"},
 	})
 
@@ -1172,6 +1178,18 @@ func TestInternal_CreateSubtasks_CircularDependency(t *testing.T) {
 	if !bytes.Contains(rr.Body.Bytes(), []byte("circular dependency")) {
 		t.Errorf("expected error message to mention circular dependency, got: %s", rr.Body.String())
 	}
+
+	// Verify created subtasks were cleaned up on dependency failure.
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks/"+parentID+"/subtasks", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 when listing subtasks after cleanup, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var listResp map[string]interface{}
+	parseResponse(t, rr, &listResp)
+	tasks := listResp["tasks"].([]interface{})
+	if len(tasks) != 0 {
+		t.Fatalf("expected 0 subtasks after dependency failure cleanup, got %d", len(tasks))
+	}
 }
 
 func TestInternal_CreateTask(t *testing.T) {
@@ -1519,17 +1537,17 @@ func TestTriageAnalysis_FullLifecycle(t *testing.T) {
 
 	// Step 5: Executor reports task done
 	body, _ = json.Marshal(map[string]interface{}{
-		"status":       "COMPLETED",
-		"result":       "task completed successfully",
-		"tokens_used":  1000,
-		"cost_usd":     0.05,
-		"executor_id":  "executor-01",
-		"model":        "opus",
-		"branch_name":  "flux/task-triage-lifecycle-001",
-		"diff_lines":   50,
+		"status":        "COMPLETED",
+		"result":        "task completed successfully",
+		"tokens_used":   1000,
+		"cost_usd":      0.05,
+		"executor_id":   "executor-01",
+		"model":         "opus",
+		"branch_name":   "flux/task-triage-lifecycle-001",
+		"diff_lines":    50,
 		"files_changed": 3,
-		"pr_url":       "https://github.com/test/repo/pull/1",
-		"pr_status":    "OPEN",
+		"pr_url":        "https://github.com/test/repo/pull/1",
+		"pr_status":     "OPEN",
 	})
 	req = httptest.NewRequest("POST", "/internal/tasks/triage-lifecycle-001/done", bytes.NewBuffer(body))
 	req.RemoteAddr = "127.0.0.1:12345"
