@@ -1,8 +1,16 @@
 # Flux
 
-Autonomous engineering system that runs 24/7. You set goals — Flux writes the code, runs tests, creates PRs, and merges them.
+**Autonomous engineering system that runs 24/7.** You set goals — Flux writes the code, runs tests, creates PRs, and merges them.
 
-Flux orchestrates [Claude Code](https://claude.ai/claude-code) agents in isolated Git worktrees, managing the full lifecycle from task assignment through PR merge. Built with Go + SQLite + React, it ships as a single binary.
+Flux orchestrates [Claude Code](https://claude.ai/claude-code) agents in isolated Git worktrees, managing the full software development lifecycle from task assignment through PR merge. Built with **Go + SQLite + React**, it ships as a **single binary** with no external dependencies.
+
+**What makes Flux different:**
+- Runs continuously without human intervention
+- Intelligent priority-based task queue (P1-P100 scale)
+- Automatic task triage and complexity assessment
+- Smart auto-merge for simple changes, manual review for complex ones
+- Built-in guardrails prevent runaway execution
+- Complete usage tracking and cost visibility
 
 ## How It Works
 
@@ -18,6 +26,26 @@ You (Operator)                        Flux (Autonomous)
 ```
 
 **Task lifecycle:** `PENDING → READY → RUNNING → COMPLETED → ARCHIVED` (failed tasks retry up to 3 times).
+
+## Key Features
+
+- **🤖 Fully Autonomous** — Set goals, Flux handles everything from code writing to PR merging
+- **🔒 Isolated Execution** — Each task runs in a dedicated Git worktree with guardrails (timeout, diff size, file limits)
+- **📊 Priority-Based Queue** — P1-P100 task system ensures critical work gets done first
+- **🧠 Intelligent Triaging** — Automatic task analysis, priority assignment, and complexity assessment
+- **🔄 Smart Auto-Merge** — Simple PRs merge automatically, complex ones request review
+- **📦 Single Binary** — Frontend embedded in Go binary, no separate deployments
+- **💾 Zero Configuration Database** — SQLite with automatic backups and WAL mode for reliability
+- **📈 Usage Tracking** — Built-in Claude Code usage monitoring and cost visibility
+- **🔧 Obsidian Integration** — Execution logs written to vault for long-term knowledge retention
+- **⚡ Auto-Update** — Pulls latest changes and rebuilds automatically when running 24/7
+
+## Tech Stack
+
+- **Backend:** Go 1.25.6, SQLite (modernc.org/sqlite - pure Go, no CGO)
+- **Frontend:** React 18, TypeScript 5.3, Tailwind CSS 3.4, Vite 5
+- **Automation:** Claude Code CLI (Max 5x plan recommended)
+- **Infrastructure:** Git worktrees, GitHub API, Discord webhooks
 
 ## Prerequisites
 
@@ -42,8 +70,11 @@ export DISCORD_WEBHOOK_URL='your-webhook-url'  # optional
 # 3. Run setup (installs deps, builds frontend, compiles binary)
 bash setup.sh
 
-# 4. Start Flux
-bash start-up.sh
+# 4. Start Flux (production mode)
+bash startup-prod.sh
+
+# Or for development (with auto-reload)
+bash startup-dev.sh
 ```
 
 Open **http://localhost:8080** and log in with your password.
@@ -142,6 +173,38 @@ The dashboard at `http://localhost:8080` provides:
 - **Logs** — real-time log viewer
 
 Access is password-protected. For network-level security, run behind [Tailscale](https://tailscale.com) — session tokens have no expiry when Tailscale handles auth.
+
+## Architecture
+
+Flux consists of four main components working together:
+
+### 1. Server (`internal/server`)
+- HTTP API and WebSocket server for the Web UI
+- Authentication and session management
+- Internal API for executor pods (localhost-only endpoints)
+- Real-time event streaming via WebSocket
+
+### 2. Manager (`internal/manager`)
+- Task queue management with priority-based scheduling
+- State machine for task lifecycle (PENDING → READY → RUNNING → COMPLETED → ARCHIVED)
+- Retry logic for failed tasks (up to 3 attempts)
+- Dependency resolution for blocked tasks
+
+### 3. Orchestrator (`internal/orchestrator`)
+- Spawns and manages executor pods (up to 5 concurrent by default)
+- Model selection (Sonnet vs Opus based on task priority and complexity)
+- Rate limit handling and pod scaling
+- Usage tracking and daily summary generation
+- Goal advisor for strategic planning
+
+### 4. Executor (`internal/executor`)
+- Runs Claude Code CLI in isolated Git worktrees
+- Enforces guardrails (30-min timeout, 2000-line diff limit, 20-file limit)
+- Handles task decomposition into subtasks
+- Creates GitHub PRs with auto-merge or review requests
+- Records execution logs to Obsidian vault
+
+**Data flow:** Server receives tasks → Manager queues by priority → Orchestrator assigns to executor pod → Executor creates worktree, runs Claude Code, creates PR → Manager updates task state → Server notifies Web UI via WebSocket.
 
 ## Project Structure
 
@@ -349,6 +412,33 @@ Implementation plans for each phase are in [`docs/phases/`](./docs/phases/).
 | 4 | Knowledge & Autonomy | Planned |
 
 Flux can autonomously pick up tasks, write code, run tests, create PRs, and merge them. Phase 3 will add auto-scaling, usage tracking, and daily summaries.
+
+## Contributing
+
+Contributions are welcome! Flux is in active development. To contribute:
+
+1. **Fork the repository** and create a feature branch
+2. **Follow existing conventions** — Go code style, React/TypeScript patterns, commit message format
+3. **Write tests** for new functionality (see `make test`)
+4. **Run the linter** before submitting (`make lint`)
+5. **Submit a PR** with a clear description of the changes
+
+For major features or architectural changes, open an issue first to discuss the approach.
+
+**Development workflow:**
+```bash
+# Backend development (hot reload)
+make dev
+
+# Frontend development (hot reload on :5173)
+make frontend-dev
+
+# Run tests
+make test
+
+# Build everything
+make build
+```
 
 ## License
 
