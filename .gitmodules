@@ -1,0 +1,4 @@
+[submodule "frontend/vitro"]
+	path = frontend/vitro
+	url = https://github.com/circle-oo/vitro.git
+	branch = main
