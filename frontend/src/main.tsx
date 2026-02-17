@@ -4,6 +4,8 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App.tsx'
 import { ToastProvider } from './components/Toast.tsx'
 import './stores/settingsStore'
+import '../vitro/src/styles/base.css'
+import '../vitro/src/styles/themes/flux.css'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

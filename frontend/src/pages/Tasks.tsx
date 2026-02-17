@@ -175,7 +175,7 @@ export default function Tasks() {
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]))
 
   return (
-    <div className="p-5 sm:p-6 lg:p-8 space-y-5 animate-fade-in">
+    <div className="page-shell space-y-5 animate-fade-in">
       {dialog}
       <PageHeader
         title="Tasks"

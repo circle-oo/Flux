@@ -57,7 +57,7 @@ export default function Goals() {
   }
 
   return (
-    <div className="p-5 sm:p-6 lg:p-8 space-y-6 animate-fade-in">
+    <div className="page-shell space-y-6 animate-fade-in">
       {dialog}
       <PageHeader
         title="Goals"

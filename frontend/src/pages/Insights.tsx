@@ -70,7 +70,7 @@ export default function Insights() {
 
   if (isLoading && !summary) {
     return (
-      <div className="p-5 sm:p-6 lg:p-8">
+      <div className="page-shell">
         <LoadingState message="Loading insights..." />
       </div>
     )
@@ -82,7 +82,7 @@ export default function Insights() {
   const rtTotalTasks = realtimeUsage.reduce((s, p) => s + p.task_count, 0)
 
   return (
-    <div className="p-5 sm:p-6 lg:p-8 space-y-6 animate-fade-in">
+    <div className="page-shell space-y-6 animate-fade-in">
       <PageHeader
         title="Insights"
         subtitle="Token usage and cost analysis"

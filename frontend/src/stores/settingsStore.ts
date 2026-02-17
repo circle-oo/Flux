@@ -2,10 +2,13 @@ import { create } from 'zustand'
 import { getCookie, setCookie } from '../lib/cookies'
 
 export type Theme = 'blue' | 'green'
+export type Mode = 'light' | 'dark'
 export type DashboardLayout = 'bento' | 'classic'
 
 interface Settings {
   theme: Theme
+  mode: Mode
+  mesh: boolean
   sidebarCollapsed: boolean
   dashboardLayout: DashboardLayout
   podRefreshInterval: number
@@ -13,6 +16,8 @@ interface Settings {
 
 interface SettingsState extends Settings {
   setTheme: (theme: Theme) => void
+  setMode: (mode: Mode) => void
+  setMesh: (mesh: boolean) => void
   setSidebarCollapsed: (collapsed: boolean) => void
   setDashboardLayout: (layout: DashboardLayout) => void
   setPodRefreshInterval: (seconds: number) => void
@@ -23,6 +28,8 @@ const COOKIE_NAME = 'flux-settings'
 
 const defaults: Settings = {
   theme: 'blue',
+  mode: 'light',
+  mesh: true,
   sidebarCollapsed: false,
   dashboardLayout: 'bento',
   podRefreshInterval: 10,
@@ -33,8 +40,12 @@ function loadSettings(): Settings {
   if (!raw) return { ...defaults }
   try {
     const parsed = JSON.parse(raw)
+    const mode = parsed.mode === 'dark' ? 'dark' : 'light'
+    const mesh = parsed.mesh !== false
     return {
       theme: parsed.theme === 'green' ? 'green' : 'blue',
+      mode,
+      mesh,
       sidebarCollapsed: parsed.sidebarCollapsed === true,
       dashboardLayout: parsed.dashboardLayout === 'classic' ? 'classic' : 'bento',
       podRefreshInterval: typeof parsed.podRefreshInterval === 'number' && parsed.podRefreshInterval >= 5
@@ -50,21 +61,36 @@ function saveSettings(settings: Settings): void {
   setCookie(COOKIE_NAME, JSON.stringify(settings))
 }
 
-function applyTheme(theme: Theme): void {
+function applyAppearance(theme: Theme, mode: Mode, mesh: boolean): void {
+  document.documentElement.setAttribute('data-svc', 'flux')
   document.documentElement.setAttribute('data-theme', theme)
+  document.documentElement.setAttribute('data-mode', mode)
+  document.documentElement.setAttribute('data-mesh', mesh ? 'on' : 'off')
 }
 
 // Load and apply on module init
 const initial = loadSettings()
-applyTheme(initial.theme)
+applyAppearance(initial.theme, initial.mode, initial.mesh)
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   ...initial,
 
   setTheme: (theme) => {
-    applyTheme(theme)
+    applyAppearance(theme, get().mode, get().mesh)
     set({ theme })
     saveSettings({ ...get(), theme })
+  },
+
+  setMode: (mode) => {
+    applyAppearance(get().theme, mode, get().mesh)
+    set({ mode })
+    saveSettings({ ...get(), mode })
+  },
+
+  setMesh: (mesh) => {
+    applyAppearance(get().theme, get().mode, mesh)
+    set({ mesh })
+    saveSettings({ ...get(), mesh })
   },
 
   setSidebarCollapsed: (sidebarCollapsed) => {
@@ -83,7 +109,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   updateSetting: (key, value) => {
-    if (key === 'theme') applyTheme(value as Theme)
+    if (key === 'theme') applyAppearance(value as Theme, get().mode, get().mesh)
+    if (key === 'mode') applyAppearance(get().theme, value as Mode, get().mesh)
+    if (key === 'mesh') applyAppearance(get().theme, get().mode, value as boolean)
     set({ [key]: value } as Partial<SettingsState>)
     saveSettings({ ...get(), [key]: value })
   },

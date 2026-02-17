@@ -42,7 +42,7 @@ export default function ProjectDetail() {
 
   if (loading) {
     return (
-      <div className="p-5 sm:p-6 lg:p-8">
+      <div className="page-shell">
         <LoadingState message="Loading project..." />
       </div>
     )
@@ -50,7 +50,7 @@ export default function ProjectDetail() {
 
   if (error || !project) {
     return (
-      <div className="p-5 sm:p-6 lg:p-8">
+      <div className="page-shell">
         <div className="card p-6">
           <h2 className="text-base font-semibold text-rose-600 mb-2">Error</h2>
           <p className="text-sm text-content-secondary">{error || 'Project not found'}</p>
@@ -67,7 +67,7 @@ export default function ProjectDetail() {
   const taskCounts = countByStatus(projectTasks)
 
   return (
-    <div className="p-5 sm:p-6 lg:p-8 space-y-6 animate-fade-in">
+    <div className="page-shell space-y-6 animate-fade-in">
       <div>
         <BackButton to="/projects" label="Back to Projects" />
         <div className="flex items-center gap-3 mb-2 mt-1">

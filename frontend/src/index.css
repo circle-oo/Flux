@@ -76,14 +76,69 @@
   --c-shadow: rgba(29, 185, 96, 0.08);
 }
 
+/* Dark mode overrides */
+[data-mode="dark"][data-theme="blue"] {
+  --c-page: #0A0F1E;
+  --c-surface: rgba(20, 26, 40, 0.74);
+  --c-surface-hover: rgba(28, 35, 52, 0.82);
+  --c-surface-active: rgba(37, 46, 67, 0.88);
+  --c-surface-alt: rgba(16, 22, 36, 0.88);
+  --c-surface-deep: rgba(12, 17, 30, 0.94);
+  --c-sidebar: rgba(16, 22, 34, 0.74);
+
+  --c-text: #E6EAF6;
+  --c-text-secondary: #AAB4CB;
+  --c-text-muted: #8591AE;
+  --c-text-faint: #66728F;
+  --c-text-inverted: #FFFFFF;
+
+  --c-border: rgba(255, 255, 255, 0.12);
+  --c-border-hover: rgba(255, 255, 255, 0.2);
+  --c-border-subtle: rgba(255, 255, 255, 0.07);
+
+  --c-selection: rgba(75, 110, 245, 0.24);
+  --c-scrollbar: rgba(255, 255, 255, 0.1);
+  --c-scrollbar-hover: rgba(255, 255, 255, 0.2);
+  --c-shadow: rgba(75, 110, 245, 0.24);
+}
+
+[data-mode="dark"][data-theme="green"] {
+  --c-page: #091A10;
+  --c-surface: rgba(17, 33, 22, 0.72);
+  --c-surface-hover: rgba(24, 44, 30, 0.82);
+  --c-surface-active: rgba(31, 54, 38, 0.88);
+  --c-surface-alt: rgba(11, 26, 17, 0.88);
+  --c-surface-deep: rgba(8, 20, 13, 0.94);
+  --c-sidebar: rgba(11, 28, 17, 0.74);
+
+  --c-text: #E2F2E6;
+  --c-text-secondary: #A7C5B0;
+  --c-text-muted: #80A58D;
+  --c-text-faint: #5D7E67;
+  --c-text-inverted: #FFFFFF;
+
+  --c-border: rgba(255, 255, 255, 0.12);
+  --c-border-hover: rgba(255, 255, 255, 0.2);
+  --c-border-subtle: rgba(255, 255, 255, 0.07);
+
+  --c-selection: rgba(29, 185, 96, 0.24);
+  --c-scrollbar: rgba(255, 255, 255, 0.1);
+  --c-scrollbar-hover: rgba(255, 255, 255, 0.2);
+  --c-shadow: rgba(29, 185, 96, 0.24);
+}
+
 /* ═══════════════════════════════════════════
    Base Layer
    ═══════════════════════════════════════════ */
 
 @layer base {
+  html {
+    background: var(--c-page);
+  }
+
   body {
     @apply antialiased font-sans;
-    background: var(--c-page);
+    background: transparent;
     color: var(--c-text);
   }
 
@@ -117,13 +172,16 @@
 @layer components {
   /* Glass card — light mode: white with subtle border + shadow */
   .card {
-    @apply bg-surface rounded-xl border border-line transition-all duration-200;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+    @apply rounded-2xl border border-line transition-all duration-200;
+    backdrop-filter: blur(24px) saturate(165%);
+    -webkit-backdrop-filter: blur(24px) saturate(165%);
+    background: var(--c-surface);
+    box-shadow: 0 10px 28px rgba(17, 24, 39, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   }
 
   .card:hover {
-    @apply border-line-hover;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
+    @apply border-line-hover -translate-y-[1px];
+    box-shadow: 0 16px 36px rgba(17, 24, 39, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.22);
   }
 
   /* ── Buttons ── */
@@ -243,6 +301,10 @@
    ═══════════════════════════════════════════ */
 
 @layer utilities {
+  .page-shell {
+    @apply w-full max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
   .touch-manipulation {
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;

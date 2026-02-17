@@ -33,7 +33,7 @@ export default function Pods() {
 
   if (loading) {
     return (
-      <div className="p-5 sm:p-6 lg:p-8">
+      <div className="page-shell">
         <LoadingState message="Loading pods..." />
       </div>
     )
@@ -44,7 +44,7 @@ export default function Pods() {
   const diskStatus = orchStatus?.disk_status
 
   return (
-    <div className="p-5 sm:p-6 lg:p-8 space-y-6 animate-fade-in">
+    <div className="page-shell space-y-6 animate-fade-in">
       <PageHeader
         title="Pods"
         subtitle="Executor and triager pod management"

@@ -198,7 +198,7 @@ export default function Logs() {
   }, [logs, filter])
 
   return (
-    <div className="p-5 sm:p-6 lg:p-8 flex flex-col h-full animate-fade-in">
+    <div className="page-shell flex flex-col h-full animate-fade-in">
       <PageHeader
         title="Logs"
         subtitle={`Real-time system logs (${filteredLogs.length} entries)`}

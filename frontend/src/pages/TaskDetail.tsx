@@ -96,11 +96,11 @@ export default function TaskDetail() {
     }
   }
 
-  if (loading) return <div className="p-5 sm:p-6 lg:p-8"><LoadingState message="Loading task..." /></div>
+  if (loading) return <div className="page-shell"><LoadingState message="Loading task..." /></div>
 
   if (error || !task) {
     return (
-      <div className="p-5 sm:p-6 lg:p-8 animate-fade-in">
+      <div className="page-shell animate-fade-in">
         <div className="text-rose-600 text-sm" role="alert">Error: {error || 'Task not found'}</div>
         <button onClick={() => navigate('/tasks')} className="mt-4 text-primary-600 hover:text-primary-500 text-sm transition-colors">
           Back to Tasks
@@ -116,7 +116,7 @@ export default function TaskDetail() {
   ]
 
   return (
-    <div className="p-5 sm:p-6 lg:p-8 space-y-5 max-w-4xl animate-fade-in">
+    <div className="page-shell space-y-5 max-w-4xl animate-fade-in">
       {dialog}
 
       <TaskHeader task={task} onRetry={handleRetry} onCancel={handleCancel} />

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useDeployStore } from '../stores/deployStore'
 import { useWSStore } from '../stores/wsStore'
-import { useSettingsStore, Theme, DashboardLayout } from '../stores/settingsStore'
+import { useSettingsStore, DashboardLayout } from '../stores/settingsStore'
 import { api, OrchestratorStatus } from '../lib/api'
 import { formatBytes, diskLevelColor } from '../lib/utils'
 import PageHeader from '../components/PageHeader'
@@ -18,7 +18,7 @@ export default function Settings() {
   const { status, isLoading, isDeploying, isCheckingRemote, error, fetchStatus, triggerDeploy, checkRemoteCommit } = useDeployStore()
   const wsConnected = useWSStore((s) => s.connected)
   const { confirm, dialog } = useConfirm()
-  const { theme, setTheme, dashboardLayout, setDashboardLayout } = useSettingsStore()
+  const { dashboardLayout, setDashboardLayout } = useSettingsStore()
   const [tab, setTab] = useState<SettingsTab>('appearance')
   const [config, setConfig] = useState<Record<string, unknown> | null>(null)
   const [configLoading, setConfigLoading] = useState(false)
@@ -79,7 +79,7 @@ export default function Settings() {
   ]
 
   return (
-    <div className="p-5 sm:p-6 lg:p-8 space-y-6 animate-fade-in">
+    <div className="page-shell space-y-6 animate-fade-in">
       {dialog}
       <PageHeader
         title="Settings"
@@ -106,32 +106,6 @@ export default function Settings() {
       {/* Appearance Tab */}
       {tab === 'appearance' && (
         <div className="space-y-6">
-          {/* Point Color */}
-          <div className="card p-5">
-            <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-4">Point Color</div>
-            <div className="flex gap-4">
-              {([
-                { id: 'blue' as Theme, label: 'Light Blue', color: 'bg-[#4B6EF5]', ring: 'ring-[#4B6EF5]' },
-                { id: 'green' as Theme, label: 'Sage Green', color: 'bg-[#1DB960]', ring: 'ring-[#1DB960]' },
-              ]).map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTheme(t.id)}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-all ${
-                    theme === t.id
-                      ? 'border-primary-500/40 bg-primary-50 ring-1 ring-primary-200/50'
-                      : 'border-line hover:border-line-hover hover:bg-surface-hover'
-                  }`}
-                >
-                  <div className={`w-6 h-6 rounded-full ${t.color} ${
-                    theme === t.id ? `ring-2 ${t.ring} ring-offset-2 ring-offset-surface` : ''
-                  }`} />
-                  <span className={`text-sm font-medium ${theme === t.id ? 'text-content' : 'text-content-muted'}`}>{t.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Dashboard Layout */}
           <div className="card p-5">
             <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-4">Dashboard Layout</div>
@@ -154,6 +128,13 @@ export default function Settings() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="card p-5">
+            <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-2">Theme Controls</div>
+            <p className="text-sm text-content-muted">
+              Theme mode and mesh animation are now controlled directly from the sidebar for faster context switching.
+            </p>
           </div>
 
           {/* Keyboard Shortcut Hint */}

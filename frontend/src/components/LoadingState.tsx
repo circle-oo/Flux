@@ -4,11 +4,30 @@ interface LoadingStateProps {
 
 export default function LoadingState({ message = 'Loading...' }: LoadingStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 gap-3">
-      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500/20 to-primary-300/20 flex items-center justify-center animate-pulse">
-        <div className="w-3 h-3 rounded-full bg-primary-400/60" />
+    <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+      <div
+        className="gi"
+        style={{
+          width: 46,
+          height: 46,
+          borderRadius: 14,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <span
+          style={{
+            width: 11,
+            height: 11,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, var(--p500), var(--p400))',
+            animation: 'vitro-loading 1.2s ease-in-out infinite',
+          }}
+        />
       </div>
       <div className="text-xs text-content-faint">{message}</div>
+      <style>{`@keyframes vitro-loading {0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.65);opacity:1}}`}</style>
     </div>
   )
 }
