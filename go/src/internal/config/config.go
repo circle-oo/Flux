@@ -32,7 +32,6 @@ type Config struct {
 }
 
 type TriagerConfig struct {
-	Enabled  bool   `yaml:"enabled"`
 	Model    string `yaml:"model"`
 	MaxTurns int    `yaml:"max_turns"`
 }

@@ -99,11 +99,6 @@ func (ps *PodScaler) scaleExecutors(desired int) error {
 func (ps *PodScaler) scaleTriagers(desired int) error {
 	current := len(ps.triagers)
 
-	if !ps.cfg.Triager.Enabled {
-		// If triager is disabled, don't create any
-		desired = 0
-	}
-
 	if desired == current {
 		return nil
 	}

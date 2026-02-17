@@ -98,4 +98,4 @@ echo "Press Ctrl+C to stop."
 echo ""
 
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
-exec go run -C go/src -ldflags "-X main.version=${VERSION}-dev" ./cmd/flux --config "$CONFIG"
+exec go run -C go/src -ldflags "-X main.version=${VERSION}-dev" ./cmd/flux --config "$CONFIG" --workdir "$SCRIPT_DIR"

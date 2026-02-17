@@ -25,7 +25,7 @@ clean:
 	mkdir -p go/src/web/dist && echo ".gitkeep" > go/src/web/dist/.gitkeep
 
 dev:
-	cd go/src && go run -ldflags "-X main.version=$(VERSION)" ./cmd/flux --config ../../config.yaml
+	go run -C go/src -ldflags "-X main.version=$(VERSION)" ./cmd/flux --config $(CURDIR)/config.yaml --workdir $(CURDIR)
 
 test:
 	cd go/src && go test ./...

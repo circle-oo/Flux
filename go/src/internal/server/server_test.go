@@ -455,14 +455,13 @@ func TestTasks_ListWithFilters(t *testing.T) {
 		t.Errorf("expected 2 tasks, got %d", len(tasks))
 	}
 
-	// List with status filter — both tasks should be READY
-	// (OPERATOR promoted immediately when triage is not configured, SYSTEM goes directly to READY)
-	rr = doAuthRequest(t, srv, "GET", "/api/tasks?status=READY", nil)
+	// List with status filter — both tasks stay PENDING (awaiting triage)
+	rr = doAuthRequest(t, srv, "GET", "/api/tasks?status=PENDING", nil)
 	var filteredResp map[string]interface{}
 	parseResponse(t, rr, &filteredResp)
-	readyTasks := filteredResp["tasks"].([]interface{})
-	if len(readyTasks) != 2 {
-		t.Errorf("expected 2 READY tasks, got %d", len(readyTasks))
+	pendingTasks := filteredResp["tasks"].([]interface{})
+	if len(pendingTasks) != 2 {
+		t.Errorf("expected 2 PENDING tasks, got %d", len(pendingTasks))
 	}
 
 	// List with pagination

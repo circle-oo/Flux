@@ -60,7 +60,6 @@ executor:
   max_files_changed: 20
 
 triager:
-  enabled: true
   model: "haiku"
   max_turns: 10
 

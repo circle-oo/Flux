@@ -176,12 +176,6 @@ func (s *TaskStore) Create(t *Task) error {
 		t.MaxRetries = 3
 	}
 
-	// Operator tasks stay PENDING until triage completes, then move to READY.
-	// Non-operator tasks (SYSTEM, SELF) go directly to READY.
-	if t.Source != TaskSourceOperator && t.Status == TaskPending {
-		t.Status = TaskReady
-	}
-
 	dependsOnJSON, err := marshalStringSlice("depends_on", t.DependsOn)
 	if err != nil {
 		return err

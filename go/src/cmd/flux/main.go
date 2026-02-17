@@ -38,7 +38,16 @@ var version = "dev"
 
 func main() {
 	configPath := flag.String("config", "", "path to config file")
+	workDir := flag.String("workdir", "", "working directory for relative paths (data, logs, workspaces)")
 	flag.Parse()
+
+	// Change to workdir so relative config paths resolve from project root
+	if *workDir != "" {
+		if err := os.Chdir(*workDir); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to chdir to %s: %v\n", *workDir, err)
+			os.Exit(1)
+		}
+	}
 
 	resolved := resolveConfigPath(*configPath)
 	cfg, err := config.Load(resolved)

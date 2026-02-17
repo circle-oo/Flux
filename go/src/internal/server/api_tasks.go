@@ -74,18 +74,8 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Broadcast task update via WebSocket
 	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 
-	// If triager is enabled, operator tasks stay PENDING for the triager to pick up.
-	// If triager is disabled but executor is configured, run inline triage.
-	// Otherwise, promote directly to READY.
-	if task.Source == models.TaskSourceOperator && task.Status == models.TaskPending {
-		if s.config.Triager.Enabled {
-			// Triager component will poll and pick up PENDING tasks
-			slog.Info("task created as PENDING, triager will process", "task_id", task.ID)
-		} else {
-			// No triage available — promote directly to READY
-			s.promoteToReady(task.ID)
-		}
-	}
+	// All tasks stay PENDING until a triager picks them up and promotes to READY.
+	slog.Info("task created as PENDING, awaiting triage", "task_id", task.ID)
 
 	writeJSON(w, http.StatusCreated, task)
 }
@@ -371,24 +361,6 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 		"today":     today,
 		"yesterday": yesterday,
 	})
-}
-
-// promoteToReady moves a PENDING task to READY status.
-// Takes taskID and re-reads from DB to avoid stale state.
-func (s *Server) promoteToReady(taskID string) {
-	task, err := s.tasks.GetByID(taskID)
-	if err != nil {
-		slog.Error("promoteToReady: failed to read task", "task_id", taskID, "error", err)
-		return
-	}
-	task.Status = models.TaskReady
-	task.ExecutorID = "" // Clear any claim
-	if err := s.tasks.Update(task); err != nil {
-		slog.Error("failed to promote task to READY", "task_id", task.ID, "error", err)
-		return
-	}
-	slog.Info("task promoted to READY", "task_id", task.ID)
-	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: task})
 }
 
 // handleRetryTask handles POST /api/tasks/{id}/retry
