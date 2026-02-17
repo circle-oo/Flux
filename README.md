@@ -17,15 +17,92 @@ Flux orchestrates [Claude Code](https://claude.ai/claude-code) agents in isolate
 ```
 You (Operator)                        Flux (Autonomous)
   │                                     │
-  ├── Create goals & tasks              ├── Manager picks next task by priority
-  ├── Review complex PRs                ├── Executor Pod spins up a Git worktree
-  ├── Approve new projects              ├── Claude Code writes & tests code
-  └── Get Discord notifications         ├── PR created on GitHub
+  ├── Create goals & tasks              ├── Triager analyzes PENDING tasks
+  ├── Review complex PRs                ├── Manager picks next READY task by priority
+  ├── Approve new projects              ├── Orchestrator assigns task to executor pod
+  └── Get Discord notifications         ├── Executor creates isolated Git worktree
+                                        ├── Claude Code writes code & runs tests
+                                        ├── Executor creates GitHub PR
                                         ├── Auto-merge (simple) or request review (complex)
-                                        └── Worktree cleaned up after merge
+                                        ├── Manager marks task COMPLETED
+                                        └── Worktree cleaned up automatically
 ```
 
-**Task lifecycle:** `PENDING → READY → RUNNING → COMPLETED → ARCHIVED` (failed tasks retry up to 3 times).
+### Complete Autonomous Workflow
+
+**Phase 1: Task Creation & Triage**
+```
+1. Operator creates task via Web UI
+   └─ Task state: PENDING
+
+2. Triager pod claims PENDING task
+   ├─ Runs Claude Code with triage prompt (2-min timeout)
+   ├─ Analyzes complexity, urgency, scope
+   ├─ Assigns priority (P1-P100 scale)
+   ├─ Recommends model (Opus vs Sonnet)
+   └─ Task state: PENDING → READY
+
+3. Manager enqueues READY task by priority
+   └─ Lower priority number = executed first
+```
+
+**Phase 2: Task Execution**
+```
+4. Orchestrator selects idle executor pod
+   ├─ Checks available pods (max 5 concurrent)
+   ├─ Selects model based on priority & complexity
+   └─ Assigns READY task to pod
+
+5. Executor pod processes task
+   ├─ Creates Git worktree: workspaces/trees/{project}--task-{id}/
+   ├─ Branches from main: flux--task-{id}
+   ├─ Injects task prompt + execution protocol
+   ├─ Runs Claude Code CLI with guardrails
+   │   • Max execution time: 30 minutes
+   │   • Max turns: 30
+   │   • Max diff lines: 2000
+   │   • Max files changed: 20
+   ├─ Claude Code writes code, tests, commits
+   ├─ Task state: READY → RUNNING
+   └─ Executor monitors for violations
+```
+
+**Phase 3: PR Creation & Review**
+```
+6. Executor creates GitHub PR
+   ├─ Pushes branch to GitHub: flux--task-{id}
+   ├─ Generates PR description from task summary
+   ├─ Decides merge strategy:
+   │   • Auto-merge: ≤3 files, <100 additions, system/maintenance work
+   │   • Request review: Complex changes or guardrail violations
+   └─ Records PR metadata in database
+
+7. Manager handles PR outcome
+   ├─ Auto-merged → Task state: COMPLETED
+   ├─ Review requested → Operator approves/requests changes
+   └─ Failed → Retry (up to 3 attempts) or mark FAILED
+```
+
+**Phase 4: Cleanup & Notification**
+```
+8. Executor cleanup
+   ├─ Records execution log to Obsidian vault
+   ├─ Removes worktree directory
+   └─ Pod returns to idle state
+
+9. Manager updates task state
+   ├─ COMPLETED → ARCHIVED (after cooldown)
+   └─ FAILED → ARCHIVED (after max retries)
+
+10. Notifier sends Discord webhook
+    ├─ Task completion notification
+    ├─ PR link for review (if needed)
+    └─ Daily summary (completed/failed/pending counts)
+```
+
+**Task lifecycle:** `PENDING → READY → RUNNING → COMPLETED → ARCHIVED`
+**Retry logic:** Failed tasks retry up to 3 times before marking as permanently FAILED
+**Crash recovery:** Tasks in RUNNING state on crash are automatically retried without consuming retry count
 
 ## Key Features
 
@@ -57,27 +134,62 @@ You (Operator)                        Flux (Autonomous)
 
 ## Quick Start
 
+Get Flux running in under 5 minutes:
+
 ```bash
-# 1. Clone
+# 1. Clone the repository
 git clone https://github.com/circle-oo/flux.git
 cd flux
 
-# 2. Set environment variables
-export FLUX_UI_PASSWORD='your-password'
-export GITHUB_TOKEN='your-github-token'
-export DISCORD_WEBHOOK_URL='your-webhook-url'  # optional
+# 2. Set required environment variables
+export FLUX_UI_PASSWORD='your-secure-password'
+export GITHUB_TOKEN='ghp_your_token_here'  # Needs 'repo' scope
+export DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'  # optional
 
 # 3. Run setup (installs deps, builds frontend, compiles binary)
 bash setup.sh
+# This creates config.yaml from template, installs Go deps, builds frontend
 
-# 4. Start Flux (production mode)
-bash startup-prod.sh
-
-# Or for development (with auto-reload)
-bash startup-dev.sh
+# 4. Start Flux
+bash startup-prod.sh    # Production mode (background)
+# Or for development:
+bash startup-dev.sh     # Dev mode (foreground, with logs)
 ```
 
-Open **http://localhost:8080** and log in with your password.
+**Access the Web UI:** Open **http://localhost:8080** and log in with your password.
+
+### First Steps After Setup
+
+1. **Create a goal** (Goals page)
+   ```
+   Example: "Build a personal task tracker with React and Go"
+   ```
+
+2. **Register a project** (Projects page)
+   - Project name: `my-project`
+   - Repository: `github.com/username/my-project`
+   - Approve the project after registration
+
+3. **Create your first task** (Tasks page)
+   ```
+   Title: "Initialize React + Go project structure"
+   Project: my-project
+   Priority: 20 (Operator task)
+   Description: "Set up a basic React frontend and Go backend structure"
+   ```
+
+4. **Watch Flux work autonomously**
+   - Triager analyzes the task (PENDING → READY)
+   - Executor pod picks it up (READY → RUNNING)
+   - Claude Code writes the code
+   - PR is created on GitHub
+   - Auto-merge or review request
+
+5. **Monitor progress**
+   - Dashboard: System overview, usage metrics
+   - Tasks: Real-time task status updates
+   - PRs: Review pending PRs
+   - Logs: Live execution logs
 
 ## Configuration
 
@@ -178,31 +290,110 @@ Access is password-protected. For network-level security, run behind [Tailscale]
 
 Flux consists of four main components working together:
 
-### 1. Server (`internal/server`)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                          WEB UI (React)                         │
+│                    http://localhost:8080                        │
+└────────────────────────┬────────────────────────────────────────┘
+                         │ HTTP/WebSocket
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      SERVER (HTTP API)                          │
+│  • Authentication & sessions                                    │
+│  • External API (/api/...) for Web UI                          │
+│  • Internal API (/internal/...) for executor pods              │
+│  • Real-time WebSocket event streaming                         │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    MANAGER (Task Queue)                         │
+│  • Priority-based scheduling (P1-P100)                         │
+│  • State machine: PENDING→READY→RUNNING→COMPLETED→ARCHIVED     │
+│  • Retry logic (up to 3 attempts)                              │
+│  • Dependency resolution for blocked tasks                      │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  ORCHESTRATOR (Pod Manager)                     │
+│  • Spawns executor pods (up to 5 concurrent)                   │
+│  • Model selection (Sonnet/Opus by priority)                   │
+│  • Rate limit handling & pod scaling                            │
+│  • Usage tracking & daily summaries                             │
+│  • Goal advisor for strategic planning                          │
+└────────────────────────┬────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    EXECUTOR POD (Worker)                        │
+│                                                                 │
+│  1. Claims READY task from Manager                              │
+│  2. Creates isolated Git worktree                               │
+│  3. Runs Claude Code CLI with task prompt                       │
+│  4. Enforces guardrails (timeout, diff size, file count)       │
+│  5. Commits changes & creates GitHub PR                         │
+│  6. Reports completion to Manager                               │
+│  7. Cleans up worktree                                          │
+│                                                                 │
+│  ┌─────────────────────────────────────────┐                  │
+│  │   Git Worktree (Isolated Workspace)     │                  │
+│  │   • Dedicated branch per task           │                  │
+│  │   • Full project checkout               │                  │
+│  │   • Claude Code CLI execution           │                  │
+│  │   • Automatic cleanup after PR          │                  │
+│  └─────────────────────────────────────────┘                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Component Details
+
+#### 1. Server (`internal/server`)
 - HTTP API and WebSocket server for the Web UI
 - Authentication and session management
-- Internal API for executor pods (localhost-only endpoints)
+- **External API** (`/api/...`) for Web UI operations
+- **Internal API** (`/internal/...`) for executor pods (localhost-only endpoints)
 - Real-time event streaming via WebSocket
 
-### 2. Manager (`internal/manager`)
+#### 2. Manager (`internal/manager`)
 - Task queue management with priority-based scheduling
 - State machine for task lifecycle (PENDING → READY → RUNNING → COMPLETED → ARCHIVED)
 - Retry logic for failed tasks (up to 3 attempts)
 - Dependency resolution for blocked tasks
 
-### 3. Orchestrator (`internal/orchestrator`)
+#### 3. Orchestrator (`internal/orchestrator`)
 - Spawns and manages executor pods (up to 5 concurrent by default)
 - Model selection (Sonnet vs Opus based on task priority and complexity)
 - Rate limit handling and pod scaling
 - Usage tracking and daily summary generation
 - Goal advisor for strategic planning
 
-### 4. Executor (`internal/executor`)
+#### 4. Executor (`internal/executor`)
 - Runs Claude Code CLI in isolated Git worktrees
 - Enforces guardrails (30-min timeout, 2000-line diff limit, 20-file limit)
 - Handles task decomposition into subtasks
 - Creates GitHub PRs with auto-merge or review requests
 - Records execution logs to Obsidian vault
+
+### Claude Code Integration
+
+The Executor interfaces with Claude Code CLI through a sophisticated execution pipeline:
+
+```bash
+# Executor spawns Claude Code CLI with task-specific prompt
+claude --yes --non-interactive \
+  --model opus-4.6 \
+  --max-turns 30 \
+  --working-directory /path/to/worktree \
+  < task_prompt.txt
+```
+
+**Key integration points:**
+1. **Prompt injection** — Task description, triage analysis, and execution protocol injected as system prompt
+2. **Guardrail enforcement** — Timeout, diff size, and file count limits enforced during execution
+3. **Output parsing** — Executor parses Claude Code output for task summary, decomposition decisions, and error detection
+4. **Worktree isolation** — Each task runs in a dedicated Git worktree to enable parallel execution without conflicts
+5. **Result extraction** — Task summary, file changes, and completion status extracted from execution logs
 
 **Data flow:** Server receives tasks → Manager queues by priority → Orchestrator assigns to executor pod → Executor creates worktree, runs Claude Code, creates PR → Manager updates task state → Server notifies Web UI via WebSocket.
 
@@ -245,24 +436,94 @@ flux/
 
 ## Development
 
+### Setup for Contributors
+
 ```bash
-# Run backend in dev mode (recompiles on start)
-make dev
+# 1. Fork and clone the repository
+git clone https://github.com/YOUR_USERNAME/flux.git
+cd flux
 
-# Run frontend dev server (hot reload on :5173)
-make frontend-dev
+# 2. Install prerequisites
+brew install go node  # macOS
+# Requires Go 1.22+ and Node.js 20+
 
-# Build everything (frontend + embed + Go binary)
-make build
+# 3. Run setup script
+bash setup.sh
+# This installs dependencies, builds frontend, compiles binary
 
-# Run tests
-make test
+# 4. Set environment variables
+export FLUX_UI_PASSWORD='dev-password'
+export GITHUB_TOKEN='your-github-token'
 
-# Lint
-make lint
+# 5. Start development servers
+make dev              # Backend (port 8080)
+make frontend-dev     # Frontend with hot reload (port 5173)
 ```
 
-The `make build` target compiles the React frontend, embeds it into the Go binary via `go:embed`, and produces a single executable at `go/bin/flux`.
+### Development Workflow
+
+```bash
+# Backend development (Go)
+make dev              # Starts server with live compilation
+make test             # Run Go tests
+make lint             # Run golangci-lint
+
+# Frontend development (React/TypeScript)
+cd frontend
+npm run dev           # Hot reload on port 5173
+npm run build         # Build for production
+npm run lint          # ESLint check
+
+# Full build (production binary)
+make build            # Compiles frontend + embeds in Go binary
+# Output: go/bin/flux (single binary with embedded UI)
+```
+
+### Development Iteration Cycle
+
+```
+1. Make Changes
+   ├─ Backend: Edit Go files in go/src/internal/
+   ├─ Frontend: Edit React files in frontend/src/
+   └─ Config: Update config.yaml.template if needed
+
+2. Test Locally
+   ├─ Backend: make test (Go unit tests)
+   ├─ Frontend: npm run lint (TypeScript checks)
+   └─ Integration: Start dev servers and test in browser
+
+3. Build & Verify
+   ├─ make build (produces single binary)
+   ├─ ./go/bin/flux (run production build locally)
+   └─ Verify at http://localhost:8080
+
+4. Submit PR
+   ├─ Create feature branch
+   ├─ Commit with clear message
+   ├─ Push to your fork
+   └─ Open PR with description of changes
+```
+
+**Build process details:**
+- `make build` runs `npm run build` in frontend/ (produces `dist/`)
+- Go's `go:embed` directive embeds `frontend/dist` into binary at compile time
+- Single binary includes both backend and frontend — no separate deployment needed
+
+### Testing Your Changes
+
+```bash
+# Unit tests
+make test                           # All Go tests
+go test ./go/src/internal/manager   # Specific package
+
+# Integration testing
+bash setup.sh                       # Full setup
+bash startup-dev.sh                 # Start in dev mode
+# Open http://localhost:8080 and test manually
+
+# Check database state
+sqlite3 data/flux.db "SELECT * FROM tasks LIMIT 5;"
+```
 
 ## Key Concepts
 
@@ -286,6 +547,38 @@ Work units with priority levels (P:1–100). Lower number = higher priority:
 ### Executor Pods
 
 Each pod runs an isolated pipeline: claim task → create worktree → run Claude Code → test → commit → create PR → report result. Guardrails prevent runaway execution (30-min timeout, 2000-line diff limit, 20-file limit).
+
+**Git Worktree Lifecycle:**
+
+```
+1. Task Assignment
+   ├─ Pod claims READY task from Manager via /internal/tasks/next
+   └─ Marks task as RUNNING via /internal/tasks/:id/started
+
+2. Worktree Creation
+   ├─ Creates isolated worktree: workspaces/trees/{project}--task-{id}/
+   ├─ Branches from main: flux--task-{id}
+   └─ Full project checkout (independent of other worktrees)
+
+3. Claude Code Execution
+   ├─ Injects task prompt with description, triage, and protocol
+   ├─ Runs Claude Code CLI with model, turn limit, and timeout
+   ├─ Claude Code writes code, runs tests, creates commits
+   └─ Executor monitors for guardrail violations
+
+4. PR Creation
+   ├─ Pushes branch to GitHub
+   ├─ Creates PR with auto-generated description
+   ├─ Decides: auto-merge (simple) or request review (complex)
+   └─ Records PR metadata in database
+
+5. Cleanup
+   ├─ Reports completion to Manager via /internal/tasks/:id/done
+   ├─ Removes worktree directory
+   └─ Pod returns to idle state, ready for next task
+```
+
+**Parallel execution:** Multiple pods can work simultaneously because each has its own worktree. This enables Flux to process 5+ tasks concurrently without Git conflicts.
 
 ### Model Selection
 
@@ -401,44 +694,216 @@ WebSocket: `GET /ws/events` for real-time event streaming.
 
 Implementation plans for each phase are in [`docs/phases/`](./docs/phases/).
 
+## FAQ
+
+**Q: How much does it cost to run Flux?**
+A: Cost depends on Claude Code usage. Max 5x plan is recommended (~$40/month subscription). Actual API costs vary by task complexity and execution time. The Web UI dashboard shows real-time usage tracking.
+
+**Q: Can I use Flux with private repositories?**
+A: Yes! Set `github.default_visibility: "private"` in `config.yaml`. Your GitHub token needs `repo` scope for private repositories.
+
+**Q: What happens if Flux crashes?**
+A: Flux has automatic crash recovery. On restart, tasks in RUNNING state are retried without consuming retry count. Database backups are taken daily (configurable).
+
+**Q: Can I run Flux on Linux or Windows?**
+A: Currently optimized for macOS (launchd support). Linux support is planned. Windows support requires WSL2 (untested).
+
+**Q: How do I limit Flux's activity to business hours?**
+A: Modify the launchd plist to include `StartCalendarInterval` constraints, or use `orchestrator.check_interval` to control execution frequency.
+
+**Q: Can Flux work with monorepos?**
+A: Yes! Each project can point to any repository. Git worktrees handle monorepos efficiently since they share the `.git` directory.
+
+**Q: What models does Flux support?**
+A: Flux uses Claude Sonnet 4.5 by default. Opus 4.6 is used for high-priority tasks (P1-P5) and complex work. Model selection is automatic based on task triage.
+
+**Q: How do I prevent Flux from merging PRs automatically?**
+A: Set stricter auto-merge criteria in the Executor's decision logic, or disable auto-merge entirely by requiring manual approval for all PRs (modify `executor/guardrails.go`).
+
+**Q: Can I add custom guardrails?**
+A: Yes! Edit `internal/executor/guardrails.go` and add your custom checks. Common additions: file path restrictions, dependency change detection, security scan integration.
+
+**Q: How do I integrate with Slack instead of Discord?**
+A: Implement a new notifier in `internal/notifier/slack.go` following the Discord pattern. PRs welcome!
+
 ## Current Status
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 1 | Foundation | Complete |
-| 2A | Core Pipeline | Complete |
-| 2B | Pipeline Hardening | Complete |
-| 3 | Orchestration | Planned |
-| 4 | Knowledge & Autonomy | Planned |
+| 1 | Foundation | ✅ Complete |
+| 2A | Core Pipeline | ✅ Complete |
+| 2B | Pipeline Hardening | ✅ Complete |
+| 3 | Orchestration | ✅ Complete |
+| 4 | Knowledge & Autonomy | 🚧 In Progress |
 
-Flux can autonomously pick up tasks, write code, run tests, create PRs, and merge them. Phase 3 will add auto-scaling, usage tracking, and daily summaries.
+**What works now:**
+- ✅ Autonomous task execution with Claude Code
+- ✅ Priority-based task queue (P1-P100)
+- ✅ Automatic task triage and complexity assessment
+- ✅ Git worktree isolation for parallel execution
+- ✅ Smart auto-merge for simple PRs
+- ✅ Guardrails (timeout, diff size, file count limits)
+- ✅ Usage tracking and cost visibility
+- ✅ Auto-update from git remote
+- ✅ Database backups and retention policies
+- ✅ Discord notifications
+- ✅ Obsidian vault integration for execution logs
+
+**Coming soon (Phase 4):**
+- 🚧 Knowledge graph for inter-task learning
+- 🚧 Adaptive priority adjustment based on outcomes
+- 🚧 Improved goal advisor with long-term planning
+- 🚧 Multi-repository project support
+
+## Troubleshooting
+
+### Common Issues
+
+**"Port 8080 already in use"**
+```bash
+# Find and kill process using port 8080
+lsof -ti:8080 | xargs kill -9
+# Or change port in config.yaml
+```
+
+**"Database is locked"**
+```bash
+# SQLite WAL mode should prevent this, but if it occurs:
+rm data/flux.db-wal data/flux.db-shm
+# Restart Flux
+```
+
+**"Worktree creation failed"**
+```bash
+# Clean up orphaned worktrees
+git worktree prune
+# Remove stale worktree directories
+rm -rf workspaces/trees/*
+```
+
+**"Claude Code command not found"**
+```bash
+# Ensure Claude Code is installed and in PATH
+which claude
+# If not found, install from https://claude.ai/claude-code
+```
+
+**"GitHub authentication failed"**
+```bash
+# Verify token has correct permissions:
+# - repo (full control)
+# - workflow (if needed for CI)
+# Test token:
+curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
+```
+
+**Executor pod stuck in RUNNING**
+```bash
+# Check if Claude Code process is alive
+ps aux | grep claude
+# Force cleanup via Web UI: Tasks → Cancel
+# Or restart Flux (crash recovery will reset state)
+```
+
+### Debugging
+
+```bash
+# Enable debug logging
+# Edit config.yaml:
+logging:
+  level: "debug"
+
+# View real-time logs
+tail -f logs/flux.log
+
+# Check database state
+sqlite3 data/flux.db
+> SELECT * FROM tasks WHERE state = 'RUNNING';
+> SELECT * FROM executor_pods;
+
+# Inspect worktree
+cd workspaces/trees/{project}--task-{id}/worktree
+git status
+git log
+```
 
 ## Contributing
 
 Contributions are welcome! Flux is in active development. To contribute:
 
+### Getting Started
+
 1. **Fork the repository** and create a feature branch
-2. **Follow existing conventions** — Go code style, React/TypeScript patterns, commit message format
-3. **Write tests** for new functionality (see `make test`)
-4. **Run the linter** before submitting (`make lint`)
-5. **Submit a PR** with a clear description of the changes
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
 
-For major features or architectural changes, open an issue first to discuss the approach.
+2. **Follow existing conventions**
+   - **Go:** Follow standard Go conventions (see `internal/` for patterns)
+   - **React/TypeScript:** Use functional components, TypeScript strict mode
+   - **Commit messages:** Clear, descriptive (e.g., "Add retry logic for failed tasks")
 
-**Development workflow:**
-```bash
-# Backend development (hot reload)
-make dev
+3. **Write tests** for new functionality
+   ```bash
+   # Go tests
+   go test ./go/src/internal/your_package -v
 
-# Frontend development (hot reload on :5173)
-make frontend-dev
+   # Frontend tests (if applicable)
+   cd frontend && npm run test
+   ```
 
-# Run tests
-make test
+4. **Run linters** before submitting
+   ```bash
+   make lint              # Go linter
+   cd frontend && npm run lint  # Frontend linter
+   ```
 
-# Build everything
-make build
-```
+5. **Submit a PR** with:
+   - Clear description of changes
+   - Screenshots (for UI changes)
+   - Test results
+   - Related issue number (if applicable)
+
+### Contribution Areas
+
+We especially welcome contributions in:
+
+- **Executor improvements** — Better guardrails, smarter decomposition logic
+- **Frontend enhancements** — UI/UX improvements, new visualizations
+- **Orchestrator features** — Advanced scheduling, better model selection
+- **Integrations** — Slack, Linear, Jira, other tools
+- **Documentation** — Tutorials, architecture guides, API docs
+- **Testing** — Integration tests, end-to-end tests
+
+### Architecture Guidelines
+
+- **Keep components isolated** — Each component (Server, Manager, Orchestrator, Executor) should have minimal coupling
+- **Use internal APIs** — Executor pods communicate via `/internal/` endpoints only
+- **Database access** — Only Manager and Server directly access SQLite; other components use APIs
+- **Configuration** — Add new config options to `config.yaml.template` with sensible defaults
+- **Error handling** — Log errors verbosely, return user-friendly messages via API
+
+### Code Review Process
+
+1. All PRs require review before merge
+2. Automated checks must pass (linting, tests)
+3. For major changes, expect architecture discussion
+4. Maintainers will provide feedback within 48 hours
+
+### Local Testing Checklist
+
+Before submitting your PR:
+
+- [ ] Backend compiles: `make build`
+- [ ] Tests pass: `make test`
+- [ ] Linter passes: `make lint`
+- [ ] Frontend builds: `cd frontend && npm run build`
+- [ ] Manual testing completed in dev environment
+- [ ] Database migrations included (if schema changed)
+- [ ] Config template updated (if new settings added)
+- [ ] Documentation updated (README, code comments)
+
+For major features or architectural changes, **open an issue first** to discuss the approach.
 
 ## License
 
