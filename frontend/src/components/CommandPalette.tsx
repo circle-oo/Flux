@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import { useTaskStore } from '../stores/taskStore'
 import { useProjectStore } from '../stores/projectStore'
 import { useGoalStore } from '../stores/goalStore'
-import { useSettingsStore } from '../stores/settingsStore'
 
 interface CommandRow {
   id: string
@@ -37,10 +36,6 @@ export default function CommandPalette() {
   const tasks = useTaskStore((s) => s.tasks)
   const projects = useProjectStore((s) => s.projects)
   const goals = useGoalStore((s) => s.goals)
-  const mode = useSettingsStore((s) => s.mode)
-  const mesh = useSettingsStore((s) => s.mesh)
-  const setMode = useSettingsStore((s) => s.setMode)
-  const setMesh = useSettingsStore((s) => s.setMesh)
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -81,20 +76,6 @@ export default function CommandPalette() {
       { id: 'nav-insights', label: 'Insights', action: () => go('/insights'), group: 'Navigation' },
       { id: 'nav-logs', label: 'Logs', action: () => go('/logs'), group: 'Navigation' },
       { id: 'nav-settings', label: 'Settings', action: () => go('/settings'), group: 'Navigation' },
-      {
-        id: 'sys-toggle-mode',
-        label: mode === 'light' ? 'Switch to dark mode' : 'Switch to light mode',
-        action: () => setMode(mode === 'light' ? 'dark' : 'light'),
-        meta: mode,
-        group: 'System',
-      },
-      {
-        id: 'sys-toggle-mesh',
-        label: mesh ? 'Disable mesh background' : 'Enable mesh background',
-        action: () => setMesh(!mesh),
-        meta: mesh ? 'mesh:on' : 'mesh:off',
-        group: 'System',
-      },
     ]
 
     tasks.slice(0, 20).forEach((t) => {
@@ -128,7 +109,7 @@ export default function CommandPalette() {
     })
 
     return out
-  }, [goals, mesh, mode, navigate, projects, setMesh, setMode, tasks])
+  }, [goals, navigate, projects, tasks])
 
   const grouped = useMemo(() => {
     const map = new Map<string, CommandRow[]>()

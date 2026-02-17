@@ -101,10 +101,6 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
   const { logout, authEnabled } = useAuthStore()
   const wsConnected = useWSStore((s) => s.connected)
   const {
-    mode,
-    mesh,
-    setMode,
-    setMesh,
     sidebarCollapsed,
     setSidebarCollapsed,
   } = useSettingsStore()
@@ -257,26 +253,10 @@ export default function Sidebar({ mobileMenuOpen, setMobileMenuOpen }: SidebarPr
           <div className="sidebar-divider" />
 
           <div className="px-2 py-2 space-y-2">
-            <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} px-1`}>
-              {!sidebarCollapsed && (
-                <div className="flex items-center gap-2 text-[11px] text-content-faint uppercase tracking-wider font-medium">
-                  <span className={`inline-block w-2 h-2 rounded-full ${wsConnected ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-                  <span>{wsConnected ? 'Live' : 'Offline'}</span>
-                </div>
-              )}
-              <div className="flex items-center gap-1">
-                <TinyIconButton
-                  label={mode === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-                  onClick={() => setMode(mode === 'light' ? 'dark' : 'light')}
-                >
-                  {mode === 'light' ? '☀︎' : '☾'}
-                </TinyIconButton>
-                <TinyIconButton
-                  label={mesh ? 'Disable mesh' : 'Enable mesh'}
-                  onClick={() => setMesh(!mesh)}
-                >
-                  ≋
-                </TinyIconButton>
+            <div className={`flex items-center px-1 ${sidebarCollapsed ? 'justify-center' : 'justify-start'}`}>
+              <div className="flex items-center gap-2 text-[11px] text-content-faint uppercase tracking-wider font-medium">
+                <span className={`inline-block w-2 h-2 rounded-full ${wsConnected ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                {!sidebarCollapsed && <span>{wsConnected ? 'Live' : 'Offline'}</span>}
               </div>
             </div>
 

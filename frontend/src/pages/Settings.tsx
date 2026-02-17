@@ -130,13 +130,6 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="card p-5">
-            <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-2">Theme Controls</div>
-            <p className="text-sm text-content-muted">
-              Theme mode and mesh animation are now controlled directly from the sidebar for faster context switching.
-            </p>
-          </div>
-
           {/* Keyboard Shortcut Hint */}
           <div className="card p-5">
             <div className="text-[11px] font-medium text-content-faint uppercase tracking-widest mb-3">Keyboard Shortcuts</div>
