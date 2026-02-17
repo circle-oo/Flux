@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
+	"github.com/circle-oo/flux/internal/ccusage"
 	"github.com/circle-oo/flux/internal/cleanup"
 	"github.com/circle-oo/flux/internal/config"
 	github_pkg "github.com/circle-oo/flux/internal/github"
@@ -41,12 +43,16 @@ type Server struct {
 	vault       vault.VaultReader
 	vaultWriter vault.VaultWriter
 
-	goals    *models.GoalStore
-	tasks    *models.TaskStore
-	projects *models.ProjectStore
-	alerts   *models.AlertStore
-	usage    *models.UsageStore
-	insights *insights.Collector
+	goals            *models.GoalStore
+	tasks            *models.TaskStore
+	taskAttempts     *models.TaskAttemptStore
+	taskUsageEvents  *models.TaskUsageEventStore
+	projects         *models.ProjectStore
+	alerts           *models.AlertStore
+	usage            *models.UsageStore
+	insights         *insights.Collector
+
+	billingCache *ccusage.BillingCache
 
 	orch         *orchestrator.Orchestrator
 	scaleManager *orchestrator.ScaleManager
@@ -77,16 +83,24 @@ func NewServer(deps ServerDeps) *Server {
 		notifier:    deps.Discord,
 		webFS:       deps.WebFS,
 		podRegistry: NewPodRegistry(),
-		goals:       models.NewGoalStore(deps.DB),
-		tasks:       models.NewTaskStore(deps.DB),
-		projects:    models.NewProjectStore(deps.DB),
-		alerts:      models.NewAlertStore(deps.DB),
-		usage:       models.NewUsageStore(deps.DB),
+		goals:           models.NewGoalStore(deps.DB),
+		tasks:           models.NewTaskStore(deps.DB),
+		taskAttempts:    models.NewTaskAttemptStore(deps.DB),
+		taskUsageEvents: models.NewTaskUsageEventStore(deps.DB),
+		projects:        models.NewProjectStore(deps.DB),
+		alerts:          models.NewAlertStore(deps.DB),
+		usage:           models.NewUsageStore(deps.DB),
 	}
 
 	s.auth = NewAuthManager(deps.Config.Server.Auth)
 	s.ws = NewWebSocketHub()
 	s.initInsights()
+
+	// Start background billing cache if ccusage is configured
+	if cmd := deps.Config.CCUsage.Command; cmd != "" {
+		s.billingCache = ccusage.NewBillingCache(cmd, deps.DB, 2*time.Minute)
+		s.billingCache.Start()
+	}
 
 	// Initialize vault if provided
 	if deps.Vault != nil {
@@ -118,6 +132,9 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully shuts down the HTTP server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.billingCache != nil {
+		s.billingCache.Stop()
+	}
 	s.ws.Stop()
 	return s.server.Shutdown(ctx)
 }
@@ -185,6 +202,9 @@ func (s *Server) setupRoutes() {
 	// Config endpoint (requires auth)
 	s.mux.Handle("GET /api/config", s.authMiddleware(http.HandlerFunc(s.handleConfig)))
 
+	// Billing info endpoint (requires auth)
+	s.mux.Handle("GET /api/billing", s.authMiddleware(http.HandlerFunc(s.handleBillingInfo)))
+
 	// Orchestrator & system status (requires auth)
 	s.mux.Handle("GET /api/orchestrator/status", s.authMiddleware(http.HandlerFunc(s.handleOrchestratorStatus)))
 	s.mux.Handle("GET /api/system/disk", s.authMiddleware(http.HandlerFunc(s.handleDiskUsage)))
@@ -197,6 +217,12 @@ func (s *Server) setupRoutes() {
 
 	// Archive endpoint (requires auth)
 	s.mux.Handle("POST /api/tasks/{id}/archive", s.authMiddleware(http.HandlerFunc(s.handleArchiveTask)))
+
+	// Task attempts API (requires auth)
+	s.mux.Handle("GET /api/tasks/{id}/attempts", s.authMiddleware(http.HandlerFunc(s.handleListAttempts)))
+
+	// Task usage API (requires auth)
+	s.mux.Handle("GET /api/tasks/{id}/usage", s.authMiddleware(http.HandlerFunc(s.handleListUsageEvents)))
 
 	// Subtasks API (requires auth)
 	s.mux.Handle("GET /api/tasks/{id}/subtasks", s.authMiddleware(http.HandlerFunc(s.handleListSubtasks)))
@@ -212,6 +238,7 @@ func (s *Server) setupRoutes() {
 	s.mux.Handle("POST /internal/subtasks", s.localhostOnly(http.HandlerFunc(s.handleInternalCreateSubtasks)))
 	s.mux.Handle("GET /internal/model/{task_id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetModel)))
 	s.mux.Handle("GET /internal/tasks/{id}/status", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskStatus)))
+	s.mux.Handle("POST /internal/tasks/{id}/usage", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskUsage)))
 	s.mux.Handle("GET /internal/projects/{id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetProject)))
 
 	// Knowledge API (requires auth)

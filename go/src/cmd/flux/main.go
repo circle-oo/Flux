@@ -205,10 +205,6 @@ func main() {
 	rlh := orchestrator.NewRateLimitHandler(database, discord, cfg.CCUsage.Command)
 	orch.SetRateLimitHandler(rlh)
 
-	// Usage collector
-	usageCollector := orchestrator.NewUsageCollector(database, cfg.CCUsage.Command)
-	orch.Register(usageCollector)
-
 	// Daily summary
 	dailySummary := orchestrator.NewDailySummary(database, discord, cfg.Orchestrator.DailySummaryHour)
 	orch.Register(dailySummary)
@@ -218,7 +214,7 @@ func main() {
 	orch.Register(goalAdvisor)
 
 	// Scale manager (with PodScaler for dynamic pod management)
-	scaleMgr := orchestrator.NewScaleManager(database, &cfg.Orchestrator, discord, podScaler)
+	scaleMgr := orchestrator.NewScaleManager(database, &cfg.Orchestrator, &cfg.ClaudeCode, discord, podScaler)
 	orch.Register(scaleMgr)
 
 	// Cleanup / Cleaner

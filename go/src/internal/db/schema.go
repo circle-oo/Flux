@@ -162,6 +162,54 @@ var schemaStatements = []string{
 
 	`CREATE INDEX IF NOT EXISTS idx_insights_snapshots_type_time ON insights_snapshots(type, recorded_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_insights_snapshots_period ON insights_snapshots(period, recorded_at)`,
+
+	`CREATE TABLE IF NOT EXISTS task_attempts (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		task_id         TEXT NOT NULL,
+		attempt         INTEGER NOT NULL,
+		status          TEXT NOT NULL,
+		result          TEXT DEFAULT '',
+		error_log       TEXT DEFAULT '',
+		executor_id     TEXT DEFAULT '',
+		model           TEXT DEFAULT '',
+		branch_name     TEXT DEFAULT '',
+		pr_url          TEXT DEFAULT '',
+		pr_status       TEXT DEFAULT '',
+		diff_lines      INTEGER DEFAULT 0,
+		files_changed   INTEGER DEFAULT 0,
+		test_passed     BOOLEAN DEFAULT NULL,
+		tokens_used     INTEGER DEFAULT 0,
+		cost_usd        REAL DEFAULT 0,
+		triage_analysis    TEXT DEFAULT '',
+		triage_description TEXT DEFAULT '',
+		triage_title       TEXT DEFAULT '',
+		started_at      DATETIME DEFAULT '',
+		completed_at    DATETIME DEFAULT '',
+		created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts(task_id, attempt)`,
+
+	`CREATE TABLE IF NOT EXISTS task_usage_events (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		task_id     TEXT NOT NULL,
+		source      TEXT NOT NULL DEFAULT 'executor',
+		tokens      INTEGER DEFAULT 0,
+		cost_usd    REAL DEFAULT 0,
+		meta        TEXT DEFAULT '{}',
+		recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_task_usage_events_task ON task_usage_events(task_id, recorded_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_task_usage_events_time ON task_usage_events(recorded_at)`,
+
+	`CREATE TABLE IF NOT EXISTS ccusage_cache (
+		key        TEXT PRIMARY KEY,
+		data       TEXT NOT NULL DEFAULT '{}',
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`,
 }
 
 // migrations are ALTER TABLE statements that add columns to existing tables.

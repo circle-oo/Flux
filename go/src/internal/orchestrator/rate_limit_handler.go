@@ -199,7 +199,10 @@ func queryCCUsageResetTime(cmd string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("empty ccusage command")
 	}
 
-	c := exec.Command(parts[0], parts[1:]...)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	c := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	var stdout, stderr bytes.Buffer
 	c.Stdout = &stdout
 	c.Stderr = &stderr

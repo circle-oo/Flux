@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,8 +35,9 @@ var (
 
 // ExecutionResult holds the outcome of a task execution via the Python Agent Manager.
 type ExecutionResult struct {
-	Output   string        // accumulated agent output
-	Duration time.Duration // total execution time
+	Output    string        // accumulated agent output
+	Duration  time.Duration // total execution time
+	SessionID string        // Claude Code session ID for ccusage tracking
 }
 
 // Executor is an autonomous execution pod that picks up tasks, delegates execution
@@ -182,10 +184,18 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		slog.Warn("failed to report task started", "task_id", task.ID, "error", err)
 	}
 
-	// Update pod status to busy
+	// Update pod status to busy; defer reset to idle so every exit path is covered.
 	if err := e.updatePodStatus("busy", task.ID, task.Title); err != nil {
 		slog.Warn("failed to update pod status", "id", e.id, "error", err)
 	}
+	defer func() {
+		e.mu.Lock()
+		e.currentTaskID = ""
+		e.mu.Unlock()
+		if err := e.updatePodStatus("idle", "", ""); err != nil {
+			slog.Warn("failed to update pod status to idle", "id", e.id, "error", err)
+		}
+	}()
 
 	// 4. Run execution
 	result, err := e.runExecution(ctx, task, project, worktreePath, model, systemPrompt)
@@ -199,25 +209,47 @@ func (e *Executor) executeOnce(ctx context.Context) {
 		return
 	}
 
-	// 5. Process results (build, test, commit, PR, usage)
-	if err := e.processResults(task, result, worktreePath, project); err != nil {
-		slog.Error("failed to process results", "task_id", task.ID, "error", err)
-		return
+	// 5. Process results (build, test, commit, PR)
+	processErr := e.processResults(task, result, worktreePath, project)
+	if processErr != nil {
+		slog.Error("failed to process results", "task_id", task.ID, "error", processErr)
 	}
 
-	// 6. Update pod status to idle after task completion
-	e.mu.Lock()
-	e.currentTaskID = ""
-	e.mu.Unlock()
-	if err := e.updatePodStatus("idle", "", ""); err != nil {
-		slog.Warn("failed to update pod status to idle", "id", e.id, "error", err)
+	// 6. Post-task hooks: ccusage + vault always run regardless of processResults outcome.
+	// Streaming events already provide usage data; ccusage reconciles asynchronously.
+	if e.config.CCUsage.Command != "" {
+		ccCmd := e.config.CCUsage.Command
+		taskID := task.ID
+		sessionID := result.SessionID
+		model := task.Model
+		go func() {
+			// Wait for JSONL logs to flush before querying ccusage.
+			time.Sleep(5 * time.Second)
+			t := &models.Task{ID: taskID}
+			_ = CollectTaskUsage(ccCmd, worktreePath, sessionID, t)
+			if t.TokensUsed > 0 || t.CostUSD > 0 {
+				meta := map[string]string{"model": model}
+				if sessionID != "" {
+					meta["session_id"] = sessionID
+				}
+				_ = e.manager.ReportTaskUsage(taskID, t.TokensUsed, t.CostUSD, "ccusage", meta)
+			}
+		}()
+	}
+
+	if e.vaultWriter != nil {
+		_ = RecordTaskCompletion(e.vaultWriter, task, result)
+	}
+
+	if processErr != nil {
+		return
 	}
 }
 
 // reportFailure reports a task as failed to the manager. Consolidates the
 // repeated pattern of ReportTaskDone + warn-on-error logging.
 func (e *Executor) reportFailure(taskID string, task *models.Task, output, reason string) {
-	if err := e.manager.ReportTaskDone(taskID, task, models.TaskFailed, output, reason, 0, 0); err != nil {
+	if err := e.manager.ReportTaskDone(taskID, task, models.TaskFailed, output, reason, task.TokensUsed, task.CostUSD); err != nil {
 		slog.Warn("failed to report task done", "task_id", taskID, "error", err)
 	}
 }
@@ -262,7 +294,30 @@ func (e *Executor) setupWorktree(task *models.Task, project *models.Project) (st
 		slog.Info("created dedicated worktree", "task_id", task.ID, "branch", task.BranchName, "path", worktreePath)
 	}
 
+	// Generate protobuf code if the worktree has a buf config (gitignored gen/ files).
+	e.generateProto(worktreePath)
+
 	return worktreePath, nil
+}
+
+// generateProto runs `buf generate proto` if buf.gen.yaml exists in the worktree.
+// Generated proto files are gitignored, so fresh worktrees need them regenerated.
+func (e *Executor) generateProto(worktreePath string) {
+	bufConfig := filepath.Join(worktreePath, "buf.gen.yaml")
+	if _, err := os.Stat(bufConfig); err != nil {
+		return // no buf config, nothing to generate
+	}
+	protoDir := filepath.Join(worktreePath, "proto")
+	if _, err := os.Stat(protoDir); err != nil {
+		return // no proto directory
+	}
+
+	slog.Info("generating protobuf code in worktree", "path", worktreePath)
+	cmd := exec.Command("buf", "generate", "proto")
+	cmd.Dir = worktreePath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		slog.Warn("buf generate failed in worktree", "error", err, "output", string(output))
+	}
 }
 
 // mapAgentType maps a task's tags to a Python agent type.
@@ -313,6 +368,28 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 
 	agentResult, err := e.agentClient.ExecuteTask(execCtx, req, func(event *fluxv1.TaskEvent) {
 		slog.Debug("agent event", "task_id", task.ID, "type", event.GetType().String())
+
+		// Extract and report incremental usage from event metadata
+		if meta := event.GetMetadata(); meta != nil {
+			if costStr, ok := meta["cost_usd"]; ok && costStr != "" {
+				cost, _ := strconv.ParseFloat(costStr, 64)
+				tokens := 0
+				if tokensStr, ok := meta["total_tokens"]; ok {
+					tokens, _ = strconv.Atoi(tokensStr)
+				}
+				if cost > 0 || tokens > 0 {
+					go func() {
+						if err := e.manager.ReportTaskUsage(task.ID, tokens, cost, "executor", map[string]string{
+							"session_id": meta["session_id"],
+							"num_turns":  meta["num_turns"],
+							"model":      model,
+						}); err != nil {
+							slog.Debug("failed to report usage event", "task_id", task.ID, "error", err)
+						}
+					}()
+				}
+			}
+		}
 	})
 
 	duration := time.Since(e.executionStartTime)
@@ -327,9 +404,15 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 		}
 	}
 
+	sessionID := ""
+	if agentResult != nil {
+		sessionID = agentResult.SessionID
+	}
+
 	result := &ExecutionResult{
-		Output:   outputText,
-		Duration: duration,
+		Output:    outputText,
+		Duration:  duration,
+		SessionID: sessionID,
 	}
 
 	if err != nil {
@@ -365,7 +448,7 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 			e.reportFailure(task.ID, task, result.Output, fmt.Sprintf("subtask creation failed: %v", err))
 			return nil, fmt.Errorf("subtask creation failed: %w", err)
 		}
-		if err := e.manager.ReportTaskDone(task.ID, task, models.TaskDecomposed, result.Output, "", 0, 0); err != nil {
+		if err := e.manager.ReportTaskDone(task.ID, task, models.TaskDecomposed, result.Output, "", task.TokensUsed, task.CostUSD); err != nil {
 			slog.Warn("failed to report task done", "task_id", task.ID, "error", err)
 		}
 		return nil, nil
@@ -405,7 +488,7 @@ func (e *Executor) processResults(task *models.Task, result *ExecutionResult, wo
 	if commitErr != nil {
 		if errors.Is(commitErr, ErrNoChanges) {
 			slog.Info("no changes produced, completing without PR", "task_id", task.ID)
-			if err := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "", 0, 0); err != nil {
+			if err := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "", task.TokensUsed, task.CostUSD); err != nil {
 				slog.Warn("failed to report task done", "task_id", task.ID, "error", err)
 			}
 			return nil
@@ -482,18 +565,8 @@ func (e *Executor) processResults(task *models.Task, result *ExecutionResult, wo
 			fmt.Sprintf("PR ready for review: %s — %s", prURL, task.Title))
 	}
 
-	// Collect usage
-	if e.config.CCUsage.Command != "" {
-		_ = CollectTaskUsage(e.config.CCUsage.Command, worktreePath, task)
-	}
-
-	// Record to vault
-	if e.vaultWriter != nil {
-		_ = RecordTaskCompletion(e.vaultWriter, task, result)
-	}
-
 	// Report completion
-	if err := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "", 0, 0); err != nil {
+	if err := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "", task.TokensUsed, task.CostUSD); err != nil {
 		slog.Warn("failed to report task done", "task_id", task.ID, "error", err)
 	}
 	slog.Info("task completed", "task_id", task.ID, "pr_url", prURL, "pr_status", task.PRStatus)
@@ -581,21 +654,21 @@ func runProjectCommand(worktreePath string, commands []projectCommand, commandTy
 	for _, cmd := range commands {
 		detectPath := filepath.Join(worktreePath, cmd.detectFile)
 		if _, err := os.Stat(detectPath); err == nil {
-			slog.Info(fmt.Sprintf("running %s", commandType), "command", cmd.command, "worktree", worktreePath)
+			slog.Info("running project command", "type", commandType, "command", cmd.command, "worktree", worktreePath)
 			execCmd := exec.Command(cmd.command, cmd.args...)
 			execCmd.Dir = worktreePath
 			output, err := execCmd.CombinedOutput()
 			if err != nil {
-				slog.Warn(fmt.Sprintf("%s failed", commandType), "command", cmd.command, "output", string(output), "error", err)
+				slog.Warn("project command failed", "type", commandType, "command", cmd.command, "output", string(output), "error", err)
 				return false, string(output)
 			}
-			slog.Info(fmt.Sprintf("%s passed", commandType), "command", cmd.command)
+			slog.Info("project command passed", "type", commandType, "command", cmd.command)
 			return true, ""
 		}
 	}
 
 	// No command detected
-	slog.Info(fmt.Sprintf("no %s system detected, skipping", commandType), "worktree", worktreePath)
+	slog.Info("no project command detected, skipping", "type", commandType, "worktree", worktreePath)
 	return true, ""
 }
 
@@ -779,7 +852,7 @@ func (e *Executor) registerPod() error {
 		// Calculate exponential backoff with jitter
 		delay := time.Duration(1<<uint(attempt-1)) * initialDelay
 		// Add jitter (0-25% of delay) to avoid thundering herd
-		jitter := time.Duration(float64(delay) * 0.25 * (0.5 + 0.5*float64(time.Now().UnixNano()%100)/100.0))
+		jitter := time.Duration(float64(delay) * 0.25 * rand.Float64())
 		totalDelay := delay + jitter
 
 		// Cap maximum delay at 10 seconds
