@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"text/template"
 	"time"
 
-	fluxv1 "github.com/circle-oo/flux/gen/flux/v1"
 	"github.com/circle-oo/flux/internal/agent"
 	"github.com/circle-oo/flux/internal/apiclient"
 	"github.com/circle-oo/flux/internal/config"
@@ -71,14 +71,14 @@ func (t *Triager) Run(ctx context.Context) {
 		t.mu.Unlock()
 	}()
 
-	// Smoke test: verify agent manager is reachable
-	if err := t.smokeTest(ctx); err != nil {
-		slog.Error("triager smoke test failed", "error", err, "component", component)
+	// Verify ANTHROPIC_API_KEY is available
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		slog.Error("triager cannot start: ANTHROPIC_API_KEY not set", "component", component)
 		_ = t.notifier.Send(notifier.LevelCritical,
-			fmt.Sprintf("Triager %s: smoke test failed: %v", t.id, err))
+			fmt.Sprintf("Triager %s: ANTHROPIC_API_KEY not set", t.id))
 		return
 	}
-	slog.Info("triager smoke test passed", "id", t.id, "component", component)
+	slog.Info("triager ready", "id", t.id, "component", component)
 
 	for {
 		select {
@@ -225,12 +225,8 @@ type triageJSON struct {
 	Description string `json:"description"`
 }
 
-// triageTask uses the Python Agent Manager to analyze a task via gRPC.
+// triageTask calls the Anthropic Messages API directly for text-only analysis.
 func (t *Triager) triageTask(ctx context.Context, task *models.Task, model string) (*TriageResult, error) {
-	if t.agentClient == nil {
-		return nil, fmt.Errorf("agent client not available")
-	}
-
 	// Fetch project context if available
 	var project *models.Project
 	var goal *models.Goal
@@ -252,37 +248,12 @@ func (t *Triager) triageTask(ctx context.Context, task *models.Task, model strin
 
 	prompt := buildTriagePromptWithContext(task, project, goal)
 
-	triageCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	triageCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	// Execute via gRPC — triage uses a lightweight agent type
-	req := &fluxv1.ExecuteTaskRequest{
-		TaskId:    task.ID,
-		AgentType: "qa", // triage is read-only analysis
-		Prompt:    prompt,
-		// WorkDir not needed for triage — it's pure analysis
-		WorkingDirectory: "/tmp",
-		MaxTurns:         1, // triage should complete in a single turn
-		Metadata: map[string]string{
-			"model": model,
-			"mode":  "triage",
-		},
-	}
-
-	var output strings.Builder
-	err := t.agentClient.ExecuteTask(triageCtx, req, func(event *fluxv1.TaskEvent) {
-		if event.GetContent() != "" {
-			output.WriteString(event.GetContent())
-		}
-	})
-
+	resultText, err := callAnthropicAPI(triageCtx, model, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("triage execution failed: %w", err)
-	}
-
-	resultText := strings.TrimSpace(output.String())
-	if resultText == "" {
-		return nil, fmt.Errorf("triage returned empty output")
+		return nil, fmt.Errorf("anthropic API call failed: %w", err)
 	}
 
 	slog.Info("triage raw response",
