@@ -1,4 +1,4 @@
-"""Flux Agent Manager — async gRPC server that executes tasks via Claude Agent SDK."""
+"""Flux Agent Manager — async gRPC server that executes tasks via Claude Code SDK."""
 
 import asyncio
 import logging
@@ -15,6 +15,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "gen", "python"
 
 from flux.v1 import flux_pb2, flux_pb2_grpc  # noqa: E402
 from google.protobuf.timestamp_pb2 import Timestamp  # noqa: E402
+
+from claude_code_sdk import query, ClaudeCodeOptions  # noqa: E402
+from claude_code_sdk.types import (  # noqa: E402
+    AssistantMessage,
+    ResultMessage,
+    TextBlock,
+    ToolUseBlock,
+    ToolResultBlock,
+)
 
 from agent_manager.config import get_agent_config, AGENT_CONFIGS  # noqa: E402
 
@@ -35,11 +44,7 @@ def _make_event(
     content: str,
     metadata: dict[str, str] | None = None,
 ) -> flux_pb2.ExecuteTaskResponse:
-    """Create an ExecuteTaskResponse wrapping a TaskEvent.
-
-    event_type is a short name like "ASSISTANT_MESSAGE" which gets prefixed
-    with TASK_EVENT_TYPE_ for the enum lookup.
-    """
+    """Create an ExecuteTaskResponse wrapping a TaskEvent."""
     enum_name = f"TASK_EVENT_TYPE_{event_type}"
     event = flux_pb2.TaskEvent(
         task_id=task_id,
@@ -54,7 +59,7 @@ def _make_event(
 
 
 class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
-    """Implements the AgentExecutionService for Go -> Python task execution."""
+    """Implements the AgentExecutionService using Claude Code SDK."""
 
     def __init__(self):
         self.cancellation_flags: dict[str, asyncio.Event] = {}
@@ -62,17 +67,12 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
         self.completed_count = 0
 
     async def ExecuteTask(self, request, context):
-        """Execute a task and stream events back.
-
-        TODO: Replace placeholder simulation with real Claude Agent SDK integration.
-        The placeholder streams realistic events so the gRPC pipeline can be tested
-        end-to-end before the SDK is wired in.
-        """
+        """Execute a task via Claude Code SDK and stream events back."""
         task_id = request.task_id
         agent_type = request.agent_type
         prompt = request.prompt
 
-        logger.info("ExecuteTask called: task_id=%s agent_type=%s", task_id, agent_type)
+        logger.info("ExecuteTask: task_id=%s agent_type=%s", task_id, agent_type)
 
         # Validate agent type
         try:
@@ -87,122 +87,76 @@ class AgentExecutionServicer(flux_pb2_grpc.AgentExecutionServiceServicer):
         self.active_agents[task_id] = agent_type
 
         try:
-            # --- PLACEHOLDER: Simulate Claude Agent SDK execution ---
-            # TODO: Replace this block with real Claude Agent SDK call:
-            #
-            #   from claude_agent_sdk import query, ClaudeAgentOptions
-            #   options = ClaudeAgentOptions(
-            #       system_prompt=request.system_prompt or agent_cfg.system_prompt,
-            #       allowed_tools=list(request.allowed_tools) or agent_cfg.allowed_tools,
-            #       max_turns=request.max_turns or agent_cfg.max_turns,
-            #       cwd=request.working_directory,
-            #       permission_mode="acceptEdits",
-            #   )
-            #   async for message in query(prompt=prompt, options=options):
-            #       if cancel_event.is_set():
-            #           yield _make_event(task_id, "TASK_ERROR", "Cancelled")
-            #           return
-            #       event = self._to_event(task_id, message)
-            #       if event:
-            #           yield event
-            #   yield _make_event(task_id, "TASK_COMPLETE", "Done")
+            yield _make_event(task_id, "PROGRESS", f"Starting {agent_type} agent")
 
-            # 1. Progress: starting
-            yield _make_event(
-                task_id,
-                "PROGRESS",
-                f"Starting {agent_type} agent for task {task_id}",
-                {"agent_type": agent_type, "max_turns": str(agent_cfg.max_turns)},
-            )
-            await asyncio.sleep(0.1)
-
-            if cancel_event.is_set():
-                yield _make_event(task_id, "TASK_ERROR", "Cancelled")
-                return
-
-            # 2. Assistant message: analyzing the prompt
-            yield _make_event(
-                task_id,
-                "ASSISTANT_MESSAGE",
-                f"I'll work on this task: {prompt[:200]}",
-            )
-            await asyncio.sleep(0.1)
-
-            if cancel_event.is_set():
-                yield _make_event(task_id, "TASK_ERROR", "Cancelled")
-                return
-
-            # 3. Tool use: simulated file read
-            yield _make_event(
-                task_id,
-                "TOOL_USE",
-                "Reading project structure...",
-                {"tool": "Glob", "pattern": "**/*.go"},
-            )
-            await asyncio.sleep(0.1)
-
-            if cancel_event.is_set():
-                yield _make_event(task_id, "TASK_ERROR", "Cancelled")
-                return
-
-            # 4. Tool result
-            yield _make_event(
-                task_id,
-                "TOOL_RESULT",
-                "Found 42 Go files in the project.",
-                {"tool": "Glob", "files_found": "42"},
-            )
-            await asyncio.sleep(0.1)
-
-            if cancel_event.is_set():
-                yield _make_event(task_id, "TASK_ERROR", "Cancelled")
-                return
-
-            # 5. Assistant message: summary
-            yield _make_event(
-                task_id,
-                "ASSISTANT_MESSAGE",
-                "I've analyzed the codebase and completed the requested changes.",
+            # Build SDK options
+            model = request.metadata.get("model") if request.metadata else None
+            options = ClaudeCodeOptions(
+                system_prompt=request.system_prompt or agent_cfg.system_prompt,
+                allowed_tools=list(request.allowed_tools) or agent_cfg.allowed_tools,
+                max_turns=request.max_turns or agent_cfg.max_turns,
+                cwd=request.working_directory or None,
+                model=model,
+                permission_mode="bypassPermissions",
             )
 
-            # 6. Task complete
-            yield _make_event(
-                task_id,
-                "TASK_COMPLETE",
-                "Task completed successfully (placeholder simulation).",
-                {"turns_used": "3"},
-            )
-            # --- END PLACEHOLDER ---
+            async for message in query(prompt=prompt, options=options):
+                if cancel_event.is_set():
+                    yield _make_event(task_id, "TASK_ERROR", "Cancelled by operator")
+                    return
 
+                # Convert SDK messages to gRPC events
+                for event in self._convert_message(task_id, message):
+                    yield event
+
+            yield _make_event(task_id, "TASK_COMPLETE", "Done")
             self.completed_count += 1
 
         except Exception as e:
             logger.exception("Error executing task %s", task_id)
-            yield _make_event(task_id, "TASK_ERROR", f"Internal error: {e}")
+            yield _make_event(task_id, "TASK_ERROR", f"Execution error: {e}")
         finally:
             self.cancellation_flags.pop(task_id, None)
             self.active_agents.pop(task_id, None)
 
-    def _to_event(self, task_id: str, message):
-        """Convert a Claude Agent SDK message to a TaskEvent response.
-
-        TODO: Wire this up once the real SDK is integrated. The SDK message
-        format has content blocks (text, tool_use) and result fields.
-        """
-        if hasattr(message, "content"):
+    def _convert_message(self, task_id: str, message):
+        """Convert a Claude Code SDK message to gRPC TaskEvent responses."""
+        if isinstance(message, AssistantMessage):
             for block in message.content:
-                if hasattr(block, "text"):
-                    return _make_event(task_id, "ASSISTANT_MESSAGE", block.text)
-                if hasattr(block, "name"):
-                    return _make_event(task_id, "TOOL_USE", block.name)
-        if hasattr(message, "result"):
-            return _make_event(task_id, "TOOL_RESULT", str(message.result))
-        return None
+                if isinstance(block, TextBlock):
+                    yield _make_event(task_id, "ASSISTANT_MESSAGE", block.text)
+                elif isinstance(block, ToolUseBlock):
+                    yield _make_event(
+                        task_id, "TOOL_USE", block.name,
+                        {"tool": block.name, "tool_use_id": block.id},
+                    )
+                elif isinstance(block, ToolResultBlock):
+                    content = block.content if isinstance(block.content, str) else str(block.content)
+                    yield _make_event(task_id, "TOOL_RESULT", content[:2000])
+        elif isinstance(message, ResultMessage):
+            meta = {
+                "num_turns": str(message.num_turns),
+                "session_id": message.session_id or "",
+            }
+            if message.total_cost_usd:
+                meta["cost_usd"] = f"{message.total_cost_usd:.4f}"
+            if message.is_error:
+                yield _make_event(
+                    task_id, "TASK_ERROR",
+                    message.result or "Agent returned error",
+                    meta,
+                )
+            else:
+                yield _make_event(
+                    task_id, "ASSISTANT_MESSAGE",
+                    message.result or "",
+                    meta,
+                )
 
     async def CancelAgentTask(self, request, context):
         """Cancel a running task."""
         task_id = request.task_id
-        logger.info("CancelAgentTask called: task_id=%s", task_id)
+        logger.info("CancelAgentTask: task_id=%s", task_id)
 
         flag = self.cancellation_flags.get(task_id)
         if flag:
@@ -240,7 +194,6 @@ async def serve(port: int = 50051) -> None:
     )
     server.add_insecure_port(f"[::]:{port}")
 
-    # Graceful shutdown on SIGTERM/SIGINT
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
 

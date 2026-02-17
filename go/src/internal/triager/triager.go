@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"text/template"
 	"time"
 
+	fluxv1 "github.com/circle-oo/flux/gen/flux/v1"
 	"github.com/circle-oo/flux/internal/agent"
 	"github.com/circle-oo/flux/internal/apiclient"
 	"github.com/circle-oo/flux/internal/config"
@@ -71,14 +71,14 @@ func (t *Triager) Run(ctx context.Context) {
 		t.mu.Unlock()
 	}()
 
-	// Verify ANTHROPIC_API_KEY is available
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		slog.Error("triager cannot start: ANTHROPIC_API_KEY not set", "component", component)
+	// Smoke test: verify agent manager is reachable
+	if err := t.smokeTest(ctx); err != nil {
+		slog.Error("triager smoke test failed", "error", err, "component", component)
 		_ = t.notifier.Send(notifier.LevelCritical,
-			fmt.Sprintf("Triager %s: ANTHROPIC_API_KEY not set", t.id))
+			fmt.Sprintf("Triager %s: smoke test failed: %v", t.id, err))
 		return
 	}
-	slog.Info("triager ready", "id", t.id, "component", component)
+	slog.Info("triager smoke test passed", "id", t.id, "component", component)
 
 	for {
 		select {
@@ -225,8 +225,12 @@ type triageJSON struct {
 	Description string `json:"description"`
 }
 
-// triageTask calls the Anthropic Messages API directly for text-only analysis.
+// triageTask uses the Agent Manager (Claude Code SDK) to analyze a task via gRPC.
 func (t *Triager) triageTask(ctx context.Context, task *models.Task, model string) (*TriageResult, error) {
+	if t.agentClient == nil {
+		return nil, fmt.Errorf("agent client not available")
+	}
+
 	// Fetch project context if available
 	var project *models.Project
 	var goal *models.Goal
@@ -248,12 +252,37 @@ func (t *Triager) triageTask(ctx context.Context, task *models.Task, model strin
 
 	prompt := buildTriagePromptWithContext(task, project, goal)
 
-	triageCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	triageCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
-	resultText, err := callAnthropicAPI(triageCtx, model, prompt)
+	// Execute via gRPC — triage uses a lightweight agent type with max_turns=1
+	req := &fluxv1.ExecuteTaskRequest{
+		TaskId:           task.ID,
+		AgentType:        "qa",
+		Prompt:           prompt,
+		WorkingDirectory: "/tmp",
+		MaxTurns:         1,
+		Metadata: map[string]string{
+			"model": model,
+			"mode":  "triage",
+		},
+	}
+
+	// Collect only ASSISTANT_MESSAGE content (skip PROGRESS, TOOL_USE, etc.)
+	var output strings.Builder
+	err := t.agentClient.ExecuteTask(triageCtx, req, func(event *fluxv1.TaskEvent) {
+		if event.GetType() == fluxv1.TaskEvent_TASK_EVENT_TYPE_ASSISTANT_MESSAGE {
+			output.WriteString(event.GetContent())
+		}
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("anthropic API call failed: %w", err)
+		return nil, fmt.Errorf("triage execution failed: %w", err)
+	}
+
+	resultText := strings.TrimSpace(output.String())
+	if resultText == "" {
+		return nil, fmt.Errorf("triage returned empty output")
 	}
 
 	slog.Info("triage raw response",
