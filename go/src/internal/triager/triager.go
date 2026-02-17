@@ -405,7 +405,61 @@ func extractJSON(text string) string {
 		text = text[start : end+1]
 	}
 
+	// Sanitize literal newlines/tabs inside JSON string values.
+	// The JSON spec forbids unescaped control chars in strings, but LLMs
+	// produce pretty-printed JSON with real newlines in string values.
+	text = sanitizeJSONStrings(text)
+
 	return strings.TrimSpace(text)
+}
+
+// sanitizeJSONStrings escapes literal newlines and tabs inside JSON string values.
+// Walks the text character by character, tracking whether we're inside a quoted string.
+func sanitizeJSONStrings(text string) string {
+	var buf strings.Builder
+	buf.Grow(len(text))
+
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+
+		if escaped {
+			buf.WriteByte(ch)
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' && inString {
+			buf.WriteByte(ch)
+			escaped = true
+			continue
+		}
+
+		if ch == '"' {
+			inString = !inString
+			buf.WriteByte(ch)
+			continue
+		}
+
+		if inString {
+			switch ch {
+			case '\n':
+				buf.WriteString(`\n`)
+			case '\r':
+				buf.WriteString(`\r`)
+			case '\t':
+				buf.WriteString(`\t`)
+			default:
+				buf.WriteByte(ch)
+			}
+		} else {
+			buf.WriteByte(ch)
+		}
+	}
+
+	return buf.String()
 }
 
 func parseTriageResponse(text string, task *models.Task) *TriageResult {
@@ -439,6 +493,10 @@ func parseTriageResponse(text string, task *models.Task) *TriageResult {
 			result.Description = tj.Description
 		}
 	} else {
+		slog.Warn("triage JSON parse failed, trying markdown fallback",
+			"task_id", task.ID, "error", err,
+			"extracted_prefix", truncate(extracted, 120))
+
 		// Fallback to markdown section parsing
 		sections := parseSections(text)
 
