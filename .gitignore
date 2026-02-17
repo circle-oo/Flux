@@ -3,6 +3,7 @@
 config.yaml
 
 # Go
+bin/
 go/bin/
 go/src/flux
 go/src/*.test
