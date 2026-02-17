@@ -53,9 +53,7 @@ func (s *Server) handleListGoals(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "failed to list goals", "error", err)
 		return
 	}
-	if goals == nil {
-		goals = []*models.Goal{}
-	}
+	goals = sliceOrEmpty(goals)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"goals": goals})
 }
 

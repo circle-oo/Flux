@@ -60,9 +60,7 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "failed to list projects", "error", err)
 		return
 	}
-	if projects == nil {
-		projects = []*models.Project{}
-	}
+	projects = sliceOrEmpty(projects)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"projects": projects})
 }
 

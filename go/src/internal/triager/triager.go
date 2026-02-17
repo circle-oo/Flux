@@ -122,14 +122,8 @@ func (t *Triager) processNext(ctx context.Context) {
 		return
 	}
 
-	t.mu.Lock()
-	t.currentTaskID = task.ID
-	t.mu.Unlock()
-	defer func() {
-		t.mu.Lock()
-		t.currentTaskID = ""
-		t.mu.Unlock()
-	}()
+	t.setCurrentTaskID(task.ID)
+	defer t.setCurrentTaskID("")
 
 	model := t.config.Triager.Model
 	if model == "" {
@@ -144,7 +138,7 @@ func (t *Triager) processNext(ctx context.Context) {
 		slog.Warn("triage failed, promoting with original description",
 			"task_id", task.ID, "title", task.Title, "error", err, "component", component)
 		// Even on failure, promote to READY so the task doesn't get stuck
-		if reportErr := t.client.ReportTriaged(task.ID, "", "", "", 0); reportErr != nil {
+		if reportErr := t.client.ReportTriaged(task.ID, "[triage failed - manual review recommended]", "", "", 0); reportErr != nil {
 			slog.Error("failed to promote task after triage failure",
 				"task_id", task.ID, "error", reportErr, "component", component)
 		}
@@ -272,24 +266,7 @@ func (t *Triager) triageTask(ctx context.Context, task *models.Task, model strin
 	agentResult, err := t.agentClient.ExecuteTask(triageCtx, req, func(event *fluxv1.TaskEvent) {
 		// Extract and report incremental usage from event metadata
 		if meta := event.GetMetadata(); meta != nil {
-			if costStr, ok := meta["cost_usd"]; ok && costStr != "" {
-				cost, _ := strconv.ParseFloat(costStr, 64)
-				tokens := 0
-				if tokensStr, ok := meta["total_tokens"]; ok {
-					tokens, _ = strconv.Atoi(tokensStr)
-				}
-				if cost > 0 || tokens > 0 {
-					go func() {
-						if err := t.client.ReportTaskUsage(task.ID, tokens, cost, "triager", map[string]string{
-							"session_id": meta["session_id"],
-							"num_turns":  meta["num_turns"],
-							"model":      model,
-						}); err != nil {
-							slog.Debug("failed to report triage usage event", "task_id", task.ID, "error", err)
-						}
-					}()
-				}
-			}
+			t.reportUsageFromEvent(task.ID, model, meta)
 		}
 	})
 	if err != nil {
@@ -319,6 +296,38 @@ func (t *Triager) triageTask(ctx context.Context, task *models.Task, model strin
 
 	triage := parseTriageResponse(resultText, task)
 	return triage, nil
+}
+
+func (t *Triager) setCurrentTaskID(taskID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.currentTaskID = taskID
+}
+
+func (t *Triager) reportUsageFromEvent(taskID, model string, meta map[string]string) {
+	costStr, ok := meta["cost_usd"]
+	if !ok || costStr == "" {
+		return
+	}
+
+	cost, _ := strconv.ParseFloat(costStr, 64)
+	tokens := 0
+	if tokensStr, ok := meta["total_tokens"]; ok {
+		tokens, _ = strconv.Atoi(tokensStr)
+	}
+	if cost <= 0 && tokens <= 0 {
+		return
+	}
+
+	go func() {
+		if err := t.client.ReportTaskUsage(taskID, tokens, cost, "triager", map[string]string{
+			"session_id": meta["session_id"],
+			"num_turns":  meta["num_turns"],
+			"model":      model,
+		}); err != nil {
+			slog.Debug("failed to report triage usage event", "task_id", taskID, "error", err)
+		}
+	}()
 }
 
 func buildTriagePrompt(task *models.Task) string {
@@ -505,48 +514,19 @@ func parseTriageResponse(text string, task *models.Task) *TriageResult {
 
 	// Try JSON first, extracting from narrative/code-fenced wrapping
 	extracted := extractJSON(text)
-	var tj triageJSON
-	if err := json.Unmarshal([]byte(extracted), &tj); err == nil {
-		if tj.Analysis != "" {
-			result.Analysis = tj.Analysis
-		}
-		if tj.Priority >= 1 && tj.Priority <= 100 {
-			result.Priority = tj.Priority
-		}
-		if tj.Title != "" {
-			result.Title = tj.Title
-		}
-		if tj.Description != "" {
-			result.Description = tj.Description
-		}
-	} else {
+	if err := applyJSONTriage(result, extracted); err != nil {
 		slog.Warn("triage JSON parse failed, trying markdown fallback",
 			"task_id", task.ID, "error", err,
 			"extracted_prefix", truncate(extracted, 120))
+		applyMarkdownTriage(result, text)
+	}
 
-		// Fallback to markdown section parsing
-		sections := parseSections(text)
-
-		if analysis, ok := sections["analysis"]; ok && analysis != "" {
-			result.Analysis = analysis
-		}
-		if priorityText, ok := sections["priority"]; ok && priorityText != "" {
-			var p int
-			if _, err := fmt.Sscanf(strings.TrimSpace(priorityText), "%d", &p); err == nil && p >= 1 && p <= 100 {
-				result.Priority = p
-			}
-		}
-		if desc, ok := sections["description"]; ok && desc != "" {
-			result.Description = desc
-		}
-
-		if result.Analysis == "" {
-			slog.Warn("triage parsing produced no analysis from JSON or markdown",
-				"task_id", task.ID,
-				"text_len", len(text),
-				"text_prefix", truncate(text, 100),
-			)
-		}
+	if result.Analysis == "" {
+		slog.Warn("triage parsing produced no analysis from JSON or markdown",
+			"task_id", task.ID,
+			"text_len", len(text),
+			"text_prefix", truncate(text, 100),
+		)
 	}
 
 	// Sanity guard: if the task input is very short and priority is suspiciously high,
@@ -558,6 +538,45 @@ func parseTriageResponse(text string, task *models.Task) *TriageResult {
 	}
 
 	return result
+}
+
+func applyJSONTriage(result *TriageResult, text string) error {
+	var tj triageJSON
+	if err := json.Unmarshal([]byte(text), &tj); err != nil {
+		return err
+	}
+
+	if tj.Analysis != "" {
+		result.Analysis = tj.Analysis
+	}
+	if tj.Priority >= 1 && tj.Priority <= 100 {
+		result.Priority = tj.Priority
+	}
+	if tj.Title != "" {
+		result.Title = tj.Title
+	}
+	if tj.Description != "" {
+		result.Description = tj.Description
+	}
+
+	return nil
+}
+
+func applyMarkdownTriage(result *TriageResult, text string) {
+	sections := parseSections(text)
+
+	if analysis, ok := sections["analysis"]; ok && analysis != "" {
+		result.Analysis = analysis
+	}
+	if priorityText, ok := sections["priority"]; ok && priorityText != "" {
+		var p int
+		if _, err := fmt.Sscanf(strings.TrimSpace(priorityText), "%d", &p); err == nil && p >= 1 && p <= 100 {
+			result.Priority = p
+		}
+	}
+	if desc, ok := sections["description"]; ok && desc != "" {
+		result.Description = desc
+	}
 }
 
 // truncate returns s truncated to maxLen characters.

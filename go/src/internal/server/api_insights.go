@@ -2,21 +2,19 @@ package server
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/circle-oo/flux/internal/insights"
-	"github.com/circle-oo/flux/internal/models"
 )
 
 // registerInsightsRoutes registers the detailed insights API endpoints.
 func (s *Server) registerInsightsRoutes() {
-	s.mux.Handle("GET /api/insights/summary", s.authMiddleware(http.HandlerFunc(s.handleInsightsSummary)))
-	s.mux.Handle("GET /api/insights/timeseries", s.authMiddleware(http.HandlerFunc(s.handleInsightsTimeseries)))
-	s.mux.Handle("GET /api/insights/efficiency", s.authMiddleware(http.HandlerFunc(s.handleInsightsEfficiency)))
-	s.mux.Handle("GET /api/insights/pipeline", s.authMiddleware(http.HandlerFunc(s.handleInsightsPipeline)))
-	s.mux.Handle("GET /api/insights/failures", s.authMiddleware(http.HandlerFunc(s.handleInsightsFailures)))
-	s.mux.Handle("GET /api/insights/usage-realtime", s.authMiddleware(http.HandlerFunc(s.handleInsightsUsageRealtime)))
+	s.handleAuth("GET /api/insights/summary", s.handleInsightsSummary)
+	s.handleAuth("GET /api/insights/timeseries", s.handleInsightsTimeseries)
+	s.handleAuth("GET /api/insights/efficiency", s.handleInsightsEfficiency)
+	s.handleAuth("GET /api/insights/pipeline", s.handleInsightsPipeline)
+	s.handleAuth("GET /api/insights/failures", s.handleInsightsFailures)
+	s.handleAuth("GET /api/insights/usage-realtime", s.handleInsightsUsageRealtime)
 }
 
 // initInsights initializes the insights collector from the server's database.
@@ -72,10 +70,8 @@ func (s *Server) handleInsightsPipeline(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleInsightsUsageRealtime(w http.ResponseWriter, r *http.Request) {
 	minutes := 60
-	if m := r.URL.Query().Get("minutes"); m != "" {
-		if parsed, err := strconv.Atoi(m); err == nil && parsed > 0 {
-			minutes = parsed
-		}
+	if parsed := queryInt(r.URL.Query(), "minutes"); parsed > 0 {
+		minutes = parsed
 	}
 
 	points, err := s.taskUsageEvents.RecentTimeseries(minutes)
@@ -83,9 +79,7 @@ func (s *Server) handleInsightsUsageRealtime(w http.ResponseWriter, r *http.Requ
 		serverError(w, "failed to get realtime usage", "error", err)
 		return
 	}
-	if points == nil {
-		points = []models.UsageTimePoint{}
-	}
+	points = sliceOrEmpty(points)
 	writeJSON(w, http.StatusOK, points)
 }
 

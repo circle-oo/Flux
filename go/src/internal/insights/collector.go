@@ -142,10 +142,7 @@ func (c *Collector) GetTimeseries(period string) ([]DailyMetric, error) {
 		return nil, fmt.Errorf("iterate timeseries: %w", err)
 	}
 
-	if metrics == nil {
-		metrics = []DailyMetric{}
-	}
-	return metrics, nil
+	return ensureSlice(metrics), nil
 }
 
 // GetEfficiency returns per-executor performance stats.
@@ -186,10 +183,7 @@ func (c *Collector) GetEfficiency() ([]AgentPerformance, error) {
 		return nil, fmt.Errorf("iterate efficiency: %w", err)
 	}
 
-	if agents == nil {
-		agents = []AgentPerformance{}
-	}
-	return agents, nil
+	return ensureSlice(agents), nil
 }
 
 // GetPipelineHealth returns task count by status.
@@ -217,10 +211,7 @@ func (c *Collector) GetPipelineHealth() ([]PipelineHealth, error) {
 		return nil, fmt.Errorf("iterate pipeline: %w", err)
 	}
 
-	if health == nil {
-		health = []PipelineHealth{}
-	}
-	return health, nil
+	return ensureSlice(health), nil
 }
 
 // errorCategories maps keywords in error_log to category names.
@@ -236,7 +227,7 @@ var errorCategories = map[string]string{
 	"test failed":    "Test Failed",
 	"tests failed":   "Test Failed",
 	"git":            "Git Error",
-	"merge conflict":  "Git Error",
+	"merge conflict": "Git Error",
 	"decomposition":  "Decomposition",
 	"decompose":      "Decomposition",
 }
@@ -269,26 +260,14 @@ func (c *Collector) GetFailures(period string) ([]FailureAnalysis, error) {
 		for keyword, category := range errorCategories {
 			if strings.Contains(lower, keyword) {
 				categoryCount[category]++
-				if len(categoryExamples[category]) < 3 {
-					truncated := errorLog
-					if len(truncated) > 200 {
-						truncated = truncated[:200] + "..."
-					}
-					categoryExamples[category] = append(categoryExamples[category], truncated)
-				}
+				addFailureExample(categoryExamples, category, errorLog)
 				categorized = true
 				break
 			}
 		}
 		if !categorized {
 			categoryCount["Other"]++
-			if len(categoryExamples["Other"]) < 3 {
-				truncated := errorLog
-				if len(truncated) > 200 {
-					truncated = truncated[:200] + "..."
-				}
-				categoryExamples["Other"] = append(categoryExamples["Other"], truncated)
-			}
+			addFailureExample(categoryExamples, "Other", errorLog)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -297,10 +276,7 @@ func (c *Collector) GetFailures(period string) ([]FailureAnalysis, error) {
 
 	var failures []FailureAnalysis
 	for category, count := range categoryCount {
-		examples := categoryExamples[category]
-		if examples == nil {
-			examples = []string{}
-		}
+		examples := ensureSlice(categoryExamples[category])
 		failures = append(failures, FailureAnalysis{
 			Category: category,
 			Count:    count,
@@ -308,10 +284,7 @@ func (c *Collector) GetFailures(period string) ([]FailureAnalysis, error) {
 		})
 	}
 
-	if failures == nil {
-		failures = []FailureAnalysis{}
-	}
-	return failures, nil
+	return ensureSlice(failures), nil
 }
 
 // GetModelUsage returns token usage grouped by model for the given period.
@@ -345,8 +318,26 @@ func (c *Collector) GetModelUsage(period string) ([]ToolUsageStat, error) {
 		return nil, fmt.Errorf("iterate model usage: %w", err)
 	}
 
-	if stats == nil {
-		stats = []ToolUsageStat{}
+	return ensureSlice(stats), nil
+}
+
+func ensureSlice[T any](items []T) []T {
+	if items == nil {
+		return []T{}
 	}
-	return stats, nil
+	return items
+}
+
+func addFailureExample(examplesByCategory map[string][]string, category, errorLog string) {
+	if len(examplesByCategory[category]) >= 3 {
+		return
+	}
+	examplesByCategory[category] = append(examplesByCategory[category], truncateErrorLog(errorLog, 200))
+}
+
+func truncateErrorLog(value string, maxLen int) string {
+	if len(value) <= maxLen {
+		return value
+	}
+	return value[:maxLen] + "..."
 }

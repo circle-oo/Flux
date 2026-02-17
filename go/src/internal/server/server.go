@@ -26,31 +26,32 @@ import (
 
 // Server is the main HTTP server for Flux.
 type Server struct {
-	config     *config.Config
-	db         *sql.DB
-	mux        *http.ServeMux
-	server     *http.Server
-	auth       *AuthManager
-	ws         *WebSocketHub
-	logHandler *LogBroadcastHandler
-	notifier   *notifier.Discord
-	updater    *updater.Updater
-	webFS      fs.FS
-	mgr        *manager.Manager
-	ghClient   *github_pkg.Client
-	podRegistry *PodRegistry
+	config           *config.Config
+	db               *sql.DB
+	mux              *http.ServeMux
+	server           *http.Server
+	auth             *AuthManager
+	ws               *WebSocketHub
+	logHandler       *LogBroadcastHandler
+	notifier         *notifier.Discord
+	updater          *updater.Updater
+	webFS            fs.FS
+	mgr              *manager.Manager
+	ghClient         *github_pkg.Client
+	podRegistry      *PodRegistry
+	podCleanupCancel context.CancelFunc
 
 	vault       vault.VaultReader
 	vaultWriter vault.VaultWriter
 
-	goals            *models.GoalStore
-	tasks            *models.TaskStore
-	taskAttempts     *models.TaskAttemptStore
-	taskUsageEvents  *models.TaskUsageEventStore
-	projects         *models.ProjectStore
-	alerts           *models.AlertStore
-	usage            *models.UsageStore
-	insights         *insights.Collector
+	goals           *models.GoalStore
+	tasks           *models.TaskStore
+	taskAttempts    *models.TaskAttemptStore
+	taskUsageEvents *models.TaskUsageEventStore
+	projects        *models.ProjectStore
+	alerts          *models.AlertStore
+	usage           *models.UsageStore
+	insights        *insights.Collector
 
 	billingCache *ccusage.BillingCache
 
@@ -61,13 +62,13 @@ type Server struct {
 
 // ServerDeps bundles all dependencies required to create a Server.
 type ServerDeps struct {
-	Config   *config.Config
-	DB       *sql.DB
-	Manager  *manager.Manager
-	Discord  *notifier.Discord
-	WebFS    fs.FS
-	Version  string
-	Vault    vault.VaultWriter
+	Config  *config.Config
+	DB      *sql.DB
+	Manager *manager.Manager
+	Discord *notifier.Discord
+	WebFS   fs.FS
+	Version string
+	Vault   vault.VaultWriter
 }
 
 // NewServer creates a new Server with the provided dependencies.
@@ -76,13 +77,13 @@ func NewServer(deps ServerDeps) *Server {
 		version = deps.Version
 	}
 	s := &Server{
-		config:      deps.Config,
-		db:          deps.DB,
-		mgr:         deps.Manager,
-		mux:         http.NewServeMux(),
-		notifier:    deps.Discord,
-		webFS:       deps.WebFS,
-		podRegistry: NewPodRegistry(),
+		config:          deps.Config,
+		db:              deps.DB,
+		mgr:             deps.Manager,
+		mux:             http.NewServeMux(),
+		notifier:        deps.Discord,
+		webFS:           deps.WebFS,
+		podRegistry:     NewPodRegistry(),
 		goals:           models.NewGoalStore(deps.DB),
 		tasks:           models.NewTaskStore(deps.DB),
 		taskAttempts:    models.NewTaskAttemptStore(deps.DB),
@@ -114,6 +115,7 @@ func NewServer(deps ServerDeps) *Server {
 	}
 
 	s.setupRoutes()
+	s.startPodRegistryCleanupTicker(5*time.Minute, 10*time.Minute)
 
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", deps.Config.Server.Host, deps.Config.Server.Port),
@@ -132,11 +134,37 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully shuts down the HTTP server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.podCleanupCancel != nil {
+		s.podCleanupCancel()
+	}
 	if s.billingCache != nil {
 		s.billingCache.Stop()
 	}
 	s.ws.Stop()
 	return s.server.Shutdown(ctx)
+}
+
+func (s *Server) startPodRegistryCleanupTicker(interval, staleDuration time.Duration) {
+	if s.podRegistry == nil {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.podCleanupCancel = cancel
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.podRegistry.CleanStale(staleDuration)
+			}
+		}
+	}()
 }
 
 // setupRoutes registers all HTTP handlers.
@@ -157,115 +185,120 @@ func (s *Server) Shutdown(ctx context.Context) error {
 //     consumers. Still load-bearing for the Dashboard (connection badge) and
 //     TaskDetail (refresh triggers). Remove once the UI fully migrates to SSE.
 func (s *Server) setupRoutes() {
+	s.registerPublicRoutes()
+	s.registerAuthenticatedRoutes()
+	s.registerInternalRoutes()
+	s.registerRealtimeRoutes()
+	s.registerStaticRoutes()
+}
+
+func (s *Server) registerPublicRoutes() {
 	// Health endpoint (no auth)
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 
 	// Auth endpoints (no auth required)
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+}
 
-	// Goals API (requires auth)
-	s.mux.Handle("POST /api/goals", s.authMiddleware(http.HandlerFunc(s.handleCreateGoal)))
-	s.mux.Handle("GET /api/goals", s.authMiddleware(http.HandlerFunc(s.handleListGoals)))
-	s.mux.Handle("GET /api/goals/current", s.authMiddleware(http.HandlerFunc(s.handleGetCurrentGoal)))
-	s.mux.Handle("PATCH /api/goals/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateGoal)))
-	s.mux.Handle("POST /api/goals/{id}/activate", s.authMiddleware(http.HandlerFunc(s.handleActivateGoal)))
-
-	// Tasks API (requires auth)
-	s.mux.Handle("POST /api/tasks", s.authMiddleware(http.HandlerFunc(s.handleCreateTask)))
-	s.mux.Handle("GET /api/tasks", s.authMiddleware(http.HandlerFunc(s.handleListTasks)))
-	s.mux.Handle("GET /api/tasks/{id}", s.authMiddleware(http.HandlerFunc(s.handleGetTask)))
-	s.mux.Handle("PATCH /api/tasks/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateTask)))
-	s.mux.Handle("DELETE /api/tasks/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteTask)))
-	s.mux.Handle("POST /api/tasks/{id}/cancel", s.authMiddleware(http.HandlerFunc(s.handleCancelTask)))
-	s.mux.Handle("POST /api/tasks/{id}/retry", s.authMiddleware(http.HandlerFunc(s.handleRetryTask)))
-
-	// Task stats (requires auth)
-	s.mux.Handle("GET /api/tasks/stats", s.authMiddleware(http.HandlerFunc(s.handleTaskStats)))
-
-	// Projects API (requires auth)
-	s.mux.Handle("POST /api/projects", s.authMiddleware(http.HandlerFunc(s.handleCreateProject)))
-	s.mux.Handle("GET /api/projects", s.authMiddleware(http.HandlerFunc(s.handleListProjects)))
-	s.mux.Handle("GET /api/projects/{id}", s.authMiddleware(http.HandlerFunc(s.handleGetProject)))
-	s.mux.Handle("PATCH /api/projects/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateProject)))
-	s.mux.Handle("POST /api/projects/{id}/approve", s.authMiddleware(http.HandlerFunc(s.handleApproveProject)))
-	s.mux.Handle("POST /api/projects/{id}/reject", s.authMiddleware(http.HandlerFunc(s.handleRejectProject)))
-
-	// Services & Alerts stubs (requires auth)
-	s.mux.Handle("GET /api/services", s.authMiddleware(http.HandlerFunc(s.handleListServices)))
-	s.mux.Handle("GET /api/alerts", s.authMiddleware(http.HandlerFunc(s.handleListAlerts)))
-
-	// System endpoints (requires auth)
-	s.mux.Handle("POST /api/system/restart", s.authMiddleware(http.HandlerFunc(s.handleRestart)))
-	s.mux.Handle("GET /api/insights", s.authMiddleware(http.HandlerFunc(s.handleInsights)))
-
-	// Config endpoint (requires auth)
-	s.mux.Handle("GET /api/config", s.authMiddleware(http.HandlerFunc(s.handleConfig)))
-
-	// Billing info endpoint (requires auth)
-	s.mux.Handle("GET /api/billing", s.authMiddleware(http.HandlerFunc(s.handleBillingInfo)))
-
-	// Orchestrator & system status (requires auth)
-	s.mux.Handle("GET /api/orchestrator/status", s.authMiddleware(http.HandlerFunc(s.handleOrchestratorStatus)))
-	s.mux.Handle("GET /api/system/disk", s.authMiddleware(http.HandlerFunc(s.handleDiskUsage)))
-	s.mux.Handle("GET /api/system/health", s.authMiddleware(http.HandlerFunc(s.handleSystemHealth)))
-
-	// Deploy endpoints (requires auth)
-	s.mux.Handle("GET /api/system/deploy/status", s.authMiddleware(http.HandlerFunc(s.handleDeployStatus)))
-	s.mux.Handle("POST /api/system/deploy", s.authMiddleware(http.HandlerFunc(s.handleDeploy)))
-	s.mux.Handle("POST /api/system/deploy/check-remote", s.authMiddleware(http.HandlerFunc(s.handleCheckRemote)))
-
-	// Archive endpoint (requires auth)
-	s.mux.Handle("POST /api/tasks/{id}/archive", s.authMiddleware(http.HandlerFunc(s.handleArchiveTask)))
-
-	// Task attempts API (requires auth)
-	s.mux.Handle("GET /api/tasks/{id}/attempts", s.authMiddleware(http.HandlerFunc(s.handleListAttempts)))
-
-	// Task usage API (requires auth)
-	s.mux.Handle("GET /api/tasks/{id}/usage", s.authMiddleware(http.HandlerFunc(s.handleListUsageEvents)))
-
-	// Subtasks API (requires auth)
-	s.mux.Handle("GET /api/tasks/{id}/subtasks", s.authMiddleware(http.HandlerFunc(s.handleListSubtasks)))
-	s.mux.Handle("GET /api/tasks/{id}/subtasks/dependencies", s.authMiddleware(http.HandlerFunc(s.handleGetSubtaskDependencies)))
-
-	// Internal API (localhost only, no auth)
-	s.mux.Handle("POST /internal/tasks/next", s.localhostOnly(http.HandlerFunc(s.handleInternalNextTask)))
-	s.mux.Handle("POST /internal/tasks/next-pending", s.localhostOnly(http.HandlerFunc(s.handleInternalNextPending)))
-	s.mux.Handle("POST /internal/tasks/{id}/started", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskStarted)))
-	s.mux.Handle("POST /internal/tasks/{id}/done", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskDone)))
-	s.mux.Handle("POST /internal/tasks/{id}/triaged", s.localhostOnly(http.HandlerFunc(s.handleInternalTriaged)))
-	s.mux.Handle("POST /internal/tasks", s.localhostOnly(http.HandlerFunc(s.handleInternalCreateTask)))
-	s.mux.Handle("POST /internal/subtasks", s.localhostOnly(http.HandlerFunc(s.handleInternalCreateSubtasks)))
-	s.mux.Handle("GET /internal/model/{task_id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetModel)))
-	s.mux.Handle("GET /internal/tasks/{id}/status", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskStatus)))
-	s.mux.Handle("POST /internal/tasks/{id}/usage", s.localhostOnly(http.HandlerFunc(s.handleInternalTaskUsage)))
-	s.mux.Handle("GET /internal/projects/{id}", s.localhostOnly(http.HandlerFunc(s.handleInternalGetProject)))
-
-	// Knowledge API (requires auth)
+func (s *Server) registerAuthenticatedRoutes() {
+	s.registerGoalRoutes()
+	s.registerTaskRoutes()
+	s.registerProjectRoutes()
+	s.registerSystemRoutes()
+	s.registerObservabilityRoutes()
 	s.registerKnowledgeRoutes()
-
-	// Insights API (requires auth)
 	s.registerInsightsRoutes()
-
-	// PR Review API (requires auth)
 	s.RegisterPRRoutes()
+}
 
-	// Logs API (requires auth)
-	s.mux.Handle("GET /api/logs/recent", s.authMiddleware(http.HandlerFunc(s.handleRecentLogs)))
+func (s *Server) registerGoalRoutes() {
+	s.handleAuth("POST /api/goals", s.handleCreateGoal)
+	s.handleAuth("GET /api/goals", s.handleListGoals)
+	s.handleAuth("GET /api/goals/current", s.handleGetCurrentGoal)
+	s.handleAuth("PATCH /api/goals/{id}", s.handleUpdateGoal)
+	s.handleAuth("POST /api/goals/{id}/activate", s.handleActivateGoal)
+}
 
-	// Pods API (requires auth)
-	s.mux.Handle("GET /api/pods", s.authMiddleware(http.HandlerFunc(s.handleListPods)))
+func (s *Server) registerTaskRoutes() {
+	s.handleAuth("POST /api/tasks", s.handleCreateTask)
+	s.handleAuth("GET /api/tasks", s.handleListTasks)
+	s.handleAuth("GET /api/tasks/{id}", s.handleGetTask)
+	s.handleAuth("PATCH /api/tasks/{id}", s.handleUpdateTask)
+	s.handleAuth("DELETE /api/tasks/{id}", s.handleDeleteTask)
+	s.handleAuth("POST /api/tasks/{id}/cancel", s.handleCancelTask)
+	s.handleAuth("POST /api/tasks/{id}/retry", s.handleRetryTask)
+	s.handleAuth("GET /api/tasks/stats", s.handleTaskStats)
+	s.handleAuth("POST /api/tasks/{id}/archive", s.handleArchiveTask)
+	s.handleAuth("GET /api/tasks/{id}/attempts", s.handleListAttempts)
+	s.handleAuth("GET /api/tasks/{id}/usage", s.handleListUsageEvents)
+	s.handleAuth("GET /api/tasks/{id}/subtasks", s.handleListSubtasks)
+	s.handleAuth("GET /api/tasks/{id}/subtasks/dependencies", s.handleGetSubtaskDependencies)
+}
 
-	// Pod registration (internal, localhost only)
-	s.mux.Handle("POST /internal/pods/register", s.localhostOnly(http.HandlerFunc(s.handlePodRegister)))
-	s.mux.Handle("POST /internal/pods/status", s.localhostOnly(http.HandlerFunc(s.handlePodStatus)))
+func (s *Server) registerProjectRoutes() {
+	s.handleAuth("POST /api/projects", s.handleCreateProject)
+	s.handleAuth("GET /api/projects", s.handleListProjects)
+	s.handleAuth("GET /api/projects/{id}", s.handleGetProject)
+	s.handleAuth("PATCH /api/projects/{id}", s.handleUpdateProject)
+	s.handleAuth("POST /api/projects/{id}/approve", s.handleApproveProject)
+	s.handleAuth("POST /api/projects/{id}/reject", s.handleRejectProject)
+}
 
+func (s *Server) registerSystemRoutes() {
+	s.handleAuth("GET /api/services", s.handleListServices)
+	s.handleAuth("GET /api/alerts", s.handleListAlerts)
+	s.handleAuth("POST /api/system/restart", s.handleRestart)
+	s.handleAuth("GET /api/insights", s.handleInsights)
+	s.handleAuth("GET /api/config", s.handleConfig)
+	s.handleAuth("GET /api/billing", s.handleBillingInfo)
+	s.handleAuth("GET /api/orchestrator/status", s.handleOrchestratorStatus)
+	s.handleAuth("GET /api/system/disk", s.handleDiskUsage)
+	s.handleAuth("GET /api/system/health", s.handleSystemHealth)
+	s.handleAuth("GET /api/system/deploy/status", s.handleDeployStatus)
+	s.handleAuth("POST /api/system/deploy", s.handleDeploy)
+	s.handleAuth("POST /api/system/deploy/check-remote", s.handleCheckRemote)
+}
+
+func (s *Server) registerObservabilityRoutes() {
+	s.handleAuth("GET /api/logs/recent", s.handleRecentLogs)
+	s.handleAuth("GET /api/pods", s.handleListPods)
+}
+
+func (s *Server) registerInternalRoutes() {
+	// Internal API (localhost only, no auth)
+	s.handleLocalhost("POST /internal/tasks/next", s.handleInternalNextTask)
+	s.handleLocalhost("POST /internal/tasks/next-pending", s.handleInternalNextPending)
+	s.handleLocalhost("POST /internal/tasks/{id}/started", s.handleInternalTaskStarted)
+	s.handleLocalhost("POST /internal/tasks/{id}/done", s.handleInternalTaskDone)
+	s.handleLocalhost("POST /internal/tasks/{id}/triaged", s.handleInternalTriaged)
+	s.handleLocalhost("POST /internal/tasks", s.handleInternalCreateTask)
+	s.handleLocalhost("POST /internal/subtasks", s.handleInternalCreateSubtasks)
+	s.handleLocalhost("GET /internal/model/{task_id}", s.handleInternalGetModel)
+	s.handleLocalhost("GET /internal/tasks/{id}/status", s.handleInternalTaskStatus)
+	s.handleLocalhost("POST /internal/tasks/{id}/usage", s.handleInternalTaskUsage)
+	s.handleLocalhost("GET /internal/projects/{id}", s.handleInternalGetProject)
+	s.handleLocalhost("POST /internal/pods/register", s.handlePodRegister)
+	s.handleLocalhost("POST /internal/pods/status", s.handlePodStatus)
+}
+
+func (s *Server) registerRealtimeRoutes() {
 	// WebSocket
-	s.mux.Handle("GET /ws/events", s.authMiddleware(http.HandlerFunc(s.handleWebSocket)))
+	s.handleAuth("GET /ws/events", s.handleWebSocket)
+}
 
+func (s *Server) registerStaticRoutes() {
 	// Static files (embedded React frontend)
 	// SPA fallback: serve index.html for non-API, non-file routes
 	s.mux.Handle("/", s.spaHandler())
+}
+
+func (s *Server) handleAuth(pattern string, handler http.HandlerFunc) {
+	s.mux.Handle(pattern, s.authMiddleware(handler))
+}
+
+func (s *Server) handleLocalhost(pattern string, handler http.HandlerFunc) {
+	s.mux.Handle(pattern, s.localhostOnly(handler))
 }
 
 // spaHandler serves the embedded React frontend with SPA fallback.
@@ -320,18 +353,20 @@ var version = "dev"
 
 // Common error messages returned by API handlers.
 const (
-	errInternalServer   = "internal server error"
-	errInvalidBody      = "invalid request body"
-	errTaskNotFound     = "task not found"
-	errGoalNotFound     = "goal not found"
-	errProjectNotFound  = "project not found"
+	errInternalServer  = "internal server error"
+	errInvalidBody     = "invalid request body"
+	errTaskNotFound    = "task not found"
+	errGoalNotFound    = "goal not found"
+	errProjectNotFound = "project not found"
 )
 
 // writeJSON writes a JSON response with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("failed to encode JSON response", "error", err)
+	}
 }
 
 // serverError logs the error and writes a 500 JSON response.

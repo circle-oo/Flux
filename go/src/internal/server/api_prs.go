@@ -57,9 +57,7 @@ func (s *Server) handleListPendingPRs(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "row iteration error", "error", err)
 		return
 	}
-	if tasks == nil {
-		tasks = []*models.Task{}
-	}
+	tasks = sliceOrEmpty(tasks)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": tasks})
 }
@@ -68,44 +66,12 @@ func (s *Server) handleListPendingPRs(w http.ResponseWriter, r *http.Request) {
 // Merges the PR and updates the task.
 func (s *Server) handleApprovePR(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("task_id")
-
-	task, err := s.tasks.GetByID(taskID)
-	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, errTaskNotFound)
+	task, ok := s.loadTaskWithPR(w, taskID)
+	if !ok {
 		return
 	}
-	if err != nil {
-		serverError(w, "failed to get task", "id", taskID, "error", err)
-		return
-	}
-
-	if task.PRUrl == "" {
-		writeError(w, http.StatusBadRequest, "task has no PR")
-		return
-	}
-
-	prNumber, err := github.ExtractPRNumber(task.PRUrl)
-	if err != nil {
-		slog.Error("failed to extract PR number", "url", task.PRUrl, "error", err)
-		writeError(w, http.StatusBadRequest, "invalid PR URL")
-		return
-	}
-
-	// Get project to extract owner/repo
-	project, err := s.projects.GetByID(task.ProjectID)
-	if err != nil {
-		serverError(w, "failed to get project", "id", task.ProjectID, "error", err)
-		return
-	}
-
-	owner, repo := github.ExtractOwnerRepo(project.RepoURL)
-	if owner == "" || repo == "" {
-		writeError(w, http.StatusBadRequest, "invalid repo URL in project")
-		return
-	}
-
-	if s.ghClient == nil {
-		writeError(w, http.StatusServiceUnavailable, "GitHub not configured")
+	owner, repo, prNumber, ok := s.resolvePRRequest(w, task)
+	if !ok {
 		return
 	}
 
@@ -133,19 +99,8 @@ func (s *Server) handleApprovePR(w http.ResponseWriter, r *http.Request) {
 // Closes the PR on GitHub and updates the task.
 func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("task_id")
-
-	task, err := s.tasks.GetByID(taskID)
-	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, errTaskNotFound)
-		return
-	}
-	if err != nil {
-		serverError(w, "failed to get task", "id", taskID, "error", err)
-		return
-	}
-
-	if task.PRUrl == "" {
-		writeError(w, http.StatusBadRequest, "task has no PR")
+	task, ok := s.loadTaskWithPR(w, taskID)
+	if !ok {
 		return
 	}
 
@@ -153,29 +108,8 @@ func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("PR is already %s", task.PRStatus))
 		return
 	}
-
-	prNumber, err := github.ExtractPRNumber(task.PRUrl)
-	if err != nil {
-		slog.Error("failed to extract PR number", "url", task.PRUrl, "error", err)
-		writeError(w, http.StatusBadRequest, "invalid PR URL")
-		return
-	}
-
-	// Get project to extract owner/repo
-	project, err := s.projects.GetByID(task.ProjectID)
-	if err != nil {
-		serverError(w, "failed to get project", "id", task.ProjectID, "error", err)
-		return
-	}
-
-	owner, repo := github.ExtractOwnerRepo(project.RepoURL)
-	if owner == "" || repo == "" {
-		writeError(w, http.StatusBadRequest, "invalid repo URL in project")
-		return
-	}
-
-	if s.ghClient == nil {
-		writeError(w, http.StatusServiceUnavailable, "GitHub not configured")
+	owner, repo, prNumber, ok := s.resolvePRRequest(w, task)
+	if !ok {
 		return
 	}
 
@@ -203,44 +137,12 @@ func (s *Server) handleClosePR(w http.ResponseWriter, r *http.Request) {
 // Fetches PR comments, creates a fix task, and marks original as CHANGES_REQUESTED.
 func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("task_id")
-
-	task, err := s.tasks.GetByID(taskID)
-	if err == sql.ErrNoRows {
-		writeError(w, http.StatusNotFound, errTaskNotFound)
+	task, ok := s.loadTaskWithPR(w, taskID)
+	if !ok {
 		return
 	}
-	if err != nil {
-		serverError(w, "failed to get task", "id", taskID, "error", err)
-		return
-	}
-
-	if task.PRUrl == "" {
-		writeError(w, http.StatusBadRequest, "task has no PR")
-		return
-	}
-
-	prNumber, err := github.ExtractPRNumber(task.PRUrl)
-	if err != nil {
-		slog.Error("failed to extract PR number", "url", task.PRUrl, "error", err)
-		writeError(w, http.StatusBadRequest, "invalid PR URL")
-		return
-	}
-
-	// Get project to extract owner/repo
-	project, err := s.projects.GetByID(task.ProjectID)
-	if err != nil {
-		serverError(w, "failed to get project", "id", task.ProjectID, "error", err)
-		return
-	}
-
-	owner, repo := github.ExtractOwnerRepo(project.RepoURL)
-	if owner == "" || repo == "" {
-		writeError(w, http.StatusBadRequest, "invalid repo URL in project")
-		return
-	}
-
-	if s.ghClient == nil {
-		writeError(w, http.StatusServiceUnavailable, "GitHub not configured")
+	owner, repo, prNumber, ok := s.resolvePRRequest(w, task)
+	if !ok {
 		return
 	}
 
@@ -305,3 +207,49 @@ func (s *Server) handleRequestChanges(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// loadTaskWithPR resolves a task and validates that it has an associated PR URL.
+func (s *Server) loadTaskWithPR(w http.ResponseWriter, taskID string) (*models.Task, bool) {
+	task, err := s.tasks.GetByID(taskID)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, errTaskNotFound)
+		return nil, false
+	}
+	if err != nil {
+		serverError(w, "failed to get task", "id", taskID, "error", err)
+		return nil, false
+	}
+	if task.PRUrl == "" {
+		writeError(w, http.StatusBadRequest, "task has no PR")
+		return nil, false
+	}
+	return task, true
+}
+
+// resolvePRRequest validates GitHub context and returns owner/repo/PR number.
+func (s *Server) resolvePRRequest(w http.ResponseWriter, task *models.Task) (string, string, int, bool) {
+	prNumber, err := github.ExtractPRNumber(task.PRUrl)
+	if err != nil {
+		slog.Error("failed to extract PR number", "url", task.PRUrl, "error", err)
+		writeError(w, http.StatusBadRequest, "invalid PR URL")
+		return "", "", 0, false
+	}
+
+	project, err := s.projects.GetByID(task.ProjectID)
+	if err != nil {
+		serverError(w, "failed to get project", "id", task.ProjectID, "error", err)
+		return "", "", 0, false
+	}
+
+	owner, repo := github.ExtractOwnerRepo(project.RepoURL)
+	if owner == "" || repo == "" {
+		writeError(w, http.StatusBadRequest, "invalid repo URL in project")
+		return "", "", 0, false
+	}
+
+	if s.ghClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "GitHub not configured")
+		return "", "", 0, false
+	}
+
+	return owner, repo, prNumber, true
+}

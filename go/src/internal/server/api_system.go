@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+type projectActivity struct {
+	ProjectID   string `json:"project_id"`
+	ProjectName string `json:"project_name"`
+	TaskCount   int    `json:"task_count"`
+}
+
 // handleRestart handles the legacy restart endpoint.
 // It updates the flux binary and restarts the service.
 // Prefer POST /api/system/deploy for the improved deploy flow.
@@ -48,6 +54,7 @@ func (s *Server) legacyRestart() {
 	exePath, err := os.Executable()
 	if err != nil {
 		slog.Error("failed to get executable path", "error", err)
+		s.broadcastDeployStatus("failed", "restart failed: executable path lookup error", err.Error())
 		return
 	}
 
@@ -55,6 +62,7 @@ func (s *Server) legacyRestart() {
 	exePath, err = filepath.EvalSymlinks(exePath)
 	if err != nil {
 		slog.Error("failed to resolve symlinks", "error", err)
+		s.broadcastDeployStatus("failed", "restart failed: symlink resolution error", err.Error())
 		return
 	}
 
@@ -63,6 +71,7 @@ func (s *Server) legacyRestart() {
 	projectRoot, err = filepath.Abs(projectRoot)
 	if err != nil {
 		slog.Error("failed to get absolute path", "error", err)
+		s.broadcastDeployStatus("failed", "restart failed: project root resolution error", err.Error())
 		return
 	}
 
@@ -77,6 +86,7 @@ func (s *Server) legacyRestart() {
 		if s.notifier != nil {
 			s.notifier.Send("error", "Restart failed: git pull error")
 		}
+		s.broadcastDeployStatus("warning", "git pull failed during restart", string(output))
 		// Continue anyway - the update might not be necessary
 	} else {
 		slog.Info("git pull completed", "output", string(output))
@@ -91,6 +101,7 @@ func (s *Server) legacyRestart() {
 		if s.notifier != nil {
 			s.notifier.Send("error", "Restart failed: build error")
 		}
+		s.broadcastDeployStatus("failed", "restart failed: build error", string(output))
 		return
 	}
 	slog.Info("build completed successfully")
@@ -107,7 +118,23 @@ func (s *Server) legacyRestart() {
 	// The process manager (launchd, systemd, or manual restart) should restart it
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		slog.Error("failed to send SIGTERM", "error", err)
+		s.broadcastDeployStatus("failed", "restart failed: could not signal process", err.Error())
 	}
+}
+
+func (s *Server) broadcastDeployStatus(status, message, detail string) {
+	if s.ws == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"status":  status,
+		"message": message,
+	}
+	if detail != "" {
+		payload["detail"] = detail
+	}
+	s.ws.Broadcast(Event{Type: EventDeployStatus, Data: payload})
 }
 
 // handleConfig handles GET /api/config
@@ -184,24 +211,38 @@ func sanitizeStruct(v reflect.Value, depth int) map[string]interface{} {
 // handleInsights handles GET /api/insights
 // Returns aggregated metrics: token usage, cost, and activities per project.
 func (s *Server) handleInsights(w http.ResponseWriter, r *http.Request) {
-	// Aggregate token usage and cost
+	totalTokens, totalCost, err := s.queryInsightsTotals()
+	if err != nil {
+		serverError(w, "failed to aggregate usage metrics", "error", err)
+		return
+	}
+
+	activities, err := s.queryProjectActivities()
+	if err != nil {
+		serverError(w, "failed to aggregate project activities", "error", err)
+		return
+	}
+
+	response := map[string]interface{}{
+		"total_tokens":       totalTokens,
+		"total_cost":         totalCost,
+		"project_activities": sliceOrEmpty(activities),
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) queryInsightsTotals() (int, float64, error) {
 	var totalTokens int
 	var totalCost float64
 	err := s.db.QueryRow(`
 		SELECT COALESCE(SUM(tokens_used), 0), COALESCE(SUM(cost_usd), 0)
 		FROM tasks
 	`).Scan(&totalTokens, &totalCost)
-	if err != nil {
-		serverError(w, "failed to aggregate usage metrics", "error", err)
-		return
-	}
+	return totalTokens, totalCost, err
+}
 
-	// Get activities per project
-	type ProjectActivity struct {
-		ProjectID   string `json:"project_id"`
-		ProjectName string `json:"project_name"`
-		TaskCount   int    `json:"task_count"`
-	}
+func (s *Server) queryProjectActivities() ([]projectActivity, error) {
 	rows, err := s.db.Query(`
 		SELECT
 			t.project_id,
@@ -214,42 +255,51 @@ func (s *Server) handleInsights(w http.ResponseWriter, r *http.Request) {
 		ORDER BY task_count DESC
 	`)
 	if err != nil {
-		serverError(w, "failed to query project activities", "error", err)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
-	var activities []ProjectActivity
+	var activities []projectActivity
 	for rows.Next() {
-		var pa ProjectActivity
+		var pa projectActivity
 		if err := rows.Scan(&pa.ProjectID, &pa.ProjectName, &pa.TaskCount); err != nil {
-			serverError(w, "failed to scan project activity", "error", err)
-			return
+			return nil, err
 		}
 		activities = append(activities, pa)
 	}
 	if err := rows.Err(); err != nil {
-		serverError(w, "failed to iterate project activities", "error", err)
-		return
+		return nil, err
 	}
-
-	// If no activities found, return empty array instead of null
-	if activities == nil {
-		activities = []ProjectActivity{}
-	}
-
-	response := map[string]interface{}{
-		"total_tokens":       totalTokens,
-		"total_cost":         totalCost,
-		"project_activities": activities,
-	}
-
-	writeJSON(w, http.StatusOK, response)
+	return activities, nil
 }
 
 // handleOrchestratorStatus handles GET /api/orchestrator/status
 // Returns orchestrator health, sub-component status, and scale state.
 func (s *Server) handleOrchestratorStatus(w http.ResponseWriter, r *http.Request) {
+	resp := s.buildOrchestratorStatusPayload()
+
+	if s.scaleManager != nil {
+		scaleStatus := s.scaleManager.Status()
+		resp["scale_status"] = map[string]any{
+			"executor_pods":       scaleStatus.GetExecutorPods(),
+			"triager_pods":        scaleStatus.GetTriagerPods(),
+			"researcher_pods":     scaleStatus.GetResearcherPods(),
+			"max_executor_pods":   scaleStatus.GetMaxExecutorPods(),
+			"max_triager_pods":    scaleStatus.GetMaxTriagerPods(),
+			"max_researcher_pods": scaleStatus.GetMaxResearcherPods(),
+			"queue_state":         scaleStatus.GetQueueState(),
+			"last_scale_time":     scaleStatus.GetLastScaleTime(),
+		}
+	}
+
+	if s.cleaner != nil {
+		resp["disk_status"] = s.cleaner.CheckDiskSpace()
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) buildOrchestratorStatusPayload() map[string]any {
 	resp := map[string]any{
 		"running":    false,
 		"uptime":     "",
@@ -286,25 +336,5 @@ func (s *Server) handleOrchestratorStatus(w http.ResponseWriter, r *http.Request
 		}
 		resp["sub_components"] = components
 	}
-
-	if s.scaleManager != nil {
-		scaleStatus := s.scaleManager.Status()
-		resp["scale_status"] = map[string]any{
-			"executor_pods":      scaleStatus.GetExecutorPods(),
-			"triager_pods":       scaleStatus.GetTriagerPods(),
-			"researcher_pods":    scaleStatus.GetResearcherPods(),
-			"max_executor_pods":  scaleStatus.GetMaxExecutorPods(),
-			"max_triager_pods":   scaleStatus.GetMaxTriagerPods(),
-			"max_researcher_pods": scaleStatus.GetMaxResearcherPods(),
-			"queue_state":        scaleStatus.GetQueueState(),
-			"last_scale_time":    scaleStatus.GetLastScaleTime(),
-		}
-	}
-
-	if s.cleaner != nil {
-		diskStatus := s.cleaner.CheckDiskSpace()
-		resp["disk_status"] = diskStatus
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	return resp
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/circle-oo/flux/internal/models"
@@ -59,12 +58,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Tags:        req.Tags,
 		Prompt:      req.Prompt,
 	}
-	if task.Priority == 0 {
-		task.Priority = 40
-	}
-	if task.Source == "" {
-		task.Source = models.TaskSourceOperator
-	}
+	applyTaskDefaults(task, models.TaskSourceOperator)
 
 	if err := s.tasks.Create(task); err != nil {
 		serverError(w, "failed to create task", "error", err)
@@ -84,8 +78,8 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
-	page, _ := strconv.Atoi(q.Get("page"))
-	limit, _ := strconv.Atoi(q.Get("limit"))
+	page := queryInt(q, "page")
+	limit := queryInt(q, "limit")
 
 	filter := models.ListFilter{
 		Status:          q.Get("status"),
@@ -100,9 +94,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "failed to list tasks", "error", err)
 		return
 	}
-	if tasks == nil {
-		tasks = []*models.Task{}
-	}
+	tasks = sliceOrEmpty(tasks)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": tasks})
 }
 
@@ -202,10 +194,45 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	if err := s.tasks.Delete(id); err != nil {
-		serverError(w, "failed to delete task", "id", id, "error", err)
+	task, err := s.tasks.GetByID(id)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, errTaskNotFound)
 		return
 	}
+	if err != nil {
+		serverError(w, "failed to get task before delete", "id", id, "error", err)
+		return
+	}
+
+	switch task.Status {
+	case models.TaskArchived:
+		// Already soft-deleted.
+	case models.TaskCompleted, models.TaskFailed, models.TaskCancelled:
+		if err := s.tasks.Archive(id); err != nil {
+			serverError(w, "failed to archive task", "id", id, "error", err)
+			return
+		}
+	default:
+		if err := s.tasks.Cancel(id); err != nil {
+			if strings.Contains(err.Error(), "not in a cancellable state") {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				serverError(w, "failed to cancel task for soft delete", "id", id, "error", err)
+			}
+			return
+		}
+		if err := s.tasks.Archive(id); err != nil {
+			serverError(w, "failed to archive task after cancel", "id", id, "error", err)
+			return
+		}
+	}
+
+	updatedTask, err := s.tasks.GetByID(id)
+	if err != nil {
+		serverError(w, "failed to get task after soft delete", "id", id, "error", err)
+		return
+	}
+	s.ws.Broadcast(Event{Type: EventTaskUpdated, Data: updatedTask})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -265,9 +292,7 @@ func (s *Server) handleListSubtasks(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "failed to list subtasks", "parent_id", id, "error", err)
 		return
 	}
-	if subtasks == nil {
-		subtasks = []*models.Task{}
-	}
+	subtasks = sliceOrEmpty(subtasks)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"tasks": subtasks})
 }
 
@@ -281,9 +306,7 @@ func (s *Server) handleGetSubtaskDependencies(w http.ResponseWriter, r *http.Req
 		serverError(w, "failed to list subtasks", "parent_id", id, "error", err)
 		return
 	}
-	if subtasks == nil {
-		subtasks = []*models.Task{}
-	}
+	subtasks = sliceOrEmpty(subtasks)
 
 	// Get dependencies
 	dependencies, err := s.tasks.GetSubtaskDependencies(id)
@@ -291,9 +314,7 @@ func (s *Server) handleGetSubtaskDependencies(w http.ResponseWriter, r *http.Req
 		serverError(w, "failed to get subtask dependencies", "parent_id", id, "error", err)
 		return
 	}
-	if dependencies == nil {
-		dependencies = []*models.SubtaskDependency{}
-	}
+	dependencies = sliceOrEmpty(dependencies)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"nodes": subtasks,
@@ -418,9 +439,7 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "failed to list task attempts", "task_id", id, "error", err)
 		return
 	}
-	if attempts == nil {
-		attempts = []*models.TaskAttempt{}
-	}
+	attempts = sliceOrEmpty(attempts)
 
 	// Use usage events as the source of truth for totals across all attempts.
 	// This is more accurate than summing attempt snapshots (which may have stale zeros).
@@ -436,7 +455,7 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"attempts":         attempts,
+		"attempts":          attempts,
 		"total_tokens_used": totalTokens,
 		"total_cost_usd":    totalCost,
 	})
@@ -451,9 +470,7 @@ func (s *Server) handleListUsageEvents(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "failed to list usage events", "task_id", id, "error", err)
 		return
 	}
-	if events == nil {
-		events = []*models.TaskUsageEvent{}
-	}
+	events = sliceOrEmpty(events)
 
 	totalTokens, totalCost, err := s.taskUsageEvents.SumByTask(id)
 	if err != nil {

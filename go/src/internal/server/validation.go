@@ -17,10 +17,15 @@ var (
 	shellInjectionPatterns = []string{
 		"$((",
 		"; rm ",
+		"; sh",
+		"; bash",
 		"| sh",
 		"| bash",
+		"| zsh",
 		"&& rm",
 		"|| rm",
+		"`",
+		"> /dev/",
 	}
 )
 
@@ -44,6 +49,8 @@ func ValidateTaskInput(title, description string) error {
 
 // ValidatePrompt validates LLM prompt input and checks for shell injection
 func ValidatePrompt(prompt string) error {
+	prompt = SanitizeInput(prompt)
+
 	if strings.TrimSpace(prompt) == "" {
 		return errors.New("prompt is required")
 	}

@@ -13,12 +13,13 @@ import (
 
 // Event types for WebSocket broadcasting.
 const (
-	EventTaskUpdated = "TASK_UPDATED"
-	EventGoalChanged = "GOAL_CHANGED"
-	EventPRStatus    = "PR_STATUS"
-	EventPodStatus   = "POD_STATUS"
-	EventLogEntry    = "LOG_ENTRY"
-	EventUsageUpdate = "USAGE_UPDATE"
+	EventTaskUpdated  = "TASK_UPDATED"
+	EventGoalChanged  = "GOAL_CHANGED"
+	EventPRStatus     = "PR_STATUS"
+	EventPodStatus    = "POD_STATUS"
+	EventLogEntry     = "LOG_ENTRY"
+	EventUsageUpdate  = "USAGE_UPDATE"
+	EventDeployStatus = "DEPLOY_STATUS"
 )
 
 // Event represents a WebSocket event.
@@ -28,7 +29,7 @@ type Event struct {
 }
 
 // maxClients is the maximum number of concurrent WebSocket connections.
-const maxClients = 10
+const maxClients = 50
 
 // WebSocketHub manages WebSocket client connections and broadcasting.
 type WebSocketHub struct {

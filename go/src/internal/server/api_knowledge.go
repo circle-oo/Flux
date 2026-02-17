@@ -18,20 +18,20 @@ func (s *Server) registerKnowledgeRoutes() {
 		return
 	}
 
-	s.mux.Handle("GET /api/knowledge/notes", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeListNotes)))
-	s.mux.Handle("GET /api/knowledge/notes/{path...}", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeReadNote)))
-	s.mux.Handle("POST /api/knowledge/notes", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeCreateNote)))
-	s.mux.Handle("PUT /api/knowledge/notes/{path...}", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeUpdateNote)))
-	s.mux.Handle("DELETE /api/knowledge/notes/{path...}", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeDeleteNote)))
-	s.mux.Handle("GET /api/knowledge/search", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeSearch)))
-	s.mux.Handle("GET /api/knowledge/daily", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeDaily)))
-	s.mux.Handle("POST /api/knowledge/daily/append", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeDailyAppend)))
-	s.mux.Handle("GET /api/knowledge/stats", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeStats)))
-	s.mux.Handle("GET /api/knowledge/frontmatter/{path...}", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeFrontmatter)))
-	s.mux.Handle("GET /api/knowledge/folders", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeFolders)))
-	s.mux.Handle("GET /api/knowledge/recent", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeRecent)))
-	s.mux.Handle("GET /api/knowledge/orphans", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeOrphans)))
-	s.mux.Handle("GET /api/knowledge/health", s.authMiddleware(http.HandlerFunc(s.handleKnowledgeHealth)))
+	s.handleAuth("GET /api/knowledge/notes", s.handleKnowledgeListNotes)
+	s.handleAuth("GET /api/knowledge/notes/{path...}", s.handleKnowledgeReadNote)
+	s.handleAuth("POST /api/knowledge/notes", s.handleKnowledgeCreateNote)
+	s.handleAuth("PUT /api/knowledge/notes/{path...}", s.handleKnowledgeUpdateNote)
+	s.handleAuth("DELETE /api/knowledge/notes/{path...}", s.handleKnowledgeDeleteNote)
+	s.handleAuth("GET /api/knowledge/search", s.handleKnowledgeSearch)
+	s.handleAuth("GET /api/knowledge/daily", s.handleKnowledgeDaily)
+	s.handleAuth("POST /api/knowledge/daily/append", s.handleKnowledgeDailyAppend)
+	s.handleAuth("GET /api/knowledge/stats", s.handleKnowledgeStats)
+	s.handleAuth("GET /api/knowledge/frontmatter/{path...}", s.handleKnowledgeFrontmatter)
+	s.handleAuth("GET /api/knowledge/folders", s.handleKnowledgeFolders)
+	s.handleAuth("GET /api/knowledge/recent", s.handleKnowledgeRecent)
+	s.handleAuth("GET /api/knowledge/orphans", s.handleKnowledgeOrphans)
+	s.handleAuth("GET /api/knowledge/health", s.handleKnowledgeHealth)
 }
 
 // handleKnowledgeListNotes handles GET /api/knowledge/notes
@@ -42,9 +42,7 @@ func (s *Server) handleKnowledgeListNotes(w http.ResponseWriter, r *http.Request
 		serverError(w, "failed to list notes", "error", err)
 		return
 	}
-	if notes == nil {
-		notes = []string{}
-	}
+	notes = sliceOrEmpty(notes)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"notes": notes})
 }
 
@@ -170,9 +168,7 @@ func (s *Server) handleKnowledgeSearch(w http.ResponseWriter, r *http.Request) {
 	if results != "" {
 		matches = strings.Split(strings.TrimRight(results, "\n"), "\n")
 	}
-	if matches == nil {
-		matches = []string{}
-	}
+	matches = sliceOrEmpty(matches)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"query":   query,
@@ -378,9 +374,7 @@ func (s *Server) handleKnowledgeOrphans(w http.ResponseWriter, r *http.Request) 
 			orphans = append(orphans, note)
 		}
 	}
-	if orphans == nil {
-		orphans = []string{}
-	}
+	orphans = sliceOrEmpty(orphans)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"orphans": orphans})
 }

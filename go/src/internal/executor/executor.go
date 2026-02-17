@@ -242,6 +242,7 @@ func (e *Executor) executeOnce(ctx context.Context) {
 	}
 
 	if processErr != nil {
+		e.reportFailure(task.ID, task, result.Output, fmt.Sprintf("post-processing failed: %v", processErr))
 		return
 	}
 }
@@ -249,7 +250,11 @@ func (e *Executor) executeOnce(ctx context.Context) {
 // reportFailure reports a task as failed to the manager. Consolidates the
 // repeated pattern of ReportTaskDone + warn-on-error logging.
 func (e *Executor) reportFailure(taskID string, task *models.Task, output, reason string) {
-	if err := e.manager.ReportTaskDone(taskID, task, models.TaskFailed, output, reason, task.TokensUsed, task.CostUSD); err != nil {
+	e.reportTaskDone(taskID, task, models.TaskFailed, output, reason)
+}
+
+func (e *Executor) reportTaskDone(taskID string, task *models.Task, status, output, errorLog string) {
+	if err := e.manager.ReportTaskDone(taskID, task, status, output, errorLog, task.TokensUsed, task.CostUSD); err != nil {
 		slog.Warn("failed to report task done", "task_id", taskID, "error", err)
 	}
 }
@@ -371,24 +376,7 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 
 		// Extract and report incremental usage from event metadata
 		if meta := event.GetMetadata(); meta != nil {
-			if costStr, ok := meta["cost_usd"]; ok && costStr != "" {
-				cost, _ := strconv.ParseFloat(costStr, 64)
-				tokens := 0
-				if tokensStr, ok := meta["total_tokens"]; ok {
-					tokens, _ = strconv.Atoi(tokensStr)
-				}
-				if cost > 0 || tokens > 0 {
-					go func() {
-						if err := e.manager.ReportTaskUsage(task.ID, tokens, cost, "executor", map[string]string{
-							"session_id": meta["session_id"],
-							"num_turns":  meta["num_turns"],
-							"model":      model,
-						}); err != nil {
-							slog.Debug("failed to report usage event", "task_id", task.ID, "error", err)
-						}
-					}()
-				}
-			}
+			e.reportUsageFromEvent(task.ID, model, meta)
 		}
 	})
 
@@ -448,13 +436,37 @@ func (e *Executor) runExecution(ctx context.Context, task *models.Task, project 
 			e.reportFailure(task.ID, task, result.Output, fmt.Sprintf("subtask creation failed: %v", err))
 			return nil, fmt.Errorf("subtask creation failed: %w", err)
 		}
-		if err := e.manager.ReportTaskDone(task.ID, task, models.TaskDecomposed, result.Output, "", task.TokensUsed, task.CostUSD); err != nil {
-			slog.Warn("failed to report task done", "task_id", task.ID, "error", err)
-		}
+		e.reportTaskDone(task.ID, task, models.TaskDecomposed, result.Output, "")
 		return nil, nil
 	}
 
 	return result, nil
+}
+
+func (e *Executor) reportUsageFromEvent(taskID, model string, meta map[string]string) {
+	costStr, ok := meta["cost_usd"]
+	if !ok || costStr == "" {
+		return
+	}
+
+	cost, _ := strconv.ParseFloat(costStr, 64)
+	tokens := 0
+	if tokensStr, ok := meta["total_tokens"]; ok {
+		tokens, _ = strconv.Atoi(tokensStr)
+	}
+	if cost <= 0 && tokens <= 0 {
+		return
+	}
+
+	go func() {
+		if err := e.manager.ReportTaskUsage(taskID, tokens, cost, "executor", map[string]string{
+			"session_id": meta["session_id"],
+			"num_turns":  meta["num_turns"],
+			"model":      model,
+		}); err != nil {
+			slog.Debug("failed to report usage event", "task_id", taskID, "error", err)
+		}
+	}()
 }
 
 // processResults handles build, test, commit, PR creation, and usage collection.
@@ -488,9 +500,7 @@ func (e *Executor) processResults(task *models.Task, result *ExecutionResult, wo
 	if commitErr != nil {
 		if errors.Is(commitErr, ErrNoChanges) {
 			slog.Info("no changes produced, completing without PR", "task_id", task.ID)
-			if err := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "", task.TokensUsed, task.CostUSD); err != nil {
-				slog.Warn("failed to report task done", "task_id", task.ID, "error", err)
-			}
+			e.reportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "")
 			return nil
 		}
 		e.reportFailure(task.ID, task, result.Output, fmt.Sprintf("git failed: %v", commitErr))
@@ -566,9 +576,7 @@ func (e *Executor) processResults(task *models.Task, result *ExecutionResult, wo
 	}
 
 	// Report completion
-	if err := e.manager.ReportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "", task.TokensUsed, task.CostUSD); err != nil {
-		slog.Warn("failed to report task done", "task_id", task.ID, "error", err)
-	}
+	e.reportTaskDone(task.ID, task, models.TaskCompleted, result.Output, "")
 	slog.Info("task completed", "task_id", task.ID, "pr_url", prURL, "pr_status", task.PRStatus)
 
 	return nil

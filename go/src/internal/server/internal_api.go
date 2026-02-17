@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/circle-oo/flux/internal/models"
@@ -17,11 +18,9 @@ func (s *Server) handleInternalNextTask(w http.ResponseWriter, r *http.Request) 
 		PodType string `json:"pod_type"`
 	}
 	// Accept empty body gracefully (backwards compat with Phase 1 stub tests)
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := readJSON(w, r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, errInvalidBody)
-			return
-		}
+	if err := readOptionalJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidBody)
+		return
 	}
 
 	slog.Debug("internal API: next task requested", "pod_id", req.PodID, "pod_type", req.PodType)
@@ -273,11 +272,9 @@ func (s *Server) handleInternalNextPending(w http.ResponseWriter, r *http.Reques
 	var req struct {
 		TriagerID string `json:"triager_id"`
 	}
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := readJSON(w, r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, errInvalidBody)
-			return
-		}
+	if err := readOptionalJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, errInvalidBody)
+		return
 	}
 
 	slog.Debug("internal API: next pending task requested", "triager_id", req.TriagerID)
@@ -414,9 +411,8 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 	defer tx.Rollback()
 
 	var created []*models.Task
-	subtaskIDMap := make(map[int]string) // index -> task ID mapping
 
-	for i, sub := range req.Subtasks {
+	for _, sub := range req.Subtasks {
 		task := &models.Task{
 			Title:       sub.Title,
 			Description: sub.Description,
@@ -434,7 +430,6 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 		}
 		slog.Info("internal API: subtask created", "parent_id", parent.ID, "subtask_id", task.ID, "title", sub.Title)
 		created = append(created, task)
-		subtaskIDMap[i] = task.ID
 	}
 
 	// Commit the subtask creation transaction before applying dependencies.
@@ -447,69 +442,26 @@ func (s *Server) handleInternalCreateSubtasks(w http.ResponseWriter, r *http.Req
 
 	// Validate and apply dependencies if provided
 	if len(req.SubtaskDependencies) > 0 {
-		// Build subtask ID list for validation
-		subtaskIDs := make([]string, len(created))
-		for i, t := range created {
-			subtaskIDs[i] = t.ID
-		}
-
-		// Convert index-based dependencies to ID-based dependencies
-		// The request format expects {dependent_id: "0", dependency_id: "1"} as indices
-		idBasedDeps := make([]models.SubtaskDependency, 0, len(req.SubtaskDependencies))
-		for _, dep := range req.SubtaskDependencies {
-			// Try to use dependency IDs directly if they look like UUIDs
-			// Otherwise treat them as indices (legacy support)
-			dependentID := dep.DependentID
-			dependencyID := dep.DependencyID
-
-			// Check if these are already actual task IDs (contain dashes)
-			if !strings.Contains(dependentID, "-") {
-				// Treat as index
-				idx := -1
-				fmt.Sscanf(dependentID, "%d", &idx)
-				if idx < 0 || idx >= len(subtaskIDMap) {
-					writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid dependent index: %s", dependentID))
-					return
-				}
-				dependentID = subtaskIDMap[idx]
-			}
-
-			if !strings.Contains(dependencyID, "-") {
-				// Treat as index
-				idx := -1
-				fmt.Sscanf(dependencyID, "%d", &idx)
-				if idx < 0 || idx >= len(subtaskIDMap) {
-					writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid dependency index: %s", dependencyID))
-					return
-				}
-				dependencyID = subtaskIDMap[idx]
-			}
-
-			idBasedDeps = append(idBasedDeps, models.SubtaskDependency{
-				DependentID:  dependentID,
-				DependencyID: dependencyID,
-			})
+		idByIndex := buildSubtaskIndex(created)
+		idBasedDeps, err := resolveSubtaskDependencies(req.SubtaskDependencies, idByIndex)
+		if err != nil {
+			s.cleanupCreatedSubtasks(created, req.ParentID)
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 
 		// Validate DAG
-		if err := models.ValidateDAG(subtaskIDs, idBasedDeps); err != nil {
+		if err := models.ValidateDAG(taskIDs(created), idBasedDeps); err != nil {
+			s.cleanupCreatedSubtasks(created, req.ParentID)
 			slog.Warn("DAG validation failed", "parent_id", req.ParentID, "error", err)
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("circular dependency detected: %v", err))
 			return
 		}
 
-		// Apply dependencies to tasks
-		for _, dep := range idBasedDeps {
-			for _, task := range created {
-				if task.ID == dep.DependentID {
-					task.DependsOn = append(task.DependsOn, dep.DependencyID)
-					if err := s.tasks.Update(task); err != nil {
-						serverError(w, "failed to update task dependencies", "task_id", task.ID, "error", err)
-						return
-					}
-					break
-				}
-			}
+		if err := s.applySubtaskDependencies(created, idBasedDeps); err != nil {
+			s.cleanupCreatedSubtasks(created, req.ParentID)
+			serverError(w, "failed to update task dependencies", "parent_id", req.ParentID, "error", err)
+			return
 		}
 
 		slog.Info("dependencies applied", "parent_id", req.ParentID, "dependency_count", len(idBasedDeps))
@@ -564,12 +516,7 @@ func (s *Server) handleInternalCreateTask(w http.ResponseWriter, r *http.Request
 		BranchName:  req.BranchName,
 		Tags:        req.Tags,
 	}
-	if task.Priority == 0 {
-		task.Priority = 40
-	}
-	if task.Source == "" {
-		task.Source = models.TaskSourceSystem
-	}
+	applyTaskDefaults(task, models.TaskSourceSystem)
 
 	if err := s.tasks.Create(task); err != nil {
 		serverError(w, "failed to create internal task", "error", err)
@@ -683,4 +630,83 @@ func (s *Server) handleInternalGetProject(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, project)
+}
+
+func buildSubtaskIndex(tasks []*models.Task) map[int]string {
+	index := make(map[int]string, len(tasks))
+	for i, task := range tasks {
+		index[i] = task.ID
+	}
+	return index
+}
+
+func taskIDs(tasks []*models.Task) []string {
+	ids := make([]string, len(tasks))
+	for i, task := range tasks {
+		ids[i] = task.ID
+	}
+	return ids
+}
+
+func resolveSubtaskDependencies(raw []models.SubtaskDependency, idByIndex map[int]string) ([]models.SubtaskDependency, error) {
+	resolved := make([]models.SubtaskDependency, 0, len(raw))
+	for _, dep := range raw {
+		dependentID, err := resolveDependencyRef(dep.DependentID, "dependent", idByIndex)
+		if err != nil {
+			return nil, err
+		}
+		dependencyID, err := resolveDependencyRef(dep.DependencyID, "dependency", idByIndex)
+		if err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, models.SubtaskDependency{
+			DependentID:  dependentID,
+			DependencyID: dependencyID,
+		})
+	}
+	return resolved, nil
+}
+
+func resolveDependencyRef(ref, label string, idByIndex map[int]string) (string, error) {
+	// If the value already looks like a task ID, use it as-is.
+	if strings.Contains(ref, "-") {
+		return ref, nil
+	}
+	idx, err := strconv.Atoi(ref)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s index: %s", label, ref)
+	}
+	id, ok := idByIndex[idx]
+	if !ok {
+		return "", fmt.Errorf("invalid %s index: %s", label, ref)
+	}
+	return id, nil
+}
+
+func (s *Server) applySubtaskDependencies(created []*models.Task, deps []models.SubtaskDependency) error {
+	depsByTask := make(map[string][]string)
+	for _, dep := range deps {
+		depsByTask[dep.DependentID] = append(depsByTask[dep.DependentID], dep.DependencyID)
+	}
+
+	for _, task := range created {
+		dependencies := depsByTask[task.ID]
+		if len(dependencies) == 0 {
+			continue
+		}
+		task.DependsOn = append(task.DependsOn, dependencies...)
+		if err := s.tasks.Update(task); err != nil {
+			return fmt.Errorf("task %s: %w", task.ID, err)
+		}
+	}
+	return nil
+}
+
+func (s *Server) cleanupCreatedSubtasks(created []*models.Task, parentID string) {
+	for _, task := range created {
+		if err := s.tasks.Delete(task.ID); err != nil {
+			slog.Warn("failed to cleanup subtask after dependency error",
+				"parent_id", parentID, "subtask_id", task.ID, "error", err)
+		}
+	}
 }

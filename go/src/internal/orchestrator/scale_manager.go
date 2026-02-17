@@ -41,6 +41,11 @@ type ScaleManager struct {
 	lastScaleTime  time.Time
 }
 
+type budgetState struct {
+	exceeded bool
+	label    string
+}
+
 // NewScaleManager creates a new ScaleManager.
 func NewScaleManager(
 	db *sql.DB,
@@ -88,70 +93,22 @@ func (s *ScaleManager) Tick(ctx context.Context) error {
 	}
 
 	// 3. Check budget based on billing mode
-	var budgetExceeded bool
-	var budgetLabel string
-
-	isAPI := s.planConfig == nil || s.planConfig.IsAPIBilling()
-
-	if isAPI {
-		// API billing: daily cost budget
-		dailyCost, err := s.todayCost(ctx)
-		if err != nil {
-			return fmt.Errorf("today cost: %w", err)
-		}
-		budget := s.config.DailyCostBudget
-		if budget <= 0 {
-			budget = 20.0 // default $20/day
-		}
-		budgetExceeded = dailyCost >= budget
-		budgetLabel = fmt.Sprintf("$%.2f/$%.2f", dailyCost, budget)
-
-		s.mu.Lock()
-		s.dailyCost = dailyCost
-		s.mu.Unlock()
-	} else {
-		// Max/Pro plan: token budget per 5-hour window
-		windowTokens, err := s.currentWindowTokens(ctx)
-		if err != nil {
-			return fmt.Errorf("window tokens: %w", err)
-		}
-		tokenBudget := s.config.WindowTokenBudget
-		if tokenBudget <= 0 {
-			tokenBudget = 5_000_000 // default 5M tokens per window
-		}
-		budgetExceeded = windowTokens >= tokenBudget
-		budgetLabel = fmt.Sprintf("%dk/%dk tokens", windowTokens/1000, tokenBudget/1000)
-
-		s.mu.Lock()
-		s.windowTokens = windowTokens
-		s.mu.Unlock()
+	budget, err := s.evaluateBudget(ctx)
+	if err != nil {
+		return err
 	}
 
 	// 4. Determine desired executor count
 	//    - One executor per READY task (up to max), minus already running
 	//    - If budget exceeded, scale to min only
-	var executorDesired int
-	if budgetExceeded {
-		executorDesired = pods.Executor.Min
-	} else {
-		executorDesired = readyCount + runningCount
-	}
-	executorPods := clamp(executorDesired, pods.Executor.Min, pods.Executor.Max)
+	executorPods := s.computeExecutorPods(readyCount, runningCount, budget.exceeded, pods)
 
 	// Triager and researcher: always at min
 	triagerPods := pods.Triager.Min
 	researcherPods := pods.Researcher.Min
 
 	// 5. Check if anything changed
-	s.mu.Lock()
-	changed := s.executorPods != executorPods || s.triagerPods != triagerPods || s.researcherPods != researcherPods
-	prevExecutor := s.executorPods
-	lastScale := s.lastScaleTime
-
-	s.readyCount = readyCount
-	s.budgetExceeded = budgetExceeded
-	s.mu.Unlock()
-
+	changed, prevExecutor, lastScale := s.updateDesiredState(executorPods, triagerPods, researcherPods, readyCount, budget.exceeded)
 	if !changed {
 		return nil
 	}
@@ -169,25 +126,20 @@ func (s *ScaleManager) Tick(ctx context.Context) error {
 	}
 
 	// 7. Apply
-	s.mu.Lock()
-	s.executorPods = executorPods
-	s.triagerPods = triagerPods
-	s.researcherPods = researcherPods
-	s.lastScaleTime = time.Now()
-	s.mu.Unlock()
+	s.setPodCounts(executorPods, triagerPods, researcherPods)
 
 	slog.Info("scale adjusted",
 		"executor_pods", executorPods,
 		"ready_tasks", readyCount,
 		"running_tasks", runningCount,
-		"budget", budgetLabel,
-		"budget_exceeded", budgetExceeded,
+		"budget", budget.label,
+		"budget_exceeded", budget.exceeded,
 	)
 
 	if s.discord != nil {
 		msg := fmt.Sprintf("Scale: executor=%d (ready=%d, running=%d, budget=%s)",
-			executorPods, readyCount, runningCount, budgetLabel)
-		if budgetExceeded {
+			executorPods, readyCount, runningCount, budget.label)
+		if budget.exceeded {
 			msg += " [BUDGET EXCEEDED]"
 		}
 		s.discord.Send(notifier.LevelInfo, msg)
@@ -204,6 +156,79 @@ func (s *ScaleManager) Tick(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *ScaleManager) evaluateBudget(ctx context.Context) (budgetState, error) {
+	isAPI := s.planConfig == nil || s.planConfig.IsAPIBilling()
+
+	if isAPI {
+		dailyCost, err := s.todayCost(ctx)
+		if err != nil {
+			return budgetState{}, fmt.Errorf("today cost: %w", err)
+		}
+		budget := s.config.DailyCostBudget
+		if budget <= 0 {
+			budget = 20.0 // default $20/day
+		}
+
+		s.mu.Lock()
+		s.dailyCost = dailyCost
+		s.mu.Unlock()
+
+		return budgetState{
+			exceeded: dailyCost >= budget,
+			label:    fmt.Sprintf("$%.2f/$%.2f", dailyCost, budget),
+		}, nil
+	}
+
+	windowTokens, err := s.currentWindowTokens(ctx)
+	if err != nil {
+		return budgetState{}, fmt.Errorf("window tokens: %w", err)
+	}
+	tokenBudget := s.config.WindowTokenBudget
+	if tokenBudget <= 0 {
+		tokenBudget = 5_000_000 // default 5M tokens per window
+	}
+
+	s.mu.Lock()
+	s.windowTokens = windowTokens
+	s.mu.Unlock()
+
+	return budgetState{
+		exceeded: windowTokens >= tokenBudget,
+		label:    fmt.Sprintf("%dk/%dk tokens", windowTokens/1000, tokenBudget/1000),
+	}, nil
+}
+
+func (s *ScaleManager) computeExecutorPods(readyCount, runningCount int, budgetExceeded bool, pods config.PodsConfig) int {
+	if budgetExceeded {
+		return clamp(pods.Executor.Min, pods.Executor.Min, pods.Executor.Max)
+	}
+	return clamp(readyCount+runningCount, pods.Executor.Min, pods.Executor.Max)
+}
+
+func (s *ScaleManager) updateDesiredState(executorPods, triagerPods, researcherPods, readyCount int, budgetExceeded bool) (bool, int, time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	changed := s.executorPods != executorPods || s.triagerPods != triagerPods || s.researcherPods != researcherPods
+	prevExecutor := s.executorPods
+	lastScale := s.lastScaleTime
+
+	s.readyCount = readyCount
+	s.budgetExceeded = budgetExceeded
+
+	return changed, prevExecutor, lastScale
+}
+
+func (s *ScaleManager) setPodCounts(executorPods, triagerPods, researcherPods int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.executorPods = executorPods
+	s.triagerPods = triagerPods
+	s.researcherPods = researcherPods
+	s.lastScaleTime = time.Now()
 }
 
 // countReady returns the number of READY tasks in the queue.
